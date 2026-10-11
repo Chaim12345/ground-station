@@ -103,3 +103,4 @@ backend/data/
 
 # Temporary files
 tmp/
+/.agentbridge/
