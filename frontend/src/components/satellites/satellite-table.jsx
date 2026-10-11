@@ -126,12 +126,23 @@ const TRANSMITTER_DEPENDENT_FILTERS = new Set([
     'bands', 'frequencyMin', 'frequencyMax', 'modes', 'transmitterTypes', 'services',
     'baudMin', 'baudMax', 'unconfirmed',
 ]);
-// Built per render: the labels follow the active language, so this cannot live
-// at module scope (no i18n `t` there).
+// [value, label] pairs. The backend matches the stored English service names, so
+// `value` must stay English whichever language is active - only `label` is
+// translated. Built per render because the labels follow the active language.
 const getServiceOptions = (t) => [
-    'Amateur', 'Meteorological', t('satellite_table.space_research', { defaultValue: 'Space Research' }), t('satellite_table.space_operation', { defaultValue: 'Space Operation' }), 'Inter-satellite',
-    'Radionavigational', 'Radiolocation', 'Mobile', 'Maritime', 'Aeronautical',
-    t('satellite_table.earth_exploration', { defaultValue: 'Earth Exploration' }), 'Broadcasting', 'Unknown',
+    ['Amateur', 'Amateur'],
+    ['Meteorological', 'Meteorological'],
+    ['Space Research', t('satellite_table.space_research', { defaultValue: 'Space Research' })],
+    ['Space Operation', t('satellite_table.space_operation', { defaultValue: 'Space Operation' })],
+    ['Inter-satellite', 'Inter-satellite'],
+    ['Radionavigational', 'Radionavigational'],
+    ['Radiolocation', 'Radiolocation'],
+    ['Mobile', 'Mobile'],
+    ['Maritime', 'Maritime'],
+    ['Aeronautical', 'Aeronautical'],
+    ['Earth Exploration', t('satellite_table.earth_exploration', { defaultValue: 'Earth Exploration' })],
+    ['Broadcasting', 'Broadcasting'],
+    ['Unknown', 'Unknown'],
 ];
 
 const EMPTY_CATALOG_FILTERS = {
@@ -159,6 +170,20 @@ const mergeCatalogOptions = (defaults, catalogValues, selectedValues = []) => {
     const selected = Array.isArray(selectedValues) ? selectedValues : [selectedValues];
     return [...new Set([...defaults, ...(catalogValues || []), ...selected].filter(Boolean))]
         .sort((left, right) => left.localeCompare(right));
+};
+
+// Same idea, for [value, label] option lists: entries coming from the catalog or
+// from the current selection are backend values, so they label themselves. The
+// value is what gets submitted, the label is what the user reads.
+const mergeCatalogLabeledOptions = (defaults, catalogValues, selectedValues = []) => {
+    const selected = Array.isArray(selectedValues) ? selectedValues : [selectedValues];
+    const merged = new Map(defaults);
+    for (const value of [...(catalogValues || []), ...selected]) {
+        if (value && !merged.has(value)) {
+            merged.set(value, value);
+        }
+    }
+    return [...merged.entries()].sort(([left], [right]) => left.localeCompare(right));
 };
 
 const frequencyBounds = (filters) => {
@@ -431,7 +456,7 @@ const SatelliteTable = React.memo(function SatelliteTable() {
         [catalogFilters.transmitterTypes, catalogStats?.transmitter_types],
     );
     const serviceOptions = React.useMemo(
-        () => mergeCatalogOptions(getServiceOptions(t), catalogStats?.services, catalogFilters.services),
+        () => mergeCatalogLabeledOptions(getServiceOptions(t), catalogStats?.services, catalogFilters.services),
         [t, catalogFilters.services, catalogStats?.services],
     );
 
@@ -1102,7 +1127,7 @@ const SatelliteTable = React.memo(function SatelliteTable() {
                                 <TextField fullWidth size="small" sx={filterFieldSx} type="number" label={t('satellite_database.maximum')} value={catalogFilters.frequencyMax} onChange={(event) => updateCatalogFilter('frequencyMax', event.target.value)} inputProps={{min: 0, step: 'any'}} />
                                 <FormControl size="small" sx={{...filterFieldSx, minWidth: 90}}><InputLabel>{t('satellite_database.unit')}</InputLabel><Select value={catalogFilters.frequencyUnit} label={t('satellite_database.unit')} onChange={(event) => updateCatalogFilter('frequencyUnit', event.target.value)}>{Object.keys(FREQUENCY_UNITS).map(unit => <MenuItem key={unit} value={unit}>{unit}</MenuItem>)}</Select></FormControl>
                             </Stack>
-                            <FormControl size="small" sx={filterFieldSx}><InputLabel>{t('satellite_database.service')}</InputLabel><Select multiple value={catalogFilters.services} label={t('satellite_database.service')} renderValue={(values) => values.join(', ')} onChange={(event) => updateCatalogFilter('services', event.target.value)}>{serviceOptions.map(service => <MenuItem key={service} value={service}><Checkbox checked={catalogFilters.services.includes(service)} size="small" />{service}</MenuItem>)}</Select></FormControl>
+                            <FormControl size="small" sx={filterFieldSx}><InputLabel>{t('satellite_database.service')}</InputLabel><Select multiple value={catalogFilters.services} label={t('satellite_database.service')} renderValue={(values) => values.map((value) => serviceOptions.find(([optionValue]) => optionValue === value)?.[1] ?? value).join(', ')} onChange={(event) => updateCatalogFilter('services', event.target.value)}>{serviceOptions.map(([value, label]) => <MenuItem key={value} value={value}><Checkbox checked={catalogFilters.services.includes(value)} size="small" />{label}</MenuItem>)}</Select></FormControl>
                         </Stack>
 
                         <Stack spacing={1.25}>
