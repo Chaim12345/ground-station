@@ -133,7 +133,7 @@ def test_inventory_deletes_a_decoded_folder(inventory):
     assert not folder.exists()
 
 
-def test_decoded_folder_summary_size_includes_nested_meteor_outputs(inventory):
+def test_decoded_folder_summary_includes_nested_meteor_size_and_image_count(inventory):
     folder = inventory.roots.decoded / "METEOR_M2.satdump_meteor_m2-x_lrpt"
     _write(folder / "dataset.json", b"{}")
     _write(folder / "products" / "image.png", b"image data")
@@ -142,8 +142,10 @@ def test_decoded_folder_summary_size_includes_nested_meteor_outputs(inventory):
 
     summary = inventory.get("decoded_folder:METEOR_M2.satdump_meteor_m2-x_lrpt")
     detail = inventory.detail(summary["id"])
+    page_item = next(item for item in inventory.query()["items"] if item["id"] == summary["id"])
 
     assert summary["size"] == 2 + 10 + 7
+    assert summary["image_count"] == page_item["image_count"] == detail["image_count"] == 1
     assert detail["size"] == summary["size"]
 
 

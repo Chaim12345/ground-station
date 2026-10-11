@@ -356,9 +356,16 @@ class LibraryInventory:
             if not folder.is_dir() or ".satdump_" not in folder.name:
                 continue
             stat = folder.stat()
-            # Folder cards and size sorting need the same byte total shown in
-            # the detail view, including files in nested SatDump output folders.
-            total_size = sum(path.stat().st_size for path in folder.rglob("*") if path.is_file())
+            # The card needs an image count before the detail view is opened.
+            # Count images while walking nested output files for the size total.
+            total_size = 0
+            image_count = 0
+            for path in folder.rglob("*"):
+                if not path.is_file():
+                    continue
+                total_size += path.stat().st_size
+                if path.suffix.lower() in IMAGE_EXTENSIONS:
+                    image_count += 1
             dataset = _read_json(folder / "dataset.json")
             folder_parts = folder.name.split(".")
             pipeline = folder_parts[1].replace("satdump_", "") if len(folder_parts) > 1 else None
@@ -382,7 +389,7 @@ class LibraryInventory:
                     "satellite_name": dataset.get("satellite", "Unknown"),
                     "pipeline": pipeline,
                     "products": dataset.get("products", []),
-                    "image_count": None,
+                    "image_count": image_count,
                     "metadata": dataset,
                 },
                 folder,
