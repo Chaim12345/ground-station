@@ -187,6 +187,83 @@ def test_manager_rejects_parakeet_without_configured_url(monkeypatch):
 
 
 @pytest.mark.unit
+def test_manager_switches_translation_backend_and_restarts_worker(monkeypatch):
+    monkeypatch.setattr(managermodule.arguments, "parakeet_url", "https://parakeet.example.org")
+    monkeypatch.setattr(managermodule.arguments, "libretranslate_url", "")
+
+    class Broadcaster:
+        def subscribe(self, _key, maxsize):
+            return queue.Queue()
+
+        def unsubscribe(self, _key):
+            pass
+
+    class Worker:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.started = False
+
+        def is_alive(self):
+            return self.started
+
+    monkeypatch.setattr(managermodule, "ParakeetTranscriptionWorker", Worker)
+    processes = {"sdr": {"broadcasters": {"audio_session_vfo1": Broadcaster()}}}
+    manager = managermodule.TranscriptionManager(processes, None, None)
+    assert not manager.start_transcription(
+        "sdr",
+        "session",
+        1,
+        provider="parakeet",
+        translate_to="el",
+        translation_backend="libretranslate",
+    )
+    assert manager.start_transcription(
+        "sdr",
+        "session",
+        1,
+        provider="parakeet",
+        translate_to="el",
+    )
+    first = processes["sdr"]["transcription_consumers"]["session"][1]["instance"]
+    assert first.kwargs["translation_backend"] == "google"
+
+    monkeypatch.setattr(
+        managermodule.arguments, "libretranslate_url", "https://translate.example.org"
+    )
+    manager._last_start_ts.clear()
+    assert manager.start_transcription(
+        "sdr",
+        "session",
+        1,
+        provider="parakeet",
+        translate_to="el",
+        translation_backend="libretranslate",
+    )
+    second = processes["sdr"]["transcription_consumers"]["session"][1]["instance"]
+    assert second is not first
+    assert not first.is_alive()
+    assert second.kwargs["libretranslate_url"] == "https://translate.example.org"
+    assert second.kwargs["translation_backend"] == "libretranslate"
+
+    monkeypatch.setattr(managermodule.arguments, "libretranslate_url", "")
+    assert not manager.start_transcription(
+        "sdr",
+        "session",
+        1,
+        provider="parakeet",
+        translate_to="el",
+        translation_backend="libretranslate",
+    )
+    assert not second.is_alive()
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_shared_translation_auto_detects_source(monkeypatch):
     received = []

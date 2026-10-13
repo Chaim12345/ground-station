@@ -509,6 +509,15 @@ transcription workers without a backend restart; direct file edits require a res
 workers keep their current endpoint until they are stopped and started again. Parakeet
 transcription cannot start until a URL is configured.
 
+For Deepgram and Parakeet transcripts, choose Google Translate or LibreTranslate in the
+waterfall transcription options or in a scheduled transcription task. The `libretranslate_url`
+backend setting is empty by default; set it to your LibreTranslate base URL in the same
+Transcription settings group. The backend queries `/languages` to show supported target
+languages and sends transcript text to `/translate` when LibreTranslate is selected.
+Google remains the default for existing VFOs and scheduled tasks. Gemini continues to
+translate through Gemini. If local translation fails, the original transcript is shown;
+it is never sent to Google as a fallback.
+
 `/settings/preferences` is kept as a compatibility route and is now rendered as a tab inside the unified Settings page.
 
 ## Docker
@@ -629,6 +638,23 @@ docker run -d \
 - For ARM64, using `-v /dev:/dev` ensures all USB devices are accessible
 - Access the web interface at `http://<YOUR_HOST>:7000`
 - For TLS reverse-proxy deployments, see [deploy/nginx/README.md](deploy/nginx/README.md)
+
+### Private DNS and HTTPS services in Docker
+
+Docker chooses DNS servers when a container starts; the image does not contain a fixed
+resolver. If your Docker daemon uses public DNS, containers cannot resolve names served
+only by your LAN or VPN DNS. Configure the Docker host's `/etc/docker/daemon.json` with
+`"dns": ["<LAN-DNS-IP>"]`, then restart Docker and verify the containers' resolver settings.
+For a single container using `--network host` on a Linux host with `systemd-resolved`,
+`--dns 127.0.0.53` can instead use the host's DNS stub and its split-DNS routing. With
+bridge networking, use a reachable LAN DNS address: `127.0.0.53` would point at the
+container itself. Recreate the container after changing per-container DNS options.
+
+If a local HTTPS service uses a private certificate authority, DNS alone is not enough.
+Trust that CA inside the container as well. On an Ubuntu host where the CA has been
+installed with `update-ca-certificates`, one option for this Ubuntu-based image is to add
+`-v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro` to
+`docker run`, so the container uses the host's trusted CA bundle.
 
 ### Preparing local SDR hardware
 

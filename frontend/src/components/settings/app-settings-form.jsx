@@ -112,7 +112,7 @@ const SETTINGS_GROUP_DEFS = [
         titleDefault: 'Transcription',
         descriptionKey: 'app_settings.group_transcription_help',
         descriptionDefault: 'Shared transcription service endpoints.',
-        fieldKeys: ['parakeet_url'],
+        fieldKeys: ['parakeet_url', 'libretranslate_url'],
     },
     {
         key: 'orbital_sync',

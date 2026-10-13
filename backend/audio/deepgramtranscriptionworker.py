@@ -67,6 +67,8 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
         satellite: Optional[Dict[str, Any]] = None,
         transmitter: Optional[Dict[str, Any]] = None,
         output_dir: Optional[str] = None,
+        translation_backend: str = "google",
+        libretranslate_url: str = "",
     ):
         super().__init__(
             transcription_queue=transcription_queue,
@@ -81,10 +83,12 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
             satellite=satellite,
             transmitter=transmitter,
             output_dir=output_dir,
+            translation_backend=translation_backend,
         )
 
         # Google Translate API key for translating Deepgram transcriptions
         self.google_translate_api_key = google_translate_api_key
+        self.libretranslate_url = libretranslate_url
 
         # Deepgram-specific settings
         self.target_sample_rate = 16000  # Deepgram prefers 16kHz
@@ -182,13 +186,7 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
                     f"Using auto-detection instead."
                 )
 
-        # Note: Deepgram doesn't have built-in translation like Gemini
-        # Translation would need to be done as a separate step if needed
-        if self.translate_to and self.translate_to != "none":
-            logger.warning(
-                f"Deepgram does not support built-in translation. "
-                f"Translation from {self.language} to {self.translate_to} will be skipped."
-            )
+        # Text translation runs after Deepgram responses arrive.
 
         url = f"{base_url}?{'&'.join(params)}"
         return url
@@ -373,9 +371,15 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
             self.connected = False
 
     async def _translate_text(self, text: str, source_lang: str, target_lang: str) -> Optional[str]:
-        """Translate with the shared Google Translate implementation."""
+        """Translate with the selected text translation service."""
         translated_text: Optional[str] = await translate_text(
-            text, source_lang, target_lang, self.google_translate_api_key, logger
+            text,
+            source_lang,
+            target_lang,
+            self.google_translate_api_key,
+            logger,
+            translation_backend=self.translation_backend,
+            libretranslate_url=self.libretranslate_url,
         )
         return translated_text
 
@@ -403,9 +407,11 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
                 else:
                     # Translation failed, emit original text
                     logger.debug("Translation failed, emitting original text")
+                    await self._report_translation_failure()
                     await super()._emit_transcription(text, language, is_final, confidence)
             except Exception as e:
                 logger.warning(f"Translation failed: {e}, emitting original text")
+                await self._report_translation_failure()
                 await super()._emit_transcription(text, language, is_final, confidence)
         else:
             # No translation needed

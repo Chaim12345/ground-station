@@ -298,6 +298,15 @@ export const vfoSlice = createSlice({
                     if (vfoState.transcription_language !== undefined) {
                         state.vfoMarkers[vfoNum].transcriptionLanguage = vfoState.transcription_language;
                     }
+                    if (vfoState.transcription_provider !== undefined) {
+                        state.vfoMarkers[vfoNum].transcriptionProvider = vfoState.transcription_provider;
+                    }
+                    if (vfoState.transcription_translate_to !== undefined) {
+                        state.vfoMarkers[vfoNum].transcriptionTranslateTo = vfoState.transcription_translate_to;
+                    }
+                    if (vfoState.transcription_translation_backend !== undefined) {
+                        state.vfoMarkers[vfoNum].transcriptionTranslationBackend = vfoState.transcription_translation_backend;
+                    }
 
                     // FIX: Enforce mutual exclusivity between audio demodulators and data decoders
                     // When loading state from backend/storage, ensure that audio demod (mode) and

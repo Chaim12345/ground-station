@@ -65,6 +65,7 @@ import {
     Cancel as DisableIcon,
 } from '@mui/icons-material';
 import { useSocket } from '../common/socket.jsx';
+import { getLibreTargetOptions, isLibrePairSupported, TranslationBackendField, useLibreTranslateCapabilities } from '../common/translation-options.jsx';
 import {
     addObservation,
     updateObservation,
@@ -253,6 +254,7 @@ const ObservationFormDialog = () => {
     const { socket } = useSocket();
 
     const open = useSelector((state) => state.scheduler?.dialogOpen || false);
+    const libreCapabilities = useLibreTranslateCapabilities(socket, open);
     const selectedObservation = useSelector((state) => state.scheduler?.selectedObservation);
     const sdrs = useSelector((state) => state.sdrs?.sdrs || []);
     const selectedSatelliteId = useSelector((state) => state.scheduler?.satelliteSelection?.satelliteId);
@@ -751,6 +753,7 @@ const ObservationFormDialog = () => {
                         provider: 'gemini',
                         language: 'auto',
                         translate_to: 'none',
+                        translation_backend: 'google',
                     },
                 };
                 break;
@@ -853,8 +856,11 @@ const ObservationFormDialog = () => {
             const modType = getTaskSummaryOptionLabel(MODULATION_TYPES, task.config.modulation, task.config.modulation?.toUpperCase());
             const provider = getProviderSummaryLabel(task.config.provider);
             const languageSummary = getTranscriptionLanguageSummary(task.config.language, task.config.translate_to);
+            const translationService = task.config.provider !== 'gemini' && task.config.translate_to && task.config.translate_to !== 'none'
+                ? (task.config.translation_backend === 'libretranslate' ? 'LibreTranslate' : 'Google Translate')
+                : null;
 
-            const parts = [transmitterName, freqMHz, modType, provider, languageSummary, t('scheduler_dialogs.shared.task_transcription')].filter(Boolean);
+            const parts = [transmitterName, freqMHz, modType, provider, languageSummary, translationService, t('scheduler_dialogs.shared.task_transcription')].filter(Boolean);
             return parts.join(' • ');
         } else if (task.type === 'iq_recording') {
             const transmitter = availableTransmitters.find(t => t.id === task.config.transmitter_id);
@@ -2476,7 +2482,7 @@ const ObservationFormDialog = () => {
 
                                                     {task.config.provider === 'parakeet' && (
                                                         <Typography variant="caption" color="text.secondary">
-                                                            {t('scheduler_dialogs.shared.parakeet_help', { defaultValue: 'Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional Google translation.' })}
+                                                            {t('scheduler_dialogs.shared.parakeet_help', { defaultValue: 'Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional translation.' })}
                                                         </Typography>
                                                     )}
 
@@ -2493,13 +2499,27 @@ const ObservationFormDialog = () => {
                                                             }
                                                             label={t('scheduler_dialogs.shared.source_language_label')}
                                                         >
-                                                            {SOURCE_LANGUAGE_OPTIONS.map((option) => (
-                                                                <MenuItem key={option.value} value={option.value}>
-                                                                    {`${option.icon} ${t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
-                                                                </MenuItem>
-                                                            ))}
+                                                                {SOURCE_LANGUAGE_OPTIONS.map((option) => (
+                                                                    <MenuItem key={option.value} value={option.value}>
+                                                                        {`${option.icon} ${t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
+                                                                    </MenuItem>
+                                                                ))}
+                                                                {(task.config.language === 'zh-Hant' || (task.config.translation_backend === 'libretranslate' && libreCapabilities?.languages?.some((language) => language.code === 'zh-Hant'))) && (
+                                                                    <MenuItem value="zh-Hant">🇹🇼 {t('scheduler_dialogs.shared.language_chinese_traditional', { defaultValue: 'Chinese (Traditional)' })}</MenuItem>
+                                                                )}
                                                         </Select>
                                                     </FormControl>
+
+                                                    {['deepgram', 'parakeet'].includes(task.config.provider) && (
+                                                        <TranslationBackendField
+                                                            value={task.config.translation_backend || 'google'}
+                                                            onChange={(value) => handleTaskConfigChange(index, 'translation_backend', value)}
+                                                            source={task.config.language || 'auto'}
+                                                            target={task.config.translate_to || 'none'}
+                                                            capabilities={libreCapabilities}
+                                                            disabled={isFormDisabled}
+                                                        />
+                                                    )}
 
                                                     <FormControl fullWidth size="small" disabled={isFormDisabled}>
                                                         <InputLabel>{t('scheduler_dialogs.shared.translate_to_label')}</InputLabel>
@@ -2514,9 +2534,10 @@ const ObservationFormDialog = () => {
                                                             }
                                                             label={t('scheduler_dialogs.shared.translate_to_label')}
                                                         >
-                                                            {TRANSLATION_TARGET_OPTIONS.map((option) => (
-                                                                <MenuItem key={option.value} value={option.value}>
-                                                                    {`${option.icon} ${t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
+                                                            {getLibreTargetOptions(TRANSLATION_TARGET_OPTIONS, task.config.translation_backend === 'libretranslate' ? libreCapabilities : null, task.config.translate_to).map((option) => (
+                                                                <MenuItem key={option.value} value={option.value}
+                                                                    disabled={['deepgram', 'parakeet'].includes(task.config.provider) && task.config.translation_backend === 'libretranslate' && option.value !== 'none' && !isLibrePairSupported(libreCapabilities, task.config.language || 'auto', option.value)}>
+                                                                    {`${option.icon} ${option.label || t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
                                                                 </MenuItem>
                                                             ))}
                                                         </Select>

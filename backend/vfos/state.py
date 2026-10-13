@@ -29,6 +29,7 @@ class VFOState:
     transcription_translate_to: str = (
         "none"  # Target language for translation (none = no translation)
     )
+    transcription_translation_backend: str = "google"
     decoder: str = "none"  # Decoder type: none, sstv, aprs, fsk, gmsk, gfsk, bpsk, morse, gnss
     locked_transmitter_id: str = "none"
     parameters_enabled: bool = True  # Enable/disable custom decoder parameters
@@ -90,6 +91,7 @@ class VFOManager:
         transcription_provider: Optional[str] = None,
         transcription_language: Optional[str] = None,
         transcription_translate_to: Optional[str] = None,
+        transcription_translation_backend: Optional[str] = None,
         decoder: Optional[str] = None,
         locked_transmitter_id: Optional[str] = None,
         parameters_enabled: Optional[bool] = None,
@@ -183,6 +185,9 @@ class VFOManager:
 
         if transcription_translate_to is not None:
             vfo_state.transcription_translate_to = transcription_translate_to
+
+        if transcription_translation_backend in {"google", "libretranslate"}:
+            vfo_state.transcription_translation_backend = transcription_translation_backend
 
         # check decoder setting
         if decoder is not None:

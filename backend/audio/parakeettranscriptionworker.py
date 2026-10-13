@@ -42,6 +42,8 @@ class ParakeetTranscriptionWorker(TranscriptionWorker):
         satellite: Optional[Dict[str, Any]] = None,
         transmitter: Optional[Dict[str, Any]] = None,
         output_dir: Optional[str] = None,
+        translation_backend: str = "google",
+        libretranslate_url: str = "",
     ):
         super().__init__(
             transcription_queue=transcription_queue,
@@ -56,12 +58,14 @@ class ParakeetTranscriptionWorker(TranscriptionWorker):
             satellite=satellite,
             transmitter=transmitter,
             output_dir=output_dir,
+            translation_backend=translation_backend,
         )
         self.requires_api_key = False
         self.uses_receiver = False
         self.chunk_duration = 1.0
         self.connection_backoff_seconds = 5
         self.google_translate_api_key = google_translate_api_key
+        self.libretranslate_url = libretranslate_url
         self.service_url = service_url.strip().rstrip("/")
         if not self.service_url:
             raise ValueError("Parakeet service URL is not configured")
@@ -216,9 +220,13 @@ class ParakeetTranscriptionWorker(TranscriptionWorker):
                 self.translate_to,
                 self.google_translate_api_key,
                 logger,
+                translation_backend=self.translation_backend,
+                libretranslate_url=self.libretranslate_url,
             )
             if translated:
                 text = translated
+            else:
+                await self._report_translation_failure()
         if self.running:
             # The service's reported language is a fixed placeholder, even for
             # this multilingual model. Keep the UI from implying detection.

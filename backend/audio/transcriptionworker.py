@@ -69,6 +69,7 @@ class TranscriptionWorker(ABC, threading.Thread):
         satellite: Optional[Dict[str, Any]] = None,
         transmitter: Optional[Dict[str, Any]] = None,
         output_dir: Optional[str] = None,
+        translation_backend: str = "google",
     ):
         """
         Initialize the transcription worker.
@@ -102,6 +103,8 @@ class TranscriptionWorker(ABC, threading.Thread):
         self.vfo_number = vfo_number
         self.language = language
         self.translate_to = translate_to
+        self.translation_backend = translation_backend
+        self._last_translation_error = 0.0
 
         # Satellite and transmitter metadata
         self.satellite = satellite
@@ -305,6 +308,7 @@ class TranscriptionWorker(ABC, threading.Thread):
                 f"# Transmitter Frequency: {transmitter_freq} Hz\n"
                 f"# Language: {self.language}\n"
                 f"# Translate To: {self.translate_to}\n"
+                f"# Translation Backend: {self.translation_backend}\n"
                 f"# Started: {datetime.now().isoformat()}\n"
                 f"#\n"
                 f"# Format: [HH:MM:SS] transcribed text (up to 20 words per line)\n"
@@ -637,6 +641,7 @@ class TranscriptionWorker(ABC, threading.Thread):
                         "provider": self.provider_name,
                         "language": self.language,
                         "translate_to": self.translate_to,
+                        "translation_backend": self.translation_backend,
                         "audio_type": stats_copy["audio_type"],
                         "audio_chunks_in": stats_copy["audio_chunks_in"],
                         "audio_samples_in": stats_copy["audio_samples_in"],
@@ -738,6 +743,28 @@ class TranscriptionWorker(ABC, threading.Thread):
                 "error_type": error_type,
                 "message": error_message,
                 "details": error_details,
+                "timestamp": datetime.now().isoformat(),
+            },
+            room=self.session_id,
+        )
+
+    async def _report_translation_failure(self) -> None:
+        """Surface failures without flooding the UI for each partial transcript."""
+        with self.stats_lock:
+            self.stats["errors"] += 1
+        now = time.monotonic()
+        if now - self._last_translation_error < 60:
+            return
+        self._last_translation_error = now
+        await self._safe_sio_emit(
+            "transcription-error",
+            {
+                "session_id": self.session_id,
+                "vfo_number": self.vfo_number,
+                "provider": self.provider_name,
+                "error_type": "translation_error",
+                "message": f"{self.translation_backend.capitalize()} translation failed; original transcript shown",
+                "details": "Check the translation service configuration and language pair.",
                 "timestamp": datetime.now().isoformat(),
             },
             room=self.session_id,

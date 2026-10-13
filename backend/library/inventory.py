@@ -122,6 +122,8 @@ def _transcription_summary(path: Path) -> Dict[str, Any]:
                     result["language"] = line.split(":", 1)[1].strip()
                 elif line.startswith("# Translate To:"):
                     result["translate_to"] = line.split(":", 1)[1].strip()
+                elif line.startswith("# Translation Backend:"):
+                    result["translation_backend"] = line.split(":", 1)[1].strip()
     except OSError:
         return {}
     return result

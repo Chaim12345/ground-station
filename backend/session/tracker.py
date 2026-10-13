@@ -435,6 +435,7 @@ class SessionTracker:
                         "transcription_provider": vfo_state.transcription_provider,
                         "transcription_language": vfo_state.transcription_language,
                         "transcription_translate_to": vfo_state.transcription_translate_to,
+                        "transcription_translation_backend": vfo_state.transcription_translation_backend,
                         "parameters_enabled": vfo_state.parameters_enabled,
                     }
 

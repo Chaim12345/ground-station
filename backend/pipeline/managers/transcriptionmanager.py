@@ -106,6 +106,7 @@ class TranscriptionManager:
         satellite: Optional[Dict[str, Any]] = None,
         transmitter: Optional[Dict[str, Any]] = None,
         output_dir: Optional[str] = None,
+        translation_backend: str = "google",
     ):
         """
         Start a transcription worker for a specific VFO.
@@ -116,6 +117,7 @@ class TranscriptionManager:
             vfo_number: VFO number (1-4)
             language: Source language code (e.g., "en", "es", "auto")
             translate_to: Target language code for translation (e.g., "en", "none")
+            translation_backend: Text translation service for Deepgram and Parakeet
             provider: Transcription provider ("gemini", "deepgram", "parakeet")
             satellite: Satellite information dict (optional)
             transmitter: Transmitter information dict (optional)
@@ -145,6 +147,23 @@ class TranscriptionManager:
             api_key = None
         else:
             self.logger.error(f"Unknown transcription provider: {provider}")
+            return False
+
+        if translation_backend not in {"google", "libretranslate"}:
+            self.logger.error("Unknown translation backend: %s", translation_backend)
+            return False
+        # Gemini handles its own text translation and ignores this separate choice.
+        if provider == "gemini":
+            translation_backend = "google"
+        if (
+            provider in {"deepgram", "parakeet"}
+            and translate_to != "none"
+            and translation_backend == "libretranslate"
+            and not str(arguments.libretranslate_url or "").strip()
+        ):
+            self.logger.warning("No LibreTranslate URL configured, cannot start translation")
+            # A live Google worker must not continue after a local selection fails.
+            self.stop_transcription(sdr_id, session_id, vfo_number)
             return False
 
         process_info = self.processes[sdr_id]
@@ -195,8 +214,20 @@ class TranscriptionManager:
                 )
                 return False
 
-            # If a start happened within last 1000ms, debounce
-            if now_ms - last_ts < 1000:
+            existing_entry = consumer_storage.get(vfo_number)
+            settings_changed_for_live_worker = bool(
+                existing_entry
+                and existing_entry["instance"].is_alive()
+                and (
+                    existing_entry.get("language") != language
+                    or existing_entry.get("translate_to") != translate_to
+                    or existing_entry.get("provider") != provider
+                    or existing_entry.get("translation_backend", "google") != translation_backend
+                )
+            )
+
+            # Only debounce duplicate starts; a changed selection must take effect.
+            if now_ms - last_ts < 1000 and not settings_changed_for_live_worker:
                 self.logger.info(
                     f"Transcription start requested too soon after last start for {session_id} VFO {vfo_number}, debouncing"
                 )
@@ -215,6 +246,7 @@ class TranscriptionManager:
                             existing.get("language") != language
                             or existing.get("translate_to") != translate_to
                             or existing.get("provider") != provider
+                            or existing.get("translation_backend", "google") != translation_backend
                         )
                         if settings_changed:
                             self.logger.info(
@@ -277,6 +309,8 @@ class TranscriptionManager:
                             language=language,
                             translate_to=translate_to,
                             google_translate_api_key=self.google_translate_api_key,
+                            translation_backend=translation_backend,
+                            libretranslate_url=arguments.libretranslate_url or "",
                             satellite=satellite,
                             transmitter=transmitter,
                             output_dir=output_dir,
@@ -293,6 +327,8 @@ class TranscriptionManager:
                             language=language,
                             translate_to=translate_to,
                             google_translate_api_key=self.google_translate_api_key,
+                            translation_backend=translation_backend,
+                            libretranslate_url=arguments.libretranslate_url or "",
                             satellite=satellite,
                             transmitter=transmitter,
                             output_dir=output_dir,
@@ -309,6 +345,7 @@ class TranscriptionManager:
                         "audio_broadcaster": audio_broadcaster,
                         "language": language,
                         "translate_to": translate_to,
+                        "translation_backend": translation_backend,
                         "provider": provider,
                         "satellite": satellite,
                         "transmitter": transmitter,

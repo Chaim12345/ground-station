@@ -21,6 +21,17 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import { useTranslation } from 'react-i18next';
 import SharedTransmittersDialog from '../../satellites/transmitters-dialog.jsx';
+import { useSocket } from '../../common/socket.jsx';
+import { getLibreTargetOptions, isLibrePairSupported, TranslationBackendField, useLibreTranslateCapabilities } from '../../common/translation-options.jsx';
+
+const TARGET_LANGUAGES = [
+    ['en', '🇬🇧', 'English'], ['el', '🇬🇷', 'Greek'], ['es', '🇪🇸', 'Spanish'],
+    ['fr', '🇫🇷', 'French'], ['de', '🇩🇪', 'German'], ['it', '🇮🇹', 'Italian'],
+    ['pt', '🇵🇹', 'Portuguese'], ['pt-BR', '🇧🇷', 'Portuguese (Brazil)'],
+    ['ru', '🇷🇺', 'Russian'], ['uk', '🇺🇦', 'Ukrainian'], ['ja', '🇯🇵', 'Japanese'],
+    ['zh', '🇨🇳', 'Chinese'], ['ar', '🇸🇦', 'Arabic'], ['tl', '🇵🇭', 'Filipino'],
+    ['tr', '🇹🇷', 'Turkish'], ['sk', '🇸🇰', 'Slovak'], ['hr', '🇭🇷', 'Croatian'],
+];
 
 /**
  * Transmitters Dialog Component
@@ -50,10 +61,15 @@ export const TranscriptionParamsDialog = ({
     getVFODecoderInfo
 }) => {
     const { t } = useTranslation('waterfall');
+    const { socket } = useSocket();
+    const vfo = vfoMarkers?.[vfoIndex];
+    const usesSeparateTranslation = ['deepgram', 'parakeet'].includes(vfo?.transcriptionProvider);
+    const translationBackend = vfo?.transcriptionTranslationBackend || 'google';
+    const isLocal = usesSeparateTranslation && translationBackend === 'libretranslate';
+    const capabilities = useLibreTranslateCapabilities(socket, open && usesSeparateTranslation);
 
-    if (!vfoIndex || !vfoMarkers[vfoIndex]) return null;
+    if (!vfoIndex || !vfo) return null;
 
-    const vfo = vfoMarkers[vfoIndex];
     const decoderInfo = getVFODecoderInfo ? getVFODecoderInfo(vfoIndex) : null;
     const isTranscribing = decoderInfo && decoderInfo.decoder_type === 'transcription';
     const info = decoderInfo?.info || {};
@@ -114,6 +130,9 @@ export const TranscriptionParamsDialog = ({
                                 <MenuItem value="uk" sx={{ fontSize: '0.875rem' }}>🇺🇦 {t('vfo.languages.uk', 'Ukrainian')}</MenuItem>
                                 <MenuItem value="ja" sx={{ fontSize: '0.875rem' }}>🇯🇵 {t('vfo.languages.ja', 'Japanese')}</MenuItem>
                                 <MenuItem value="zh" sx={{ fontSize: '0.875rem' }}>🇨🇳 {t('vfo.languages.zh', 'Chinese')}</MenuItem>
+                                {(vfo.transcriptionLanguage === 'zh-Hant' || (isLocal && capabilities?.languages?.some((language) => language.code === 'zh-Hant'))) && (
+                                    <MenuItem value="zh-Hant" sx={{ fontSize: '0.875rem' }}>🇹🇼 {t('vfo.languages.zh-Hant', 'Chinese (Traditional)')}</MenuItem>
+                                )}
                                 <MenuItem value="ar" sx={{ fontSize: '0.875rem' }}>🇸🇦 {t('vfo.languages.ar', 'Arabic')}</MenuItem>
                                 <MenuItem value="tl" sx={{ fontSize: '0.875rem' }}>🇵🇭 {t('vfo.languages.tl', 'Filipino')}</MenuItem>
                                 <MenuItem value="tr" sx={{ fontSize: '0.875rem' }}>🇹🇷 {t('vfo.languages.tr', 'Turkish')}</MenuItem>
@@ -129,6 +148,19 @@ export const TranscriptionParamsDialog = ({
                         </Alert>
                     )}
 
+                    {usesSeparateTranslation && (
+                        <Box sx={{ mb: 2.5 }}>
+                            <TranslationBackendField
+                                value={translationBackend}
+                                onChange={(value) => onVFOPropertyChange(vfoIndex, { transcriptionTranslationBackend: value })}
+                                source={vfo.transcriptionLanguage || 'auto'}
+                                target={vfo.transcriptionTranslateTo || 'none'}
+                                capabilities={capabilities}
+                                disabled={!vfo.transcriptionEnabled}
+                            />
+                        </Box>
+                    )}
+
                     {/* Translate To */}
                     <Box sx={{ mb: 2.5 }}>
                         <FormControl fullWidth size="small" variant="outlined">
@@ -142,29 +174,18 @@ export const TranscriptionParamsDialog = ({
                                 sx={{ fontSize: '0.875rem' }}
                             >
                                 <MenuItem value="none" sx={{ fontSize: '0.875rem' }}>⭕ {t('vfo.languages.none', 'No Translation')}</MenuItem>
-                                <MenuItem value="en" sx={{ fontSize: '0.875rem' }}>🇬🇧 {t('vfo.languages.en', 'English')}</MenuItem>
-                                <MenuItem value="el" sx={{ fontSize: '0.875rem' }}>🇬🇷 {t('vfo.languages.el', 'Greek')}</MenuItem>
-                                <MenuItem value="es" sx={{ fontSize: '0.875rem' }}>🇪🇸 {t('vfo.languages.es', 'Spanish')}</MenuItem>
-                                <MenuItem value="fr" sx={{ fontSize: '0.875rem' }}>🇫🇷 {t('vfo.languages.fr', 'French')}</MenuItem>
-                                <MenuItem value="de" sx={{ fontSize: '0.875rem' }}>🇩🇪 {t('vfo.languages.de', 'German')}</MenuItem>
-                                <MenuItem value="it" sx={{ fontSize: '0.875rem' }}>🇮🇹 {t('vfo.languages.it', 'Italian')}</MenuItem>
-                                <MenuItem value="pt" sx={{ fontSize: '0.875rem' }}>🇵🇹 {t('vfo.languages.pt', 'Portuguese')}</MenuItem>
-                                <MenuItem value="pt-BR" sx={{ fontSize: '0.875rem' }}>🇧🇷 {t('vfo.languages.pt-BR', 'Portuguese (Brazil)')}</MenuItem>
-                                <MenuItem value="ru" sx={{ fontSize: '0.875rem' }}>🇷🇺 {t('vfo.languages.ru', 'Russian')}</MenuItem>
-                                <MenuItem value="uk" sx={{ fontSize: '0.875rem' }}>🇺🇦 {t('vfo.languages.uk', 'Ukrainian')}</MenuItem>
-                                <MenuItem value="ja" sx={{ fontSize: '0.875rem' }}>🇯🇵 {t('vfo.languages.ja', 'Japanese')}</MenuItem>
-                                <MenuItem value="zh" sx={{ fontSize: '0.875rem' }}>🇨🇳 {t('vfo.languages.zh', 'Chinese')}</MenuItem>
-                                <MenuItem value="ar" sx={{ fontSize: '0.875rem' }}>🇸🇦 {t('vfo.languages.ar', 'Arabic')}</MenuItem>
-                                <MenuItem value="tl" sx={{ fontSize: '0.875rem' }}>🇵🇭 {t('vfo.languages.tl', 'Filipino')}</MenuItem>
-                                <MenuItem value="tr" sx={{ fontSize: '0.875rem' }}>🇹🇷 {t('vfo.languages.tr', 'Turkish')}</MenuItem>
-                                <MenuItem value="sk" sx={{ fontSize: '0.875rem' }}>🇸🇰 {t('vfo.languages.sk', 'Slovak')}</MenuItem>
-                                <MenuItem value="hr" sx={{ fontSize: '0.875rem' }}>🇭🇷 {t('vfo.languages.hr', 'Croatian')}</MenuItem>
+                                {getLibreTargetOptions(TARGET_LANGUAGES.map(([value, icon, label]) => ({ value, icon, label })), isLocal ? capabilities : null, vfo.transcriptionTranslateTo)
+                                    .map((option) => (
+                                        <MenuItem key={option.value} value={option.value} sx={{ fontSize: '0.875rem' }}
+                                            disabled={isLocal && !isLibrePairSupported(capabilities, vfo.transcriptionLanguage || 'auto', option.value)}>
+                                            {option.icon} {t(`vfo.languages.${option.value}`, option.label)}
+                                        </MenuItem>
+                                    ))}
                             </Select>
                         </FormControl>
                     </Box>
 
-                    {/* These providers use the separate Google Translate service. */}
-                    {['deepgram', 'parakeet'].includes(vfo.transcriptionProvider) &&
+                    {usesSeparateTranslation && !isLocal &&
                      vfo.transcriptionTranslateTo &&
                      vfo.transcriptionTranslateTo !== 'none' && (
                         <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>

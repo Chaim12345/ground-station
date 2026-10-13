@@ -1153,6 +1153,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         const currentVfo = store.getState().vfo.vfoMarkers[vfoNumber];
         const language = currentVfo?.transcriptionLanguage || 'auto';
         const translateTo = currentVfo?.transcriptionTranslateTo || 'none';
+        const translationBackend = currentVfo?.transcriptionTranslationBackend || 'google';
 
         socket.emit("api.call", {
   cmd: 'toggle-transcription',
@@ -1161,6 +1162,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
     enabled,
     language,
     translateTo,
+    translationBackend,
     provider
   }
 }, response => {

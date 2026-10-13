@@ -265,6 +265,8 @@ def parse_transcription_metadata(transcription_file_path: str) -> Dict[str, Any]
                     metadata["language"] = line.split(":", 1)[1].strip()
                 elif line.startswith("# Translate To:"):
                     metadata["translate_to"] = line.split(":", 1)[1].strip()
+                elif line.startswith("# Translation Backend:"):
+                    metadata["translation_backend"] = line.split(":", 1)[1].strip()
                 elif line.startswith("# Started:"):
                     metadata["started"] = line.split(":", 1)[1].strip()
                 elif line.startswith("# Ended:"):
@@ -1159,6 +1161,7 @@ async def filebrowser_request_routing(sio, cmd, data, logger, sid):
                     transmitter_frequency = metadata.get("transmitter_frequency")
                     language = metadata.get("language")
                     translate_to = metadata.get("translate_to")
+                    translation_backend = metadata.get("translation_backend")
                     started = metadata.get("started")
                     ended = metadata.get("ended")
 
@@ -1186,6 +1189,7 @@ async def filebrowser_request_routing(sio, cmd, data, logger, sid):
                             "transmitter_frequency": transmitter_frequency,
                             "language": language,
                             "translate_to": translate_to,
+                            "translation_backend": translation_backend,
                             "started": started,
                             "ended": ended,
                             "metadata": metadata,

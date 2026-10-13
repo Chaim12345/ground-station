@@ -24,6 +24,12 @@
   "offline": "Offline",
   "unknown": "Unknown",
   "not_available": "N/A",
+  "translation": {
+    "backend_label": "Translation Service",
+    "configure_local": "Set the LibreTranslate URL in Application Settings to enable local translation.",
+    "unavailable": "LibreTranslate is unavailable. Check the service URL and connection.",
+    "unsupported_pair": "This language pair is not supported by the configured LibreTranslate service."
+  },
   "map_load_error": {
     "title": "Map failed to load",
     "summary": "{{engine}} could not display the map.",
@@ -246,7 +252,7 @@
       "provider_gemini": "Gemini",
       "provider_deepgram": "Deepgram",
       "provider_parakeet": "Parakeet",
-      "parakeet_help": "Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional Google translation.",
+      "parakeet_help": "Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional translation.",
       "band_hf": "HF",
       "band_vhf": "VHF",
       "band_uhf": "UHF",
@@ -271,6 +277,7 @@
       "language_ukrainian": "Ukrainian",
       "language_japanese": "Japanese",
       "language_chinese": "Chinese",
+      "language_chinese_traditional": "Chinese (Traditional)",
       "language_arabic": "Arabic",
       "language_filipino": "Filipino",
       "language_turkish": "Turkish",

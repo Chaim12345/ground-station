@@ -343,6 +343,10 @@ const SessionSnapshotCard = () => {
                                                                 {vfo.transcription_translate_to && (
                                                                     <KeyValue label={t('session_snapshot_card.translate_to', { defaultValue: 'Translate To' })} value={vfo.transcription_translate_to} />
                                                                 )}
+                                                                {vfo.transcription_provider !== 'gemini' && vfo.transcription_translate_to && vfo.transcription_translate_to !== 'none' && (
+                                                                    <KeyValue label={t('session_snapshot_card.translation_service', { defaultValue: 'Translation Service' })}
+                                                                        value={vfo.transcription_translation_backend === 'libretranslate' ? 'LibreTranslate' : 'Google Translate'} />
+                                                                )}
                                                             </>
                                                         )}
                                                     </Box>

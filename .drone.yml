@@ -70,8 +70,9 @@ steps:
       - docker stop --timeout 15 ground-station-prod || true
       - docker rm ground-station-prod || true
 
-      # Run the new container with the versioned image (using host networking for mDNS discovery)
-      - docker run -d --network host --device=/dev/bus/usb --restart=unless-stopped --privileged --name ground-station-prod -v /media/pool1/volumes/ground-station-data:/app/backend/data -e GS_ENVIRONMENT=$ENV_TYPE -e GR_BUFFER_TYPE=vmcirc_mmap_tmpfile sgoudelis/ground-station:$FULL_VERSION
+      # rfbox5's Docker daemon supplies LAN DNS for private service names. The host
+      # CA bundle must include any private CA used by HTTPS transcription services.
+      - docker run -d --network host --device=/dev/bus/usb --restart=unless-stopped --privileged --name ground-station-prod -v /media/pool1/volumes/ground-station-data:/app/backend/data -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro -e GS_ENVIRONMENT=$ENV_TYPE -e GR_BUFFER_TYPE=vmcirc_mmap_tmpfile sgoudelis/ground-station:$FULL_VERSION
 
       # Check that it's running
       - sleep 5

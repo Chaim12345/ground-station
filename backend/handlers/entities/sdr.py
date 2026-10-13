@@ -1017,6 +1017,11 @@ def _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
         desired_provider = getattr(vfo_state, "transcription_provider", "gemini") or "gemini"
         desired_language = vfo_state.transcription_language or "auto"
         desired_translate_to = vfo_state.transcription_translate_to or "none"
+        desired_translation_backend = (
+            (vfo_state.transcription_translation_backend or "google")
+            if desired_provider != "gemini"
+            else "google"
+        )
 
         existing_worker = transcription_manager.get_active_transcription_consumer(
             sdr_id, session_id, vfo_number
@@ -1027,6 +1032,8 @@ def _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
             and getattr(existing_worker, "provider_name", None) == desired_provider
             and getattr(existing_worker, "language", None) == desired_language
             and getattr(existing_worker, "translate_to", None) == desired_translate_to
+            and getattr(existing_worker, "translation_backend", "google")
+            == desired_translation_backend
         ):
             logger.debug(
                 f"Transcription already active for session {session_id} VFO {vfo_number} "
@@ -1096,6 +1103,7 @@ def _auto_start_transcription(sdr_id, session_id, vfo_number, vfo_state, logger)
                     vfo_number=vfo_number,
                     language=language,
                     translate_to=translate_to,
+                    translation_backend=desired_translation_backend,
                     provider=provider,
                     satellite=satellite_dict,
                     transmitter=transmitter_dict,
@@ -1154,6 +1162,11 @@ def handle_vfo_demodulator_state(vfo_state, session_id, logger):
             desired_provider = getattr(vfo_state, "transcription_provider", "gemini") or "gemini"
             desired_language = vfo_state.transcription_language or "auto"
             desired_translate_to = vfo_state.transcription_translate_to or "none"
+            desired_translation_backend = (
+                (vfo_state.transcription_translation_backend or "google")
+                if desired_provider != "gemini"
+                else "google"
+            )
             if transcription_manager:
                 existing_worker = transcription_manager.get_active_transcription_consumer(
                     sdr_id, session_id, vfo_number
@@ -1165,6 +1178,8 @@ def handle_vfo_demodulator_state(vfo_state, session_id, logger):
                 and getattr(existing_worker, "provider_name", None) == desired_provider
                 and getattr(existing_worker, "language", None) == desired_language
                 and getattr(existing_worker, "translate_to", None) == desired_translate_to
+                and getattr(existing_worker, "translation_backend", "google")
+                == desired_translation_backend
             ):
                 logger.debug(
                     f"Transcription worker already active for VFO {vfo_number} with matching settings, "

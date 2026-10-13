@@ -81,6 +81,7 @@ class TranscriptionHandler:
             provider = task_config.get("provider", "gemini")
             language = task_config.get("language", "auto")
             translate_to = task_config.get("translate_to", "none")
+            translation_backend = task_config.get("translation_backend", "google")
             transcription_transmitter_id = task_config.get("transmitter_id", "none")
 
             # Fetch transmitter info to get frequency if transmitter is specified
@@ -171,6 +172,7 @@ class TranscriptionHandler:
                     vfo_number=transcription_vfo_number,
                     language=language,
                     translate_to=translate_to,
+                    translation_backend=translation_backend,
                     provider=provider,
                     satellite=satellite,
                     transmitter=transmitter_dict,

@@ -17,7 +17,9 @@
 
 from typing import Any, Dict, Optional, Union
 
+from audio.translation import get_libretranslate_languages
 from common.appsettings import app_settings_service
+from common.arguments import arguments
 
 
 async def get_app_config(
@@ -52,11 +54,31 @@ async def update_app_config(
     }
 
 
+async def get_libretranslate_capabilities(
+    sio: Any, data: Optional[Dict], logger: Any, sid: str
+) -> Dict[str, Any]:
+    """Proxy language capabilities so browser clients need no direct service access."""
+    del sio, data, sid
+    service_url = str(arguments.libretranslate_url or "").strip()
+    if not service_url:
+        return {"success": True, "data": {"configured": False, "languages": []}}
+    try:
+        languages = await get_libretranslate_languages(service_url)
+        return {"success": True, "data": {"configured": True, "languages": languages}}
+    except Exception as exc:
+        logger.warning("Could not fetch LibreTranslate languages: %s", exc)
+        return {
+            "success": True,
+            "data": {"configured": True, "languages": [], "error": "LibreTranslate is unavailable"},
+        }
+
+
 def register_handlers(registry):
     """Register app settings handlers with the command registry."""
     registry.register_batch(
         {
             "get-app-config": (get_app_config, "api_call"),
             "update-app-config": (update_app_config, "api_call"),
+            "get-libretranslate-capabilities": (get_libretranslate_capabilities, "api_call"),
         }
     )

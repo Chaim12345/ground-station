@@ -169,6 +169,7 @@ async def update_vfo_parameters(
         transcription_provider=data.get("transcriptionProvider"),
         transcription_language=data.get("transcriptionLanguage"),
         transcription_translate_to=data.get("transcriptionTranslateTo"),
+        transcription_translation_backend=data.get("transcriptionTranslationBackend"),
         decoder=data.get("decoder"),
         locked_transmitter_id=data.get("locked_transmitter_id"),
         parameters_enabled=data.get("parametersEnabled"),
@@ -350,7 +351,22 @@ async def toggle_transcription(
     # Get language, translation, and provider settings
     language = data.get("language", "auto")
     translate_to = data.get("translateTo", "none")
+    translation_backend = data.get("translationBackend", "google")
     provider = data.get("provider", "gemini")  # Default to gemini for backward compatibility
+
+    if translation_backend not in {"google", "libretranslate"}:
+        return {"success": False, "error": "Unknown translation backend"}
+    if (
+        enabled
+        and provider in {"deepgram", "parakeet"}
+        and translate_to != "none"
+        and translation_backend == "libretranslate"
+        and not str(arguments.libretranslate_url or "").strip()
+    ):
+        return {
+            "success": False,
+            "error": "Configure the LibreTranslate URL in Application Settings before enabling local translation",
+        }
 
     if enabled and provider == "parakeet" and not str(arguments.parakeet_url or "").strip():
         return {
@@ -450,6 +466,7 @@ async def toggle_transcription(
                             vfo_number=vfo_number,
                             language=language,
                             translate_to=translate_to,
+                            translation_backend=translation_backend,
                             provider=provider,
                             satellite=satellite_dict,
                             transmitter=transmitter_dict,
@@ -490,6 +507,7 @@ async def toggle_transcription(
         transcription_provider=provider,
         transcription_language=language,
         transcription_translate_to=translate_to,
+        transcription_translation_backend=translation_backend,
     )
 
     # Get updated state

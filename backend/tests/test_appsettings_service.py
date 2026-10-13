@@ -159,3 +159,22 @@ def test_parakeet_url_hot_applies_and_rejects_invalid_urls(tmp_path, monkeypatch
     assert cleared["data"]["changed_hot_keys"] == ["parakeet_url"]
     assert appsettings.arguments.parakeet_url == ""
     assert _read_json(service.config_path)["parakeet_url"] == ""
+
+
+def test_libretranslate_url_is_empty_by_default_and_hot_applied(tmp_path, monkeypatch):
+    service = _build_service(tmp_path)
+    assert appsettings.DEFAULT_APP_CONFIG["libretranslate_url"] == ""
+    monkeypatch.setattr(appsettings.arguments, "libretranslate_url", "", raising=False)
+
+    invalid = service.update({"libretranslate_url": "http://user@localhost"})
+    assert invalid["success"] is False
+    assert "libretranslate_url" in invalid["data"]["validation_errors"]
+
+    updated = service.update({"libretranslate_url": "https://translate.example.org/"})
+    assert updated["success"] is True
+    assert updated["data"]["changed_hot_keys"] == ["libretranslate_url"]
+    assert appsettings.arguments.libretranslate_url == "https://translate.example.org/"
+
+    cleared = service.update({"libretranslate_url": ""})
+    assert cleared["success"] is True
+    assert appsettings.arguments.libretranslate_url == ""

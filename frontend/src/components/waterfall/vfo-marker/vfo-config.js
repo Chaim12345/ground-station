@@ -718,6 +718,8 @@ export const getDefaultVFOConfig = () => {
         stepSize: 1000,
         transcriptionEnabled: false,
         transcriptionLanguage: 'auto',
+        transcriptionTranslateTo: 'none',
+        transcriptionTranslationBackend: 'google',
 
         // Decoder-specific parameters (flat object, prefixed by decoder type)
         parameters: {

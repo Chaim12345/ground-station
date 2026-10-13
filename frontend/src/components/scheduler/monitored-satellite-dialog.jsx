@@ -66,6 +66,7 @@ import {
     fetchSDRParameters,
 } from './scheduler-slice.jsx';
 import { useSocket } from '../common/socket.jsx';
+import { getLibreTargetOptions, isLibrePairSupported, TranslationBackendField, useLibreTranslateCapabilities } from '../common/translation-options.jsx';
 import { SatelliteSelector } from './satellite-selector.jsx';
 import { getSatdumpPipelines, getDecoderParameters, getDecoderDefaultParameters } from '../waterfall/decoder-parameters.js';
 import { DecoderConfigSuggestion } from './decoder-config-suggestion.jsx';
@@ -236,6 +237,7 @@ export default function MonitoredSatelliteDialog() {
     const { t } = useTranslation(['common', 'waterfall']);
     const { socket } = useSocket();
     const open = useSelector((state) => state.scheduler?.monitoredSatelliteDialogOpen || false);
+    const libreCapabilities = useLibreTranslateCapabilities(socket, open);
     const selectedMonitoredSatellite = useSelector((state) => state.scheduler?.selectedMonitoredSatellite);
     const isEditingMonitoredSatellite = Boolean(selectedMonitoredSatellite?.id);
     const sdrs = useSelector((state) => state.sdrs?.sdrs || []);
@@ -640,6 +642,7 @@ export default function MonitoredSatelliteDialog() {
                         provider: 'gemini',
                         language: 'auto',
                         translate_to: 'none',
+                        translation_backend: 'google',
                     },
                 };
                 break;
@@ -824,8 +827,11 @@ export default function MonitoredSatelliteDialog() {
             const modType = getTaskSummaryOptionLabel(MODULATION_TYPES, task.config.modulation, task.config.modulation?.toUpperCase());
             const provider = getProviderSummaryLabel(task.config.provider);
             const languageSummary = getTranscriptionLanguageSummary(task.config.language, task.config.translate_to);
+            const translationService = task.config.provider !== 'gemini' && task.config.translate_to && task.config.translate_to !== 'none'
+                ? (task.config.translation_backend === 'libretranslate' ? 'LibreTranslate' : 'Google Translate')
+                : null;
 
-            const parts = [transmitterName, freqMHz, modType, provider, languageSummary, t('scheduler_dialogs.shared.task_transcription')].filter(Boolean);
+            const parts = [transmitterName, freqMHz, modType, provider, languageSummary, translationService, t('scheduler_dialogs.shared.task_transcription')].filter(Boolean);
             return parts.join(' • ');
         } else if (task.type === 'iq_recording') {
             const transmitter = availableTransmitters.find(t => t.id === task.config.transmitter_id);
@@ -2371,7 +2377,7 @@ export default function MonitoredSatelliteDialog() {
 
                                                             {task.config.provider === 'parakeet' && (
                                                                 <Typography variant="caption" color="text.secondary">
-                                                                    {t('scheduler_dialogs.shared.parakeet_help', { defaultValue: 'Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional Google translation.' })}
+                                                                    {t('scheduler_dialogs.shared.parakeet_help', { defaultValue: 'Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional translation.' })}
                                                                 </Typography>
                                                             )}
 
@@ -2393,8 +2399,21 @@ export default function MonitoredSatelliteDialog() {
                                                                             {`${option.icon} ${t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
                                                                         </MenuItem>
                                                                     ))}
+                                                                    {(task.config.language === 'zh-Hant' || (task.config.translation_backend === 'libretranslate' && libreCapabilities?.languages?.some((language) => language.code === 'zh-Hant'))) && (
+                                                                        <MenuItem value="zh-Hant">🇹🇼 {t('scheduler_dialogs.shared.language_chinese_traditional', { defaultValue: 'Chinese (Traditional)' })}</MenuItem>
+                                                                    )}
                                                                 </Select>
                                                             </FormControl>
+
+                                                            {['deepgram', 'parakeet'].includes(task.config.provider) && (
+                                                                <TranslationBackendField
+                                                                    value={task.config.translation_backend || 'google'}
+                                                                    onChange={(value) => handleTaskConfigChange(index, 'translation_backend', value)}
+                                                                    source={task.config.language || 'auto'}
+                                                                    target={task.config.translate_to || 'none'}
+                                                                    capabilities={libreCapabilities}
+                                                                />
+                                                            )}
 
                                                             <FormControl fullWidth size="small">
                                                                 <InputLabel>{t('scheduler_dialogs.shared.translate_to_label')}</InputLabel>
@@ -2409,9 +2428,10 @@ export default function MonitoredSatelliteDialog() {
                                                                     }
                                                                     label={t('scheduler_dialogs.shared.translate_to_label')}
                                                                 >
-                                                                    {TRANSLATION_TARGET_OPTIONS.map((option) => (
-                                                                        <MenuItem key={option.value} value={option.value}>
-                                                                            {`${option.icon} ${t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
+                                                                    {getLibreTargetOptions(TRANSLATION_TARGET_OPTIONS, task.config.translation_backend === 'libretranslate' ? libreCapabilities : null, task.config.translate_to).map((option) => (
+                                                                        <MenuItem key={option.value} value={option.value}
+                                                                            disabled={['deepgram', 'parakeet'].includes(task.config.provider) && task.config.translation_backend === 'libretranslate' && option.value !== 'none' && !isLibrePairSupported(libreCapabilities, task.config.language || 'auto', option.value)}>
+                                                                            {`${option.icon} ${option.label || t(`scheduler_dialogs.shared.${option.labelKey}`)}`}
                                                                         </MenuItem>
                                                                     ))}
                                                                 </Select>

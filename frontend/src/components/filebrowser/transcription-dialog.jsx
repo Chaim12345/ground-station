@@ -236,6 +236,16 @@ export default function TranscriptionDialog({ open, onClose, transcription }) {
                                         </Typography>
                                     </Box>
                                 )}
+                                {transcription.provider !== 'gemini' && transcription.translate_to && transcription.translate_to !== 'none' && transcription.translation_backend && (
+                                    <Box sx={rowSx}>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                            {t('transcription_dialog.translation_service', { defaultValue: 'Translation Service' })}
+                                        </Typography>
+                                        <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                                            {transcription.translation_backend === 'libretranslate' ? 'LibreTranslate' : 'Google Translate'}
+                                        </Typography>
+                                    </Box>
+                                )}
                             </Box>
 
                             {(transcription.started || transcription.ended) && (

@@ -1468,6 +1468,7 @@ class PerformanceMonitor(threading.Thread):
                     "transcription_id": key,
                     "language": consumer_entry.get("language", "auto"),
                     "translate_to": consumer_entry.get("translate_to", "none"),
+                    "translation_backend": consumer_entry.get("translation_backend", "google"),
                     "input_queue_size": input_queue_size,
                     "input_queue_maxsize": input_queue_maxsize,
                     "is_alive": consumer_instance.is_alive(),

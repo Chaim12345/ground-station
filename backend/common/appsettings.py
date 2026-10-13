@@ -172,6 +172,13 @@ FIELDS: Tuple[AppSettingField, ...] = (
         apply_mode="hot",
     ),
     AppSettingField(
+        key="libretranslate_url",
+        value_type="string",
+        default=DEFAULT_APP_CONFIG["libretranslate_url"],
+        description="LibreTranslate service base URL. Leave empty to disable local translation. Changes apply to new transcription workers.",
+        apply_mode="hot",
+    ),
+    AppSettingField(
         key="orbital_sync_satellite_metadata_urls",
         value_type="string_list",
         default=DEFAULT_APP_CONFIG["orbital_sync_satellite_metadata_urls"],
@@ -303,8 +310,8 @@ def _validate_value(field: AppSettingField, value: Any) -> ValidatedSettingValue
     if field.choices and coerced not in field.choices:
         raise ValueError(f"Value must be one of: {', '.join(map(str, field.choices))}")
 
-    # An empty URL disables Parakeet until an administrator configures an endpoint.
-    if field.key == "parakeet_url" and coerced:
+    # Empty service URLs leave their optional integrations disabled.
+    if field.key in {"parakeet_url", "libretranslate_url"} and coerced:
         parsed = urlsplit(str(coerced))
         if (
             parsed.scheme not in {"http", "https"}
