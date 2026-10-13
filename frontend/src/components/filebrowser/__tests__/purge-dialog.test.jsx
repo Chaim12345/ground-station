@@ -96,7 +96,7 @@ describe('PurgeDialog', () => {
         // The bootstrap preview provides the slider domain; the debounced
         // default-cutoff preview then fills the summary.
         await waitFor(() => {
-            expect(screen.getByText('items will be deleted (40 files)')).toBeInTheDocument();
+            expect(screen.getByText('items will be deleted (40 files, including metadata files)')).toBeInTheDocument();
         }, { timeout: 3000 });
         expect(screen.getByText('7')).toBeInTheDocument();
         expect(screen.getByText(/in-progress items are protected/)).toBeInTheDocument();
@@ -130,7 +130,7 @@ describe('PurgeDialog', () => {
         });
         expect(screen.getByText('Composition')).toBeInTheDocument();
         expect(screen.getByRole('progressbar', { name: 'Deletion progress' })).toHaveAttribute('aria-valuenow', '100');
-        expect(screen.getByText('Deleted 7 items (40 files), freed 4.66 GB.')).toBeInTheDocument();
+        expect(screen.getByText('Deleted 7 items (40 files, including metadata files), freed 4.66 GB.')).toBeInTheDocument();
         expect(screen.queryByText('— / — · —')).not.toBeInTheDocument();
         expect(screen.queryByRole('progressbar', { name: 'Purge' })).not.toBeInTheDocument();
         await waitFor(() => {
@@ -165,7 +165,7 @@ describe('PurgeDialog', () => {
         renderWithProviders(<PurgeDialog open onClose={vi.fn()} socket={socket} />, { store: createStore() });
 
         await waitFor(() => {
-            expect(screen.getByText('items will be deleted (0 files)')).toBeInTheDocument();
+            expect(screen.getByText('items will be deleted (0 files, including metadata files)')).toBeInTheDocument();
         }, { timeout: 3000 });
         expect(screen.getByText('Composition')).toBeInTheDocument();
         expect(screen.getByText('0 B')).toBeInTheDocument();
@@ -184,7 +184,7 @@ describe('PurgeDialog', () => {
 
         expect(screen.getByRole('slider', { name: 'Delete before' })).toBeDisabled();
         expect(screen.getByRole('progressbar', { name: 'Scanning the library...' })).toBeInTheDocument();
-        expect(screen.getByText('items will be deleted (— files)')).toBeInTheDocument();
+        expect(screen.getByText('items will be deleted (— files, including metadata files)')).toBeInTheDocument();
         expect(screen.getByText('Composition')).toBeInTheDocument();
         expect(screen.getByText(/Automated observations/)).toBeInTheDocument();
         expect(screen.queryByText('Scanning the library...')).not.toBeInTheDocument();

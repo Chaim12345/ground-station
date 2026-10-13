@@ -242,7 +242,7 @@ const PurgeDialog = ({ open, onClose, socket }) => {
             count: done.deleted,
             files: done.files,
             bytes: formatBytes(done.bytesFreed),
-            defaultValue: 'Deleted {{count}} items ({{files}} files), freed {{bytes}}.',
+            defaultValue: 'Deleted {{count}} items ({{files}} files, including metadata files), freed {{bytes}}.',
         })
         : done ? done.error || t('purge_dialog.failed', { defaultValue: 'Purge failed' }) : '—';
     const failedText = done?.failed?.length > 0 ? t('purge_dialog.failed_count', {
@@ -304,7 +304,7 @@ const PurgeDialog = ({ open, onClose, socket }) => {
                             <Typography variant="body2" color="text.secondary">
                                 {t('purge_dialog.items_files', {
                                     files: displayFiles == null ? '—' : displayFiles.toLocaleString(),
-                                    defaultValue: 'items will be deleted ({{files}} files)',
+                                    defaultValue: 'items will be deleted ({{files}} files, including metadata files)',
                                 })}
                             </Typography>
                             <Box sx={{ flexGrow: 1 }} />
@@ -341,10 +341,34 @@ const PurgeDialog = ({ open, onClose, socket }) => {
                                     </Tooltip>
                                 ))}
                             </Box>
-                            <Stack direction="row" flexWrap="wrap" spacing={1.5} rowGap={0.5} sx={{ mt: 1 }}>
+                            <Stack direction="row" flexWrap="wrap" sx={{ mt: 1, columnGap: 2, rowGap: 0.5 }}>
                                 {distribution.map((category) => (
-                                    <Stack key={`legend-${category.key}`} direction="row" spacing={0.5} alignItems="center">
-                                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: category.color }} />
+                                    <Stack
+                                        key={`legend-${category.key}`}
+                                        direction="row"
+                                        spacing={0.5}
+                                        alignItems="center"
+                                        sx={{
+                                            position: 'relative',
+                                            '&:not(:last-child)::after': {
+                                                content: '""',
+                                                position: 'absolute',
+                                                right: '-8px',
+                                                top: '50%',
+                                                transform: 'translateY(-50%)',
+                                                width: '1px',
+                                                height: 12,
+                                                bgcolor: 'divider',
+                                            },
+                                        }}
+                                    >
+                                        <Box sx={{
+                                            width: 12,
+                                            height: 12,
+                                            bgcolor: category.color,
+                                            flexShrink: 0,
+                                            transform: 'translateY(-1px)',
+                                        }} />
                                         <Typography variant="caption" color="text.secondary">
                                             {t(`purge_dialog.categories.${category.key}`, { defaultValue: category.key })}
                                             {' '}
@@ -377,9 +401,15 @@ const PurgeDialog = ({ open, onClose, socket }) => {
                             <Typography
                                 variant="body2"
                                 color={done && !done.success ? 'error.main' : failedText ? 'warning.main' : 'text.secondary'}
-                                noWrap
                                 title={statusText}
-                                sx={{ minHeight: 20 }}
+                                sx={{
+                                    height: 40,
+                                    lineHeight: '20px',
+                                    display: '-webkit-box',
+                                    WebkitBoxOrient: 'vertical',
+                                    WebkitLineClamp: 2,
+                                    overflow: 'hidden',
+                                }}
                             >
                                 {statusText}
                             </Typography>
