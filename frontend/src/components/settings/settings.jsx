@@ -180,9 +180,9 @@ export function AdminCelestialCatalogPage() {
 
 export function UserPreferencesPage() {
     return (
-        <Box sx={{ flexGrow: 1, bgcolor: 'background.paper' }}>
+        <UserAccountPageLayout activeTab="preferences">
             <PreferencesForm />
-        </Box>
+        </UserAccountPageLayout>
     );
 }
 
@@ -262,6 +262,42 @@ const ADMIN_CELESTIAL_TABS = [
     { key: "ephemeris", labelKey: "tabs.ephemeris", defaultLabel: "Ephemeris Data", path: "/admin/celestial/ephemeris" },
     { key: "catalog", labelKey: "tabs.celestial_catalog", defaultLabel: "Catalog", path: "/admin/celestial/catalog" },
 ];
+
+// Keep the existing personal routes so user-menu links and bookmarks continue to work.
+const USER_ACCOUNT_TABS = [
+    { key: "preferences", labelKey: "tabs.preferences", defaultLabel: "Preferences", path: "/preferences" },
+    { key: "tokens", labelKey: "tabs.api_tokens", defaultLabel: "API Tokens", path: "/account/tokens" },
+];
+
+export function UserAccountPageLayout({ activeTab, children }) {
+    const { t } = useTranslation('settings');
+    const navigate = useNavigate();
+
+    const handleTabChange = (_event, nextTab) => {
+        if (nextTab === activeTab) return;
+        const tabDefinition = USER_ACCOUNT_TABS.find((tab) => tab.key === nextTab);
+        if (tabDefinition) navigate(tabDefinition.path);
+    };
+
+    return (
+        <Box sx={{ flexGrow: 1, bgcolor: 'background.paper' }}>
+            <AntTabs
+                value={activeTab}
+                onChange={handleTabChange}
+                aria-label={t('tabs.user_settings', { defaultValue: 'User settings' })}
+                scrollButtons={true}
+                variant="scrollable"
+                allowScrollButtonsMobile
+                sx={getSettingsTabRowSx('detailRow')}
+            >
+                {USER_ACCOUNT_TABS.map((tab) => (
+                    <AntTab key={tab.key} value={tab.key} label={t(tab.labelKey, { defaultValue: tab.defaultLabel })} />
+                ))}
+            </AntTabs>
+            {children}
+        </Box>
+    );
+}
 
 const AdminSatellitesPageLayout = React.memo(function AdminSatellitesPageLayout({ activeTab, children }) {
     const { t } = useTranslation('settings');

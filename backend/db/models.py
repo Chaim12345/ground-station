@@ -867,3 +867,27 @@ class AuthSessions(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class ApiTokens(Base):
+    """User-owned credentials for the public API, separate from browser sessions."""
+
+    __tablename__ = "api_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name = Column(String(80), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    scopes = Column(JSON, nullable=False)
+    expires_at = Column(AwareDateTime, nullable=True)
+    revoked_at = Column(AwareDateTime, nullable=True)
+    last_used_at = Column(AwareDateTime, nullable=True)
+    created_at = Column(AwareDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        AwareDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

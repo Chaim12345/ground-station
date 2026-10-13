@@ -34,7 +34,15 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from common.timezones import station_timezone
 from db import AsyncSessionLocal
-from db.models import AuthSessions, Locations, Preferences, PreferenceScope, UserRole, Users
+from db.models import (
+    ApiTokens,
+    AuthSessions,
+    Locations,
+    Preferences,
+    PreferenceScope,
+    UserRole,
+    Users,
+)
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _username_regex = re.compile(r"^[a-zA-Z0-9._-]{3,64}$")
@@ -788,6 +796,11 @@ async def reset_user_password(
                 revoke_reason="password_reset",
                 updated_at=now,
             )
+        )
+        await session.execute(
+            update(ApiTokens)
+            .where(and_(ApiTokens.user_id == user_row.id, ApiTokens.revoked_at.is_(None)))
+            .values(revoked_at=now, updated_at=now)
         )
         await session.commit()
         await session.refresh(user_row)

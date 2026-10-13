@@ -18,6 +18,8 @@
     "celestial_targets": "Monitored",
     "general": "General",
     "preferences": "Preferences",
+    "api_tokens": "API Tokens",
+    "user_settings": "User settings",
     "integrations": "Integrations",
     "location": "Location",
     "maintenance": "Maintenance",

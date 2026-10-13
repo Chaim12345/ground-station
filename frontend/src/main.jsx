@@ -35,6 +35,7 @@ import {
     AdminSystemLocationPage,
     AdminSystemMaintenancePage,
     AdminSystemUsersPage,
+    UserAccountPageLayout,
     UserPreferencesPage,
 } from "./components/settings/settings.jsx";
 import EarthViewLayout from "./components/earthview/main-layout.jsx";
@@ -53,6 +54,7 @@ import SatelliteInfoPage from "./components/satellites/satellite-info-page.jsx";
 import FileBrowserMain from "./components/filebrowser/filebrowser-main.jsx";
 import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx";
 import CelestialMainLayout from "./components/celestial/main-layout.jsx";
+import ApiTokensPage from "./components/auth/tokens.jsx";
 
 const enableStrictMode = import.meta.env.VITE_REACT_STRICT_MODE !== 'false';
 
@@ -109,6 +111,10 @@ const router = createBrowserRouter([
                     {
                         path: "preferences",
                         Component: UserPreferencesPage,
+                    },
+                    {
+                        path: "account/tokens",
+                        element: <UserAccountPageLayout activeTab="tokens"><ApiTokensPage /></UserAccountPageLayout>,
                     },
                     {
                         path: "solarsystem",

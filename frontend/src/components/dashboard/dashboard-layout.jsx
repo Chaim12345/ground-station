@@ -96,6 +96,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LogoutIcon from '@mui/icons-material/Logout';
 import TuneIcon from '@mui/icons-material/Tune';
+import KeyIcon from '@mui/icons-material/Key';
 import {getNavigation} from "../../config/navigation.jsx";
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatTime } from '../../utils/date-time.js';
@@ -1586,6 +1587,19 @@ export default function Layout() {
                     <ListItemText
                         sx={{ my: 0 }}
                         primary="Preferences"
+                        primaryTypographyProps={{ variant: 'body2', fontWeight: 500, lineHeight: 1.2 }}
+                    />
+                </MenuItem>
+                <MenuItem
+                    onClick={() => handleMenuNavigation('/account/tokens')}
+                    sx={{ minHeight: 40, px: 1.75, py: 0.75 }}
+                >
+                    <ListItemIcon sx={{ minWidth: 30, color: 'text.secondary' }}>
+                        <KeyIcon fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText
+                        sx={{ my: 0 }}
+                        primary={t('api_tokens.menu', { defaultValue: 'API Tokens' })}
                         primaryTypographyProps={{ variant: 'body2', fontWeight: 500, lineHeight: 1.2 }}
                     />
                 </MenuItem>
