@@ -19,7 +19,7 @@ import os
 import secrets
 from pathlib import Path
 
-from common.appconfig import load_app_config
+from common.appconfig import DEFAULT_APP_CONFIG, load_app_config
 
 parser = argparse.ArgumentParser(description="Start the Ground Station app with custom arguments.")
 parser.add_argument(
@@ -104,6 +104,7 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         max_tracker_targets=10,
         enable_soapy_discovery=False,
         runonce_soapy_discovery=True,
+        parakeet_url=DEFAULT_APP_CONFIG["parakeet_url"],
         orbital_sync_satellite_metadata_urls=["http://db.satnogs.org/api/satellites/?format=json"],
         orbital_sync_transmitter_urls=["http://db.satnogs.org/api/transmitters/?format=json"],
         tle_sync_satellite_metadata_urls=["http://db.satnogs.org/api/satellites/?format=json"],
@@ -174,6 +175,7 @@ else:
         max_tracker_targets=_pick(_raw_args.max_tracker_targets, "max_tracker_targets"),
         enable_soapy_discovery=_pick(_raw_args.enable_soapy_discovery, "enable_soapy_discovery"),
         runonce_soapy_discovery=_pick(_raw_args.runonce_soapy_discovery, "runonce_soapy_discovery"),
+        parakeet_url=_file_config.get("parakeet_url"),
         orbital_sync_satellite_metadata_urls=orbital_sync_satellite_metadata_urls,
         orbital_sync_transmitter_urls=orbital_sync_transmitter_urls,
         tle_sync_satellite_metadata_urls=orbital_sync_satellite_metadata_urls,

@@ -83,7 +83,7 @@ export const TranscriptionParamsDialog = ({
             </DialogTitle>
             <DialogContent dividers sx={{ p: 3 }}>
                 <Box>
-                    {!geminiConfigured && (
+                    {vfo.transcriptionProvider === 'gemini' && !geminiConfigured && (
                         <Alert severity="warning" sx={{ mb: 2 }}>
                             {t('vfo.configure_gemini', 'Configure Gemini API in Settings to enable transcription')}
                         </Alert>
@@ -97,7 +97,7 @@ export const TranscriptionParamsDialog = ({
                                 value={vfo.transcriptionLanguage || 'auto'}
                                 label={t('vfo.source_language', 'Source Language')}
                                 onChange={(e) => onVFOPropertyChange(vfoIndex, { transcriptionLanguage: e.target.value })}
-                                disabled={!vfo.transcriptionEnabled || !geminiConfigured}
+                                disabled={!vfo.transcriptionEnabled}
                                 size="small"
                                 sx={{ fontSize: '0.875rem' }}
                             >
@@ -122,6 +122,12 @@ export const TranscriptionParamsDialog = ({
                             </Select>
                         </FormControl>
                     </Box>
+
+                    {vfo.transcriptionProvider === 'parakeet' && (
+                        <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
+                            {t('vfo.parakeet_language_info', 'Parakeet sends audio to the configured service and detects supported languages automatically. The source language selection is used only for translation.')}
+                        </Alert>
+                    )}
 
                     {/* Translate To */}
                     <Box sx={{ mb: 2.5 }}>
@@ -157,12 +163,12 @@ export const TranscriptionParamsDialog = ({
                         </FormControl>
                     </Box>
 
-                    {/* Deepgram translation info */}
-                    {vfo.transcriptionProvider === 'deepgram' &&
+                    {/* These providers use the separate Google Translate service. */}
+                    {['deepgram', 'parakeet'].includes(vfo.transcriptionProvider) &&
                      vfo.transcriptionTranslateTo &&
                      vfo.transcriptionTranslateTo !== 'none' && (
                         <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-                            {t('vfo.deepgram_translation_info', 'Deepgram transcribes audio. Translation uses Google Translate API (configured in Settings).')}
+                            {t('vfo.external_translation_info', 'Translation uses Google Translate API (configured in Settings).')}
                         </Alert>
                     )}
 

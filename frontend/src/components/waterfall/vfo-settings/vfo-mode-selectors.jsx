@@ -192,7 +192,7 @@ export const TranscriptionSelector = ({
             <ToggleButtonGroup
                 value={currentValue}
                 exclusive
-                disabled={!vfoActive || (!geminiConfigured && !deepgramConfigured)}
+                disabled={!vfoActive}
                 onChange={(event, newValue) => {
                     if (newValue !== null && newValue !== currentValue) {
                         const newEnabled = newValue !== 'none';
@@ -209,21 +209,17 @@ export const TranscriptionSelector = ({
                 <ToggleButton value="deepgram" disabled={!deepgramConfigured}>
                     {t('vfo.transcription_modes.deepgram', 'Deepgram')}
                 </ToggleButton>
+                <ToggleButton value="parakeet">
+                    {t('vfo.transcription_modes.parakeet', 'Parakeet')}
+                </ToggleButton>
             </ToggleButtonGroup>
-
-            {/* API Key notifications */}
-            {!geminiConfigured && !deepgramConfigured && (
-                <Typography variant="caption" sx={{ mt: 0.5, display: 'block', color: 'text.disabled', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                    {t('vfo.api_key_required', 'API key required in Settings')}
-                </Typography>
-            )}
 
             {/* Transcription Parameters Link */}
             <Box sx={{ mt: 1.5, width: '100%' }}>
                 <Link
                     component="button"
                     variant="body2"
-                    disabled={!vfoActive || !vfo?.transcriptionEnabled || !geminiConfigured}
+                    disabled={!vfoActive || !vfo?.transcriptionEnabled}
                     onClick={onOpenParamsDialog}
                     sx={{
                         width: '100%',

@@ -21,6 +21,9 @@ from typing import Any, Dict, Optional
 
 from audio.deepgramtranscriptionworker import DeepgramTranscriptionWorker
 from audio.geminitranscriptionworker import GeminiTranscriptionWorker
+from audio.parakeettranscriptionworker import ParakeetTranscriptionWorker
+from audio.transcriptionworker import TranscriptionWorker
+from common.arguments import arguments
 from common.audio_queue_config import get_audio_queue_config
 from handlers.entities.filebrowser import emit_file_browser_state
 
@@ -113,7 +116,7 @@ class TranscriptionManager:
             vfo_number: VFO number (1-4)
             language: Source language code (e.g., "en", "es", "auto")
             translate_to: Target language code for translation (e.g., "en", "none")
-            provider: Transcription provider ("gemini", "deepgram")
+            provider: Transcription provider ("gemini", "deepgram", "parakeet")
             satellite: Satellite information dict (optional)
             transmitter: Transmitter information dict (optional)
 
@@ -124,7 +127,7 @@ class TranscriptionManager:
             self.logger.warning(f"No SDR process found for device {sdr_id}")
             return False
 
-        # Get API key for the selected provider
+        # Parakeet needs an operator-configured endpoint rather than an API key.
         if provider == "gemini":
             api_key = self.gemini_api_key
             if not api_key:
@@ -135,6 +138,11 @@ class TranscriptionManager:
             if not api_key:
                 self.logger.warning("No Deepgram API key configured, cannot start transcription")
                 return False
+        elif provider == "parakeet":
+            if not str(arguments.parakeet_url or "").strip():
+                self.logger.warning("No Parakeet URL configured, cannot start transcription")
+                return False
+            api_key = None
         else:
             self.logger.error(f"Unknown transcription provider: {provider}")
             return False
@@ -241,7 +249,9 @@ class TranscriptionManager:
 
                 # Create the appropriate worker based on provider
                 try:
+                    transcription_worker: TranscriptionWorker
                     if provider == "gemini":
+                        assert api_key is not None
                         transcription_worker = GeminiTranscriptionWorker(
                             transcription_queue=transcription_queue,
                             sio=self.sio,
@@ -256,6 +266,7 @@ class TranscriptionManager:
                             output_dir=output_dir,
                         )
                     elif provider == "deepgram":
+                        assert api_key is not None
                         transcription_worker = DeepgramTranscriptionWorker(
                             transcription_queue=transcription_queue,
                             sio=self.sio,
@@ -263,6 +274,22 @@ class TranscriptionManager:
                             api_key=api_key,
                             session_id=session_id,
                             vfo_number=vfo_number,
+                            language=language,
+                            translate_to=translate_to,
+                            google_translate_api_key=self.google_translate_api_key,
+                            satellite=satellite,
+                            transmitter=transmitter,
+                            output_dir=output_dir,
+                        )
+                    elif provider == "parakeet":
+                        # Snapshot the hot setting so an active worker keeps one endpoint.
+                        transcription_worker = ParakeetTranscriptionWorker(
+                            transcription_queue=transcription_queue,
+                            sio=self.sio,
+                            loop=self.event_loop,
+                            session_id=session_id,
+                            vfo_number=vfo_number,
+                            service_url=arguments.parakeet_url,
                             language=language,
                             translate_to=translate_to,
                             google_translate_api_key=self.google_translate_api_key,

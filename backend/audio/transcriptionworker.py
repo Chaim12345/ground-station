@@ -118,6 +118,8 @@ class TranscriptionWorker(ABC, threading.Thread):
         self.input_sample_rate = 44100  # Input from demodulators
         self.target_sample_rate = 16000  # Most APIs prefer 16kHz
         self.silence_threshold = 0.001  # RMS threshold for silence detection
+        self.requires_api_key = True
+        self.uses_receiver = True
 
         # Connection state
         self.connected: bool = False
@@ -518,23 +520,8 @@ class TranscriptionWorker(ABC, threading.Thread):
                     # Check if audio has sufficient energy (not just silence)
                     rms = np.sqrt(np.mean(concatenated**2))
 
-                    if rms >= self.silence_threshold:
-                        # Ensure audio is mono float32
-                        audio_array = np.array(concatenated, dtype=np.float32)
-                        audio_payload = self._prepare_audio_payload(audio_array)
-
-                        # Clear buffer
-                        self.audio_buffer = []
-
-                        # Stream to provider
-                        if self.provider_loop:
-                            asyncio.run_coroutine_threadsafe(
-                                self._stream_audio(audio_payload=audio_payload),
-                                self.provider_loop,
-                            )
-                    else:
-                        # Silence detected, clear buffer
-                        self.audio_buffer = []
+                    self.audio_buffer = []
+                    self._handle_audio_window(np.asarray(concatenated, dtype=np.float32), rms)
 
                 self.transcription_queue.task_done()
 
@@ -612,6 +599,16 @@ class TranscriptionWorker(ABC, threading.Thread):
         self._close_transcription_file()
         self._send_status_to_ui("closed")
         logger.info(f"{self.provider_name.capitalize()} transcription worker stopped")
+
+    def _handle_audio_window(self, audio_data: np.ndarray, rms: float):
+        """Handle a demodulated window; HTTP providers can group speech windows."""
+        if rms < self.silence_threshold:
+            return
+        payload = self._prepare_audio_payload(audio_data)
+        if self.provider_loop:
+            asyncio.run_coroutine_threadsafe(
+                self._stream_audio(audio_payload=payload), self.provider_loop
+            )
 
     def _send_status_to_ui(self, status: str):
         """
@@ -863,7 +860,7 @@ class TranscriptionWorker(ABC, threading.Thread):
         """
         try:
             # Check if API key is configured
-            if not self.api_key:
+            if self.requires_api_key and not self.api_key:
                 logger.debug(
                     f"No API key configured for {self.provider_name}, skipping transcription"
                 )
@@ -886,7 +883,11 @@ class TranscriptionWorker(ABC, threading.Thread):
                 await self._connect()
 
                 # Start receiver task if not already running
-                if self.connected and (self.receiver_task is None or self.receiver_task.done()):
+                if (
+                    self.connected
+                    and self.uses_receiver
+                    and (self.receiver_task is None or self.receiver_task.done())
+                ):
                     self.receiver_task = asyncio.create_task(self._receive_loop())
 
             # Send audio to provider

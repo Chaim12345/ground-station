@@ -259,6 +259,7 @@
       "provider_label": "Παροχος",
       "provider_gemini": "Gemini",
       "provider_deepgram": "Deepgram",
+      "provider_parakeet": "Parakeet",
       "band_hf": "HF",
       "band_vhf": "VHF",
       "band_uhf": "UHF",

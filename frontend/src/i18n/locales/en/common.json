@@ -245,6 +245,8 @@
       "provider_label": "Provider",
       "provider_gemini": "Gemini",
       "provider_deepgram": "Deepgram",
+      "provider_parakeet": "Parakeet",
+      "parakeet_help": "Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional Google translation.",
       "band_hf": "HF",
       "band_vhf": "VHF",
       "band_uhf": "UHF",

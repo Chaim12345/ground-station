@@ -115,7 +115,10 @@
     "saving": "Saving...",
     "save": "Save Settings",
     "save_success": "Application settings were saved.",
-    "no_socket": "No active backend connection."
+    "no_socket": "No active backend connection.",
+    "group_transcription": "Transcription",
+    "group_transcription_help": "Shared transcription service endpoints.",
+    "field_parakeet_url": "Parakeet service base URL. Leave empty to disable it. Changes apply to new transcription workers."
   },
   "location": {
     "title": "Select location on map",

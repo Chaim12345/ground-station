@@ -260,6 +260,7 @@
       "provider_label": "提供商",
       "provider_gemini": "Gemini",
       "provider_deepgram": "Deepgram",
+      "provider_parakeet": "Parakeet",
       "band_hf": "HF 高频",
       "band_vhf": "VHF 甚高频",
       "band_uhf": "UHF 特高频",

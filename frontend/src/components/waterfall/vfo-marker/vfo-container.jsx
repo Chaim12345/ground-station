@@ -899,10 +899,7 @@ const VFOMarkersContainer = ({
                         const status = decoderInfo.status || 'idle';
                         const language = decoderInfo.info?.language || 'auto';
                         const translateTo = decoderInfo.info?.translate_to || 'none';
-                        const provider = (decoderInfo.info?.provider || '').toLowerCase();
-
-                        // Show translation indicator if enabled and not using Deepgram (which doesn't support translation)
-                        const translationIndicator = (translateTo !== 'none' && provider !== 'deepgram') ? ` → ${translateTo.toUpperCase()}` : '';
+                        const translationIndicator = translateTo !== 'none' ? ` → ${translateTo.toUpperCase()}` : '';
                         secondaryLabelText = `${status.toUpperCase()} | ${language.toUpperCase()}${translationIndicator}`;
                     } else {
                         // For other decoder types, construct the label

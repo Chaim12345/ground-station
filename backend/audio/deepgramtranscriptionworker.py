@@ -24,10 +24,10 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-import aiohttp
 import numpy as np
 
 from audio.transcriptionworker import TranscriptionWorker
+from audio.translation import translate_text
 
 try:
     import websockets
@@ -93,9 +93,6 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
 
         # Deepgram API endpoint
         self.websocket_url = self._build_websocket_url()
-
-        # Google Translate API endpoint
-        self.translate_api_url = "https://translation.googleapis.com/language/translate/v2"
 
     def _build_websocket_url(self) -> str:
         """Build Deepgram WebSocket URL with query parameters"""
@@ -376,61 +373,11 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
             self.connected = False
 
     async def _translate_text(self, text: str, source_lang: str, target_lang: str) -> Optional[str]:
-        """
-        Translate text using Google Cloud Translation API REST endpoint.
-
-        Args:
-            text: Text to translate
-            source_lang: Source language code (e.g., "es", "fr")
-            target_lang: Target language code (e.g., "en", "de")
-
-        Returns:
-            Translated text or None if translation fails
-        """
-        if not self.google_translate_api_key:
-            logger.warning("Google Translate API key not configured, skipping translation")
-            return None
-
-        try:
-            # Prepare the request payload
-            payload = {
-                "q": text,
-                "target": target_lang,
-                "format": "text",
-            }
-
-            # Add source language if not auto-detect
-            if source_lang and source_lang != "auto":
-                payload["source"] = source_lang
-
-            # Make async HTTP request to Google Translate API
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.translate_api_url,
-                    params={"key": self.google_translate_api_key},
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=5.0),
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        translated_text: str = result["data"]["translations"][0]["translatedText"]
-                        logger.debug(
-                            f"Translated '{text}' from {source_lang} to {target_lang}: '{translated_text}'"
-                        )
-                        return translated_text
-                    else:
-                        error_text = await response.text()
-                        logger.error(
-                            f"Google Translate API error (status {response.status}): {error_text}"
-                        )
-                        return None
-
-        except asyncio.TimeoutError:
-            logger.warning("Google Translate API timeout, skipping translation")
-            return None
-        except Exception as e:
-            logger.error(f"Translation error: {e}", exc_info=True)
-            return None
+        """Translate with the shared Google Translate implementation."""
+        translated_text: Optional[str] = await translate_text(
+            text, source_lang, target_lang, self.google_translate_api_key, logger
+        )
+        return translated_text
 
     async def _emit_transcription(
         self, text: str, language: str, is_final: bool, confidence: Optional[float] = None

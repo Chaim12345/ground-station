@@ -34,6 +34,8 @@ DEFAULT_APP_CONFIG: Dict[str, Any] = {
     "max_tracker_targets": 10,
     "enable_soapy_discovery": False,
     "runonce_soapy_discovery": True,
+    # Shared Parakeet inference endpoint. New transcription workers use hot updates.
+    "parakeet_url": "",
     # Optional override list for satellite metadata API endpoints used during orbital sync.
     # If this list is empty, sync falls back to the original SatNOGS URL.
     "orbital_sync_satellite_metadata_urls": ["http://db.satnogs.org/api/satellites/?format=json"],

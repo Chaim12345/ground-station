@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from urllib.parse import urlsplit
 
 from common.appconfig import DEFAULT_APP_CONFIG
 from common.arguments import app_config_cli_overrides, arguments, resolved_app_config_path
@@ -164,6 +165,13 @@ FIELDS: Tuple[AppSettingField, ...] = (
         cli_flag="--runonce-soapy-discovery",
     ),
     AppSettingField(
+        key="parakeet_url",
+        value_type="string",
+        default=DEFAULT_APP_CONFIG["parakeet_url"],
+        description="Parakeet service base URL. Leave empty to disable it. Changes apply to new transcription workers.",
+        apply_mode="hot",
+    ),
+    AppSettingField(
         key="orbital_sync_satellite_metadata_urls",
         value_type="string_list",
         default=DEFAULT_APP_CONFIG["orbital_sync_satellite_metadata_urls"],
@@ -294,6 +302,28 @@ def _validate_value(field: AppSettingField, value: Any) -> ValidatedSettingValue
 
     if field.choices and coerced not in field.choices:
         raise ValueError(f"Value must be one of: {', '.join(map(str, field.choices))}")
+
+    # An empty URL disables Parakeet until an administrator configures an endpoint.
+    if field.key == "parakeet_url" and coerced:
+        parsed = urlsplit(str(coerced))
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or any(character.isspace() for character in str(coerced))
+        ):
+            raise ValueError(
+                "Enter an HTTP or HTTPS service URL without credentials or query parameters"
+            )
+        try:
+            port = parsed.port  # Accessing port rejects malformed port numbers.
+        except ValueError as exc:
+            raise ValueError("Enter a valid service port") from exc
+        if port == 0:
+            raise ValueError("Enter a valid service port")
 
     if isinstance(coerced, int):
         if field.minimum is not None and coerced < field.minimum:

@@ -107,6 +107,14 @@ const SETTINGS_GROUP_DEFS = [
         fieldKeys: ['enable_soapy_discovery', 'runonce_soapy_discovery'],
     },
     {
+        key: 'transcription',
+        titleKey: 'app_settings.group_transcription',
+        titleDefault: 'Transcription',
+        descriptionKey: 'app_settings.group_transcription_help',
+        descriptionDefault: 'Shared transcription service endpoints.',
+        fieldKeys: ['parakeet_url'],
+    },
+    {
         key: 'orbital_sync',
         titleKey: 'app_settings.group_orbital_sync',
         titleDefault: 'Orbital Sync Sources',

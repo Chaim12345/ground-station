@@ -150,6 +150,7 @@ const TRANSLATION_TARGET_OPTIONS = [
 const TRANSCRIPTION_PROVIDER_OPTIONS = [
     { value: 'gemini', labelKey: 'provider_gemini' },
     { value: 'deepgram', labelKey: 'provider_deepgram' },
+    { value: 'parakeet', labelKey: 'provider_parakeet' },
 ];
 
 const createEmptySession = () => ({
@@ -2367,6 +2368,12 @@ export default function MonitoredSatelliteDialog() {
                                                                     ))}
                                                                 </Select>
                                                             </FormControl>
+
+                                                            {task.config.provider === 'parakeet' && (
+                                                                <Typography variant="caption" color="text.secondary">
+                                                                    {t('scheduler_dialogs.shared.parakeet_help', { defaultValue: 'Parakeet uses the configured transcription service and detects supported languages automatically. Source language only guides optional Google translation.' })}
+                                                                </Typography>
+                                                            )}
 
                                                             <FormControl fullWidth size="small">
                                                                 <InputLabel>{t('scheduler_dialogs.shared.source_language_label')}</InputLabel>

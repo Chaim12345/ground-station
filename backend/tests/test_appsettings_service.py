@@ -130,3 +130,32 @@ def test_update_restart_required_setting_persists_but_does_not_hot_apply(tmp_pat
 
     written = _read_json(service.config_path)
     assert written["host"] == "127.0.0.1"
+
+
+def test_parakeet_url_hot_applies_and_rejects_invalid_urls(tmp_path, monkeypatch):
+    service = _build_service(tmp_path)
+    assert appsettings.DEFAULT_APP_CONFIG["parakeet_url"] == ""
+    monkeypatch.setattr(
+        appsettings.arguments,
+        "parakeet_url",
+        appsettings.DEFAULT_APP_CONFIG["parakeet_url"],
+        raising=False,
+    )
+
+    for invalid_url in ("file:///etc/passwd", "http://user@host", "http://host:bad"):
+        invalid = service.update({"parakeet_url": invalid_url})
+        assert invalid["success"] is False
+        assert "parakeet_url" in invalid["data"]["validation_errors"]
+
+    result = service.update({"parakeet_url": "https://new.example.test/parakeet"})
+    assert result["success"] is True
+    assert result["data"]["changed_hot_keys"] == ["parakeet_url"]
+    assert result["data"]["restart_required"] is False
+    assert appsettings.arguments.parakeet_url == "https://new.example.test/parakeet"
+    assert _read_json(service.config_path)["parakeet_url"] == "https://new.example.test/parakeet"
+
+    cleared = service.update({"parakeet_url": ""})
+    assert cleared["success"] is True
+    assert cleared["data"]["changed_hot_keys"] == ["parakeet_url"]
+    assert appsettings.arguments.parakeet_url == ""
+    assert _read_json(service.config_path)["parakeet_url"] == ""

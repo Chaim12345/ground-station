@@ -56,7 +56,7 @@ const AboutPage = () => {
         t('about.live_dsp_pipeline', { defaultValue: 'Live DSP Pipeline: Stream IQ to FFT/waterfall, demodulators, decoders, recorders, and browser consumers through queue-based worker orchestration.' }),
         t('about.iq_recording_sigmf_playback', { defaultValue: 'IQ Recording + SigMF Playback: Record IQ as .sigmf-data/.sigmf-meta with metadata, then replay through the same processing pipeline used for live SDR operation.' }),
         t('about.data_decoding_framing_protocols', { defaultValue: 'Data Decoding + Framing Protocols: Decode SSTV, FSK, GFSK, GMSK, BPSK, and GNSS paths with AX.25/USP/GEOSCAN framing support in packet pipelines.' }),
-        t('about.transcription_services', { defaultValue: 'Transcription Services: Real-time demodulated-audio transcription via Gemini Live or Deepgram, with optional translation and file output.' }),
+        t('about.transcription_services', { defaultValue: 'Transcription Services: Demodulated-audio transcription via Gemini Live, Deepgram, or Parakeet, with optional translation and file output.' }),
         t('about.scheduled_observations', { defaultValue: 'Scheduled Observations: APScheduler-driven AOS/LOS orchestration for automatic start/stop of tracking, SDR, decoding, recording, and transcription tasks.' }),
         t('about.satdump_post_processing', { defaultValue: 'SatDump Post-Processing: Optional SatDump processing for IQ recordings, including METEOR LRPT/HRPT workflows.' }),
         t('about.performance_monitoring', { defaultValue: 'Performance Monitoring: Stream live pipeline metrics including queue utilization, throughput, drops, and component health.' }),
@@ -95,7 +95,8 @@ const AboutPage = () => {
         { name: 'NASA/JPL Horizons API', description: t('about.ephemeris_vectors_and_observer_geometry_for_sola_2', { defaultValue: 'Ephemeris vectors and observer geometry for solar-system targets.' }), url: 'https://ssd-api.jpl.nasa.gov/doc/horizons.html' },
         { name: 'Deepgram Streaming API', description: t('about.realtime_speech_to_text_provider_for_demodulated', { defaultValue: 'Realtime speech-to-text provider for demodulated audio.' }), url: 'https://developers.deepgram.com/' },
         { name: 'Google Gemini Live API', description: t('about.realtime_transcription_provider_with_optional_tr', { defaultValue: 'Realtime transcription provider with optional translation workflows.' }), url: 'https://ai.google.dev/gemini-api/docs/live' },
-        { name: 'Google Cloud Translation API', description: t('about.optional_translation_for_deepgram_transcription_', { defaultValue: 'Optional translation for Deepgram transcription outputs.' }), url: 'https://cloud.google.com/translate/docs/reference/rest' },
+        { name: 'Parakeet', description: t('about.parakeet_transcription', { defaultValue: 'Self-hosted speech transcription for demodulated audio.' }), url: 'https://github.com/mudler/parakeet.cpp' },
+        { name: 'Google Cloud Translation API', description: t('about.optional_translation_for_deepgram_transcription_', { defaultValue: 'Optional translation for Deepgram and Parakeet transcription outputs.' }), url: 'https://cloud.google.com/translate/docs/reference/rest' },
     ];
 
     const sdrSupport = [

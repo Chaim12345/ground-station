@@ -141,7 +141,7 @@ single web interface.
 *   **SigMF Playback:** Replay recorded IQ through the same processing pipeline used for live SDR operation.
 *   **Data Decoding + Framing Protocols:** Supported decoder paths include SSTV, APRS, FSK, GFSK, GMSK, BPSK, and GNSS, with AX.25/USP/GEOSCAN framing support in the packet pipelines.
 *   **APRS Packet Decoding:** Dedicated raw-IQ APRS decoding with integrated NBFM/Bell 202 demodulation, AX.25 parsing, batch-boundary recovery, and decoded packet/metadata output files.
-*   **Transcription Services:** Real-time demodulated-audio transcription via Gemini Live or Deepgram, with optional translation and file output under `backend/data/transcriptions/`.
+*   **Transcription Services:** Demodulated-audio transcription via Gemini Live, Deepgram, or Parakeet, with optional translation and file output under `backend/data/transcriptions/`.
 *   **Scheduled Observations:** APScheduler-driven AOS/LOS orchestration for automatic start/stop of tracking, SDR, decoding, recording, and transcription tasks.
 *   **SatDump Post-Processing:** Optional SatDump processing for IQ recordings, including METEOR LRPT/HRPT pipelines.
 *   **Performance Monitoring:** Live pipeline metrics (queue utilization, throughput, drops, and component health) streamed to the frontend.
@@ -501,6 +501,13 @@ Configuration precedence is:
 3. built-in defaults (lowest priority)
 
 The UI also exposes when a value is currently CLI-overridden and whether a change is hot-applied or restart-required.
+
+The Parakeet transcription endpoint is the `parakeet_url` backend setting. It is empty by
+default; set it to the base URL of your Parakeet service in
+`Settings -> Settings -> Transcription` or in `app_config.json`. UI changes apply to new
+transcription workers without a backend restart; direct file edits require a restart. Active
+workers keep their current endpoint until they are stopped and started again. Parakeet
+transcription cannot start until a URL is configured.
 
 `/settings/preferences` is kept as a compatibility route and is now rendered as a tab inside the unified Settings page.
 

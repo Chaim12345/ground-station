@@ -24,7 +24,7 @@ class VFOState:
     vad_sensitivity: str = "medium"  # low, medium, high
     vad_close_delay_ms: int = 300  # 50-1000 ms hangover
     transcription_enabled: bool = False  # Enable/disable transcription for this VFO
-    transcription_provider: str = "gemini"  # Transcription provider (gemini, deepgram)
+    transcription_provider: str = "gemini"  # Transcription provider (gemini, deepgram, parakeet)
     transcription_language: str = "auto"  # Language code for transcription (auto-detect by default)
     transcription_translate_to: str = (
         "none"  # Target language for translation (none = no translation)

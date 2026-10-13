@@ -88,6 +88,8 @@
     "volume": "Volume",
     "transcribe": "Transcribe",
     "configure_gemini": "(Configure Gemini API in Settings)",
+    "parakeet_language_info": "Parakeet sends audio to the configured service and detects supported languages automatically. The source language selection is used only for translation.",
+    "external_translation_info": "Translation uses Google Translate API (configured in Settings).",
     "transcription_settings": "Transcription Settings",
     "language": "Language",
     "modes": {

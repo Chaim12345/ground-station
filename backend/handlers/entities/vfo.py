@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional, Union
 
 from sqlalchemy import select
 
+from common.arguments import arguments
 from crud.preferences import fetch_integration_preferences_map
 from db import AsyncSessionLocal
 from db.models import Satellites, Transmitters
@@ -351,6 +352,12 @@ async def toggle_transcription(
     translate_to = data.get("translateTo", "none")
     provider = data.get("provider", "gemini")  # Default to gemini for backward compatibility
 
+    if enabled and provider == "parakeet" and not str(arguments.parakeet_url or "").strip():
+        return {
+            "success": False,
+            "error": "Configure the Parakeet URL in Application Settings before enabling transcription",
+        }
+
     logger.debug(
         f"[VFO {vfo_number}] Transcription settings from frontend: "
         f"provider={provider}, language={language}, translate_to={translate_to}"
@@ -377,7 +384,7 @@ async def toggle_transcription(
         if not transcription_manager:
             logger.warning("Transcription manager not initialized, updating VFO state only")
         else:
-            # Fetch API key from preferences based on provider
+            # Fetch provider credentials and optional translation settings.
             try:
                 async with AsyncSessionLocal() as dbsession:
                     auth_context = get_auth_context() or {}
@@ -386,11 +393,12 @@ async def toggle_transcription(
                         dbsession, user_id=user_id
                     )
 
-                    # Get the appropriate API key based on provider
+                    provider_ready = False
                     if provider == "gemini":
                         api_key = preferences.get("gemini_api_key", "")
                         if api_key:
                             transcription_manager.set_gemini_api_key(api_key)
+                            provider_ready = True
                             logger.info("Updated transcription manager with Gemini API key")
                         else:
                             logger.warning("Gemini API key not configured in preferences")
@@ -398,6 +406,7 @@ async def toggle_transcription(
                         api_key = preferences.get("deepgram_api_key", "")
                         if api_key:
                             transcription_manager.set_deepgram_api_key(api_key)
+                            provider_ready = True
                             logger.info("Updated transcription manager with Deepgram API key")
 
                             # Set Google Translate API key for Deepgram translation
@@ -408,11 +417,15 @@ async def toggle_transcription(
                             )
                         else:
                             logger.warning("Deepgram API key not configured in preferences")
+                    elif provider == "parakeet":
+                        transcription_manager.set_google_translate_api_key(
+                            preferences.get("google_translate_api_key", "")
+                        )
+                        provider_ready = True
                     else:
                         logger.error(f"Unknown transcription provider: {provider}")
-                        api_key = None
 
-                    if api_key:
+                    if provider_ready:
                         # Fetch transmitter and satellite info
                         satellite_dict = None
                         transmitter_dict = None
@@ -449,7 +462,7 @@ async def toggle_transcription(
                             )
             except Exception as e:
                 logger.error(
-                    f"Error fetching API key for {provider}: {e}, updating VFO state only",
+                    f"Error preparing {provider} transcription: {e}, updating VFO state only",
                     exc_info=True,
                 )
 
