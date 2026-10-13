@@ -44,6 +44,41 @@ function createStore() {
 }
 
 describe('PurgeDialog', () => {
+    it('keeps one spinner visible across the opening preview requests', async () => {
+        const requests = [];
+        const socket = {
+            connected: true,
+            on: vi.fn(),
+            off: vi.fn(),
+            emit: vi.fn((_event, payload, callback) => requests.push({ payload, callback })),
+        };
+        const store = createStore();
+        renderWithProviders(<PurgeDialog open onClose={vi.fn()} socket={socket} />, { store });
+
+        await waitFor(() => expect(requests).toHaveLength(1));
+        expect(screen.getAllByRole('progressbar', { name: 'Scanning the library...' })).toHaveLength(1);
+
+        act(() => {
+            requests[0].callback({
+                success: true,
+                data: { ...AGGREGATE, cutoff: requests[0].payload.data.cutoff },
+            });
+        });
+        await waitFor(() => expect(store.getState().filebrowser.purge.previewLoading).toBe(false));
+        expect(screen.getAllByRole('progressbar', { name: 'Scanning the library...' })).toHaveLength(1);
+
+        await waitFor(() => expect(requests).toHaveLength(2), { timeout: 3000 });
+        act(() => {
+            requests[1].callback({
+                success: true,
+                data: { ...AGGREGATE, cutoff: requests[1].payload.data.cutoff },
+            });
+        });
+        await waitFor(() => {
+            expect(screen.queryByRole('progressbar', { name: 'Scanning the library...' })).not.toBeInTheDocument();
+        });
+    });
+
     it('shows preview aggregates and starts the purge after confirmation', async () => {
         const socket = mockSocket();
         const store = createStore();

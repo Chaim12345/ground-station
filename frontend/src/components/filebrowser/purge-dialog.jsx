@@ -140,7 +140,10 @@ const PurgeDialog = ({ open, onClose, socket }) => {
     const done = purge.done;
     const progress = purge.progress;
     const previewError = purge.previewError;
-    const busy = running || purge.previewLoading;
+    // Opening needs a domain preview followed by the selected-cutoff preview.
+    // Keep the overlay mounted between those requests so it does not flash twice.
+    const busy = running || purge.previewLoading
+        || (socket?.connected && !!domain && !usablePreview && !previewError);
 
     const retryPreview = () => {
         if (!socket?.connected) return;
