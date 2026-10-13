@@ -113,6 +113,7 @@ admin_only_commands = {
 admin_only_prefixes = (
     "database-backup.",
     "transmitter-import.",
+    "users.",
 )
 
 

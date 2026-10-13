@@ -24,6 +24,28 @@ const SETUP_MODE_NONE = 'none';
 const SETUP_MODE_FULL = 'full_setup';
 const SETUP_MODE_ADMIN_RECOVERY = 'admin_recovery';
 
+const callUsersApi = async (socket, cmd, data = null) => {
+    if (!socket?.connected) {
+        throw new Error('Socket is disconnected. Reconnect before managing users.');
+    }
+    try {
+        const reply = await socket.timeout(20000).emitWithAck('api.call', { cmd, data });
+        if (!reply?.success) {
+            throw new Error(reply?.error || 'User-management request failed.');
+        }
+        if (cmd === 'users.list' ? !Array.isArray(reply.data) : !reply.data?.id) {
+            throw new Error('Invalid user-management response.');
+        }
+        return reply.data;
+    } catch (error) {
+        // A timed-out mutation may have committed; prompt a refresh before any retry.
+        if (/timed out/i.test(error?.message || '')) {
+            throw new Error('Request timed out. Refresh the users list before retrying.');
+        }
+        throw error;
+    }
+};
+
 const parseErrorMessage = async (response, fallbackMessage = 'Request failed.') => {
     try {
         const payload = await response.json();
@@ -124,18 +146,9 @@ export const logoutUser = createAsyncThunk(
 
 export const fetchUsers = createAsyncThunk(
     'auth/fetchUsers',
-    async (_unused, { rejectWithValue }) => {
+    async ({ socket }, { rejectWithValue }) => {
         try {
-            const response = await fetch(`${AUTH_API_BASE}/users`, {
-                method: 'GET',
-                headers: buildHeaders(false),
-                credentials: 'same-origin',
-            });
-            if (!response.ok) {
-                return rejectWithValue(await parseErrorMessage(response, 'Failed to fetch users.'));
-            }
-            const payload = await response.json();
-            return Array.isArray(payload?.data) ? payload.data : [];
+            return await callUsersApi(socket, 'users.list');
         } catch (error) {
             return rejectWithValue(error?.message || 'Failed to fetch users.');
         }
@@ -144,19 +157,9 @@ export const fetchUsers = createAsyncThunk(
 
 export const createUser = createAsyncThunk(
     'auth/createUser',
-    async ({ username, password, role }, { rejectWithValue }) => {
+    async ({ socket, username, password, role }, { rejectWithValue }) => {
         try {
-            const response = await fetch(`${AUTH_API_BASE}/users`, {
-                method: 'POST',
-                headers: buildHeaders(true),
-                credentials: 'same-origin',
-                body: JSON.stringify({ username, password, role }),
-            });
-            if (!response.ok) {
-                return rejectWithValue(await parseErrorMessage(response, 'Failed to create user.'));
-            }
-            const payload = await response.json();
-            return payload?.data || null;
+            return await callUsersApi(socket, 'users.create', { username, password, role });
         } catch (error) {
             return rejectWithValue(error?.message || 'Failed to create user.');
         }
@@ -165,19 +168,13 @@ export const createUser = createAsyncThunk(
 
 export const updateUser = createAsyncThunk(
     'auth/updateUser',
-    async ({ userId, role, isActive }, { rejectWithValue }) => {
+    async ({ socket, userId, role, isActive }, { rejectWithValue }) => {
         try {
-            const response = await fetch(`${AUTH_API_BASE}/users/${userId}`, {
-                method: 'PATCH',
-                headers: buildHeaders(true),
-                credentials: 'same-origin',
-                body: JSON.stringify({ role, is_active: isActive }),
+            return await callUsersApi(socket, 'users.update', {
+                user_id: userId,
+                role,
+                is_active: isActive,
             });
-            if (!response.ok) {
-                return rejectWithValue(await parseErrorMessage(response, 'Failed to update user.'));
-            }
-            const payload = await response.json();
-            return payload?.data || null;
         } catch (error) {
             return rejectWithValue(error?.message || 'Failed to update user.');
         }
@@ -186,21 +183,9 @@ export const updateUser = createAsyncThunk(
 
 export const resetUserPassword = createAsyncThunk(
     'auth/resetUserPassword',
-    async ({ userId, password }, { rejectWithValue }) => {
+    async ({ socket, userId, password }, { rejectWithValue }) => {
         try {
-            const response = await fetch(`${AUTH_API_BASE}/users/${userId}/reset-password`, {
-                method: 'POST',
-                headers: buildHeaders(true),
-                credentials: 'same-origin',
-                body: JSON.stringify({ password }),
-            });
-            if (!response.ok) {
-                return rejectWithValue(
-                    await parseErrorMessage(response, 'Failed to reset user password.')
-                );
-            }
-            const payload = await response.json();
-            return payload?.data || null;
+            return await callUsersApi(socket, 'users.reset_password', { user_id: userId, password });
         } catch (error) {
             return rejectWithValue(error?.message || 'Failed to reset user password.');
         }
@@ -209,18 +194,9 @@ export const resetUserPassword = createAsyncThunk(
 
 export const deleteUser = createAsyncThunk(
     'auth/deleteUser',
-    async ({ userId }, { rejectWithValue }) => {
+    async ({ socket, userId }, { rejectWithValue }) => {
         try {
-            const response = await fetch(`${AUTH_API_BASE}/users/${userId}`, {
-                method: 'DELETE',
-                headers: buildHeaders(false),
-                credentials: 'same-origin',
-            });
-            if (!response.ok) {
-                return rejectWithValue(await parseErrorMessage(response, 'Failed to delete user.'));
-            }
-            const payload = await response.json();
-            return payload?.data || { id: userId };
+            return await callUsersApi(socket, 'users.delete', { user_id: userId });
         } catch (error) {
             return rejectWithValue(error?.message || 'Failed to delete user.');
         }

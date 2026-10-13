@@ -79,20 +79,17 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
-        '/socket.io/': {  // For regular HTTP API requests
+        // Engine.IO checks Origin against Host for both polling and WebSocket requests.
+        // Preserve the browser-facing headers through the development proxy.
+        '/socket.io/': {
           target: `http://${backendHost}:${backendPort}`,
           ws: true,
-          changeOrigin: true,
           secure: false,
         },
         '/ws': {
-          target: `http://${backendHost}:5000`,
+          target: `http://${backendHost}:${backendPort}`,
           ws: true,
-          changeOrigin: true,
           secure: false,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-          }
         },
       },
     },

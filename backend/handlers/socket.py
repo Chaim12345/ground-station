@@ -23,6 +23,7 @@ from handlers.entities import (
     systeminfo,
     tracking,
     transmitters,
+    users,
     vfo,
 )
 from handlers.routing import dispatch_request, handler_registry
@@ -54,6 +55,7 @@ def _register_all_handlers():
     filebrowser.register_handlers(handler_registry)
     library.register_handlers(handler_registry)
     control.register_handlers(handler_registry)
+    users.register_handlers(handler_registry)
 
 
 # Register all handlers at module load time.

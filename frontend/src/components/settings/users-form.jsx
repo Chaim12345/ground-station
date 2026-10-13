@@ -44,6 +44,7 @@ import { alpha } from '@mui/material/styles';
 import { useDispatch, useSelector } from 'react-redux';
 import { toast } from '../../utils/toast-with-timestamp.jsx';
 import { toRowSelectionModel, toSelectedIds } from '../../utils/datagrid-selection.js';
+import { useSocket } from '../common/socket.jsx';
 import SelectionActionBar from '../hardware/selection-action-bar.jsx';
 import {
     createUser,
@@ -81,7 +82,9 @@ function formatDateTime(value) {
 function UsersForm() {
     const { t } = useTranslation('settings');
     const dispatch = useDispatch();
+    const { socket } = useSocket();
     const authState = useSelector((state) => state.auth);
+    const socketConnected = useSelector((state) => state.dashboard?.connected);
     const isAdmin = String(authState?.user?.role || '').toLowerCase() === 'admin';
     const users = Array.isArray(authState.users) ? authState.users : [];
 
@@ -104,9 +107,9 @@ function UsersForm() {
     const isBusy = Boolean(authState.usersLoading || authState.loadingAction);
 
     React.useEffect(() => {
-        if (!isAdmin) return;
-        dispatch(fetchUsers());
-    }, [dispatch, isAdmin]);
+        if (!isAdmin || !socketConnected || !socket) return;
+        dispatch(fetchUsers({ socket }));
+    }, [dispatch, isAdmin, socket, socketConnected]);
 
     const columns = [
         { field: 'username', headerName: 'Username', flex: 1, minWidth: 180 },
@@ -198,6 +201,7 @@ function UsersForm() {
         if (!isEditing) {
             const createAction = await dispatch(
                 createUser({
+                    socket,
                     username: String(userForm.username || '').trim(),
                     password: userForm.password,
                     role: userForm.role,
@@ -215,6 +219,7 @@ function UsersForm() {
 
         const updateAction = await dispatch(
             updateUser({
+                socket,
                 userId: userForm.id,
                 role: userForm.role,
                 isActive: userForm.isActive,
@@ -230,6 +235,7 @@ function UsersForm() {
         if (userForm.password) {
             const resetAction = await dispatch(
                 resetUserPassword({
+                    socket,
                     userId: userForm.id,
                     password: userForm.password,
                 })
@@ -251,7 +257,7 @@ function UsersForm() {
         let hadError = false;
 
         for (const userId of selected) {
-            const action = await dispatch(deleteUser({ userId }));
+            const action = await dispatch(deleteUser({ socket, userId }));
             if (!deleteUser.fulfilled.match(action)) {
                 hadError = true;
                 toast.error(action.payload || action.error?.message || 'Failed to delete user.');

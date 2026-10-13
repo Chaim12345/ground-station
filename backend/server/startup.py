@@ -345,9 +345,10 @@ async def lifespan(fastapiapp: FastAPI):
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins="*",
+    # The default Engine.IO policy accepts only same-origin browser connections.
     logger=True,
-    engineio_logger=True,
+    # Engine.IO packet logging includes complete payloads, including passwords.
+    engineio_logger=False,
     binary=True,
     max_http_buffer_size=SOCKET_IO_MAX_PAYLOAD_BYTES,
     ping_interval=SOCKET_IO_PING_INTERVAL_SECONDS,
@@ -751,92 +752,6 @@ async def api_artifact(artifact_id: str, request: Request):
     return {"data": item}
 
 
-@app.get("/api/auth/users")
-async def auth_list_users(request: Request):
-    """Admin endpoint: list all users."""
-    await _require_request_auth(request, require_auth=True, require_admin=True)
-    return await authsvc.list_users()
-
-
-@app.post("/api/auth/users")
-async def auth_create_user(request: Request):
-    """Admin endpoint: create a new user account."""
-    auth_context = await _require_request_auth(request, require_auth=True, require_admin=True)
-    if auth_context is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-    payload = await request.json()
-    result = await authsvc.create_user(
-        username=str(payload.get("username") or ""),
-        password=str(payload.get("password") or ""),
-        role=str(payload.get("role") or ""),
-        actor_user_id=str(auth_context.get("user_id")),
-    )
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=400, detail=str(result.get("error") or "Failed to create user.")
-        )
-    return result
-
-
-@app.patch("/api/auth/users/{user_id}")
-async def auth_update_user(user_id: str, request: Request):
-    """Admin endpoint: update role and activation state for a user."""
-    auth_context = await _require_request_auth(request, require_auth=True, require_admin=True)
-    if auth_context is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-    payload = await request.json()
-    role = payload.get("role", None)
-    is_active = payload.get("is_active", None)
-    result = await authsvc.update_user(
-        user_id=user_id,
-        role=role,
-        is_active=is_active,
-        actor_user_id=str(auth_context.get("user_id")),
-    )
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=400, detail=str(result.get("error") or "Failed to update user.")
-        )
-    return result
-
-
-@app.post("/api/auth/users/{user_id}/reset-password")
-async def auth_reset_user_password(user_id: str, request: Request):
-    """Admin endpoint: reset a user password and revoke active sessions."""
-    auth_context = await _require_request_auth(request, require_auth=True, require_admin=True)
-    if auth_context is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-    payload = await request.json()
-    result = await authsvc.reset_user_password(
-        user_id=user_id,
-        new_password=str(payload.get("password") or ""),
-        actor_user_id=str(auth_context.get("user_id")),
-    )
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=400,
-            detail=str(result.get("error") or "Failed to reset user password."),
-        )
-    return result
-
-
-@app.delete("/api/auth/users/{user_id}")
-async def auth_delete_user(user_id: str, request: Request):
-    """Admin endpoint: delete a user account."""
-    auth_context = await _require_request_auth(request, require_auth=True, require_admin=True)
-    if auth_context is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-    result = await authsvc.delete_user(
-        user_id=user_id,
-        actor_user_id=str(auth_context.get("user_id")),
-    )
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=400, detail=str(result.get("error") or "Failed to delete user.")
-        )
-    return result
-
-
 @app.post("/api/database/restore")
 async def restore_database_backup(request: Request):
     """Restore an admin-uploaded SQL backup without placing it in browser or Socket.IO memory."""
@@ -1050,6 +965,10 @@ async def download_observation_bundle(
 # This catch-all route comes AFTER specific API routes
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
+    # Unknown API URLs must fail as API calls rather than return the SPA HTML.
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API endpoint not found.")
+
     static_files_dir = os.environ.get("STATIC_FILES_DIR", "../../frontend/dist")
     base_dir = Path(static_files_dir).resolve()
 

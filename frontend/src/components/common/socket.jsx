@@ -28,6 +28,17 @@ import {setSocketForMiddleware} from '../waterfall/vfo-marker/vfo-middleware.jsx
 // Create the context
 const SocketContext = createContext();
 
+export const redactSocketDebugArgs = (eventName, args) => {
+    if (eventName !== 'api.call' || !['users.create', 'users.reset_password'].includes(args[0]?.cmd)) {
+        return args;
+    }
+    // Only the event-console copy is redacted. Socket.IO still receives the real password.
+    return [{
+        ...args[0],
+        data: { ...args[0].data, password: '[REDACTED]' },
+    }, ...args.slice(1)];
+};
+
 // Provider component
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
@@ -304,7 +315,7 @@ export const SocketProvider = ({ children }) => {
                     const ts = Date.now();
                     debugListenersRef.current.forEach(entry => {
                         if (entry.includeOutgoing) {
-                            try { entry.fn({ direction: 'out', event: eventName, args, ts }); } catch (e) { /* noop */ }
+                            try { entry.fn({ direction: 'out', event: eventName, args: redactSocketDebugArgs(eventName, args), ts }); } catch (e) { /* noop */ }
                         }
                     });
                 }

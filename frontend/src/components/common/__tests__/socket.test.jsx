@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useSocket, SocketProvider } from '../socket';
+import { useSocket, SocketProvider, redactSocketDebugArgs } from '../socket';
 
 // Mock socket.io-client - define the mock inline in the factory function
 vi.mock('socket.io-client', () => ({
@@ -42,6 +42,14 @@ vi.mock('socket.io-client', () => ({
 }));
 
 describe('SocketProvider', () => {
+  it('redacts admin passwords from event-console copies without changing the sent payload', () => {
+    const payload = { cmd: 'users.reset_password', data: { user_id: 'user-1', password: 'private' } };
+    const args = [payload];
+
+    expect(redactSocketDebugArgs('api.call', args)[0].data.password).toBe('[REDACTED]');
+    expect(payload.data.password).toBe('private');
+  });
+
   it('provides socket instance to children', () => {
     const wrapper = ({ children }) => (
       <SocketProvider>{children}</SocketProvider>
