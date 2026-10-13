@@ -203,7 +203,7 @@ export default function ApiTokensPage() {
                                             </Typography>
                                         </Box>
                                         {token.status === 'active' && (
-                                            <Stack direction="row">
+                                            <Stack direction="row" alignItems="center">
                                                 <IconButton size="small" aria-label={t('api_tokens.rename', { defaultValue: 'Rename token' })}
                                                     onClick={() => { setError(''); setRenameTarget(token); setRenameValue(token.name); }}>
                                                     <EditOutlinedIcon fontSize="small" />
@@ -290,13 +290,13 @@ export default function ApiTokensPage() {
                             </Typography>
                         </Stack>
                     </DialogTitle>
-                    <DialogContent sx={{ pt: '10px !important' }}>
+                    <DialogContent sx={{ pt: '24px !important' }}>
                         <Alert severity="warning" variant="outlined" sx={{ mb: 2 }}>
                             {t('api_tokens.verify_message', { defaultValue: 'API tokens grant access to your station. Enter your current password to confirm this token.' })}
                         </Alert>
                         {verificationError && <Alert severity="error" sx={{ mb: 2 }}>{verificationError}</Alert>}
                         <TextField label={t('api_tokens.password', { defaultValue: 'Current password' })}
-                            type="password" autoComplete="current-password" value={password} autoFocus fullWidth
+                            type="password" autoComplete="current-password" value={password} autoFocus fullWidth size="small"
                             onChange={(event) => setPassword(event.target.value)} />
                     </DialogContent>
                     <DialogActions sx={{ px: 3, pb: 2 }}>
