@@ -23,6 +23,45 @@ def test_get_full_version_info_includes_server_time_fields():
     assert abs(parsed_iso_epoch_ms - info["serverTimeEpochMs"]) < 5000
 
 
+@pytest.mark.unit
+def test_build_version_info_falls_back_when_docker_args_are_empty(monkeypatch, tmp_path):
+    version_file = tmp_path / "version-info.json"
+    monkeypatch.setattr(version, "VERSION_FILE_PATH", str(version_file))
+    monkeypatch.setattr(version, "get_version_base", lambda: "1.2.3")
+    monkeypatch.setattr(version, "get_build_date", lambda: "20261013")
+    monkeypatch.setattr(version, "get_git_revision_short_hash", lambda: "abc123")
+    monkeypatch.setenv("GS_ENVIRONMENT", "production")
+    monkeypatch.setenv("BUILD_VERSION", "")
+    monkeypatch.setenv("BUILD_DATE", "")
+    monkeypatch.setenv("GIT_COMMIT", "")
+
+    generated = version.write_version_info_during_build()
+
+    assert generated == {
+        "version": "1.2.3-20261013-abc123",
+        "buildDate": "20261013",
+        "gitCommit": "abc123",
+        "environment": "production",
+    }
+    assert version.get_version_info() == generated
+
+
+@pytest.mark.unit
+def test_build_version_info_keeps_supplied_docker_args(monkeypatch, tmp_path):
+    monkeypatch.setattr(version, "VERSION_FILE_PATH", str(tmp_path / "version-info.json"))
+    monkeypatch.setenv("GS_ENVIRONMENT", "production")
+    monkeypatch.setenv("BUILD_VERSION", "1.2.3")
+    monkeypatch.setenv("BUILD_DATE", "20261013")
+    monkeypatch.setenv("GIT_COMMIT", "abc123")
+
+    assert version.write_version_info_during_build() == {
+        "version": "1.2.3",
+        "buildDate": "20261013",
+        "gitCommit": "abc123",
+        "environment": "production",
+    }
+
+
 def test_get_system_info_includes_footer_host_details():
     info = get_system_info(nonblocking_cpu=True)
 

@@ -212,32 +212,21 @@ def get_version_info():
     # Determine environment (development by default)
     environment = os.environ.get("GS_ENVIRONMENT", "development")
 
-    # Check if version is provided by environment (e.g., from the CI pipeline)
-    if "BUILD_VERSION" in os.environ:
-        version_info = {
-            "version": os.environ["BUILD_VERSION"],
-            "buildDate": os.environ.get("BUILD_DATE", get_build_date()),
-            "gitCommit": os.environ.get("GIT_COMMIT", "unknown"),
-            "environment": environment,
-        }
-    else:
-        # Otherwise generate a version from components
-        git_hash = get_git_revision_short_hash()
-        build_date = get_build_date()
+    # Docker sets these variables to empty strings when build args are omitted.
+    build_date = os.environ.get("BUILD_DATE") or get_build_date()
+    git_hash = os.environ.get("GIT_COMMIT") or get_git_revision_short_hash()
+    version = os.environ.get("BUILD_VERSION")
+    if not version:
         version_base = get_version_base()
-
-        # Include environment indicator in dev builds
         env_suffix = "" if environment == "production" else f"-{environment}"
         version = f"{version_base}{env_suffix}-{build_date}-{git_hash}"
 
-        version_info = {
-            "version": version,
-            "buildDate": build_date,
-            "gitCommit": git_hash,
-            "environment": environment,
-        }
-
-    return version_info
+    return {
+        "version": version,
+        "buildDate": build_date,
+        "gitCommit": git_hash,
+        "environment": environment,
+    }
 
 
 def _get_cpu_usage_percent_nonblocking(prime: bool = False) -> float:

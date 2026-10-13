@@ -587,8 +587,8 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV BUILD_VERSION=${BUILD_VERSION}
 ENV GS_ENVIRONMENT=${GS_ENVIRONMENT}
 
-# Run the version info file creation utility with an override, the git commit hash
-RUN cd /app/backend && python -c "import os; from server.version import write_version_info_during_build; write_version_info_during_build({'gitCommit': os.environ.get('GIT_COMMIT', 'unknown')})"
+# Capture the version metadata after build args have been applied.
+RUN cd /app/backend && python -c "from server.version import write_version_info_during_build; write_version_info_during_build()"
 
 # Configure backend to serve static files
 # Create a volume for persistent data (database, recordings, snapshots, UHD images)
