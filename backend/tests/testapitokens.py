@@ -5,9 +5,13 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from common import apitokens, auth
+from common.events import EventBroker, public_events
+from crud import monitoredsatellites as monitored_crud
+from crud import scheduledobservations as observation_crud
 from db.models import (
     AuthSessions,
     MonitoredSatellites,
@@ -445,3 +449,143 @@ async def test_every_public_route_requires_a_pat_and_its_scope(token_store, monk
         )
         assert artifact_page.json()["page"] == 2
         assert artifact_page.json()["page_size"] == 1
+
+
+def _event_request(secret: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/events",
+            "headers": [(b"authorization", f"Bearer {secret}".encode())],
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_public_event_stream_scopes_changes_and_revocation(token_store, monkeypatch):
+    spec = startup.app.openapi()["paths"]["/api/v1/events"]["get"]
+    assert spec["security"]
+    assert "text/event-stream" in spec["responses"]["200"]["content"]
+
+    owner_id, browser_secret = await _make_user(token_store, "events-owner")
+    full = await apitokens.create_token(
+        owner_id, "password123", "Event consumer", ["station:read", "observations:read"]
+    )
+    unrelated = await apitokens.create_token(
+        owner_id, "password123", "Artifacts only", ["artifacts:read"]
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
+        assert (await client.get("/api/v1/events")).status_code == 401
+        assert (
+            await client.get(
+                "/api/v1/events", cookies={auth.AUTH_SESSION_COOKIE_NAME: browser_secret}
+            )
+        ).status_code == 401
+        assert (
+            await client.get(
+                "/api/v1/events", headers={"Authorization": f"Bearer {unrelated['token']}"}
+            )
+        ).status_code == 403
+
+    now = datetime.now(timezone.utc)
+    async with token_store() as session:
+        session.add(Satellites(norad_id=25544, name="ISS", source="manual"))
+        session.add(
+            MonitoredSatellites(
+                id="sse-monitor",
+                norad_id=25544,
+                enabled=False,
+                satellite_config={"name": "ISS"},
+                hardware_config={},
+                generation_config={},
+                sessions=[],
+            )
+        )
+        session.add(
+            ScheduledObservations(
+                id="sse-test",
+                name="ISS pass",
+                norad_id=25544,
+                enabled=True,
+                status=ObservationStatus.SCHEDULED,
+                event_start=now + timedelta(hours=1),
+                event_end=now + timedelta(hours=1, minutes=10),
+                satellite_config={"name": "ISS"},
+                pass_config={},
+                hardware_config={},
+                sessions=[],
+            )
+        )
+        await session.commit()
+
+    response = await startup.api_events(_event_request(full["token"]))
+    assert response.media_type == "text/event-stream"
+    assert response.headers["x-accel-buffering"] == "no"
+    chunks = response.body_iterator
+    try:
+        assert await anext(chunks) == "retry: 3000\n\n"
+        assert 'event: connected\ndata: {"replay":false}' in await anext(chunks)
+        assert '"observation_state":"idle"' in await anext(chunks)
+
+        async with token_store() as session:
+            result = await observation_crud.update_scheduled_observation_status(
+                session, "sse-test", "running"
+            )
+        assert result["success"] is True
+        assert 'event: observations.changed\ndata: {"id":"sse-test","status":"running"}' in (
+            await anext(chunks)
+        )
+        assert '"observation_state":"observing"' in await anext(chunks)
+
+        async with token_store() as session:
+            result = await monitored_crud.toggle_monitored_satellite_enabled(
+                session, "sse-monitor", True
+            )
+        assert result["success"] is True
+        assert '"monitored_satellite_count":1' in await anext(chunks)
+
+        assert await apitokens.revoke_token(owner_id, full["data"]["id"])
+        monkeypatch.setattr(startup, "EVENT_STREAM_CHECK_INTERVAL_SECONDS", 0)
+        with pytest.raises(StopAsyncIteration):
+            await anext(chunks)
+    finally:
+        await chunks.aclose()
+
+
+@pytest.mark.asyncio
+async def test_observation_only_stream_and_bounded_subscribers(token_store):
+    owner_id, _ = await _make_user(token_store, "observation-events")
+    token = await apitokens.create_token(
+        owner_id, "password123", "Observation listener", ["observations:read"]
+    )
+    response = await startup.api_events(_event_request(token["token"]))
+    chunks = response.body_iterator
+    try:
+        assert await anext(chunks) == "retry: 3000\n\n"
+        assert "event: connected" in await anext(chunks)
+        subscription = next(
+            subscriber
+            for subscriber in public_events._subscribers
+            if subscriber.token_id == token["data"]["id"]
+        )
+        public_events.status_changed()
+        assert subscription.queue.empty()
+        public_events.observations_changed()
+        assert await anext(chunks) == "event: observations.changed\ndata: {}\n\n"
+        assert subscription.queue.empty()
+    finally:
+        await chunks.aclose()
+
+    broker = EventBroker()
+    subscribers = [broker.subscribe("same-token", ["station:read"]) for _ in range(5)]
+    with pytest.raises(ValueError, match="Too many open"):
+        broker.subscribe("same-token", ["station:read"])
+    broker.unsubscribe(subscribers[-1])
+    replacement = broker.subscribe("same-token", ["station:read"])
+    for _ in range(33):
+        broker.status_changed()
+    assert subscribers[0].queue.get_nowait() is None
+    broker.unsubscribe(replacement)

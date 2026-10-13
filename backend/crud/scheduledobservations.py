@@ -22,6 +22,7 @@ from sqlalchemy import delete, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.common import logger, serialize_object
+from common.events import public_events
 from db.models import ScheduledObservations
 from observations.constants import STATUS_SCHEDULED
 
@@ -266,6 +267,7 @@ async def add_scheduled_observation(session: AsyncSession, data: dict) -> dict:
         stmt = insert(ScheduledObservations).values(**db_data).returning(ScheduledObservations)
         result = await session.execute(stmt)
         await session.commit()
+        public_events.observations_changed(data.get("id"))
 
         new_observation = result.scalar_one()
         new_observation = serialize_object(new_observation)
@@ -307,6 +309,7 @@ async def edit_scheduled_observation(session: AsyncSession, data: dict) -> dict:
         updated_observation = result.scalar_one_or_none()
         if not updated_observation:
             return {"success": False, "error": f"Observation not found: {observation_id}"}
+        public_events.observations_changed(observation_id)
 
         updated_observation = serialize_object(updated_observation)
         updated_observation = _transform_from_db_format(updated_observation)
@@ -340,6 +343,7 @@ async def toggle_scheduled_observation_enabled(
         updated_observation = result.scalar_one_or_none()
         if not updated_observation:
             return {"success": False, "error": f"Observation not found: {observation_id}"}
+        public_events.observations_changed(observation_id)
 
         return {"success": True, "data": {"id": observation_id, "enabled": enabled}}
 
@@ -384,8 +388,10 @@ async def update_scheduled_observation_status(
             .where(ScheduledObservations.id == observation_id)
             .values(**update_data)
         )
-        await session.execute(stmt)
+        result = await session.execute(stmt)
         await session.commit()
+        if result.rowcount:
+            public_events.observations_changed(observation_id, status)
 
         return {"success": True, "data": {"id": observation_id, "status": status}, "error": None}
 
@@ -459,6 +465,8 @@ async def delete_scheduled_observations(session: AsyncSession, ids: List[str]) -
         await session.commit()
 
         deleted_count = result.rowcount
+        if deleted_count:
+            public_events.observations_changed()
         return {"success": True, "data": {"deleted": deleted_count}, "error": None}
 
     except Exception as e:

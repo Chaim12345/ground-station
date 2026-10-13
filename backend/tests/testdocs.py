@@ -27,6 +27,7 @@ async def test_api_docs_theme_and_schema_routes():
         "/api/v1/me",
         "/api/v1/station",
         "/api/v1/status",
+        "/api/v1/events",
         "/api/v1/observations",
         "/api/v1/observations/upcoming",
         "/api/v1/observations/{observation_id}",

@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.common import logger, serialize_object
+from common.events import public_events
 from db.models import MonitoredSatellites, ScheduledObservations
 
 # Compiled regex patterns for parsing integrity errors
@@ -215,6 +216,7 @@ async def add_monitored_satellite(session: AsyncSession, data: dict) -> dict:
         stmt = insert(MonitoredSatellites).values(**db_data).returning(MonitoredSatellites)
         result = await session.execute(stmt)
         await session.commit()
+        public_events.status_changed()
 
         new_satellite = result.scalar_one()
         new_satellite = serialize_object(new_satellite)
@@ -282,6 +284,7 @@ async def edit_monitored_satellite(session: AsyncSession, data: dict) -> dict:
         )
         result = await session.execute(stmt)
         await session.commit()
+        public_events.status_changed()
 
         updated_satellite = result.scalar_one_or_none()
         if not updated_satellite:
@@ -345,6 +348,7 @@ async def toggle_monitored_satellite_enabled(
         )
         result = await session.execute(stmt)
         await session.commit()
+        public_events.status_changed()
 
         updated_satellite = result.scalar_one_or_none()
         if not updated_satellite:
@@ -393,6 +397,10 @@ async def delete_monitored_satellites(
         stmt = delete(MonitoredSatellites).where(MonitoredSatellites.id.in_(ids))
         result = await session.execute(stmt)
         await session.commit()
+        if deleted_observations_count:
+            public_events.observations_changed()
+        else:
+            public_events.status_changed()
 
         deleted_count = result.rowcount
         return {

@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import json
 import os
 import queue
 import tempfile
@@ -7,13 +8,13 @@ import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, AsyncIterator, Dict, Optional, Set
 
 import socketio
 from engineio.payload import Payload
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
@@ -25,6 +26,7 @@ from common import apitokens
 from common import auth as authsvc
 from common.arguments import arguments
 from common.audio_queue_config import get_audio_queue_config
+from common.events import Subscription, public_events
 from common.logger import logger
 from crud.scheduledobservations import fetch_scheduled_observations
 from db import AsyncSessionLocal, engine
@@ -84,6 +86,7 @@ Payload.max_decode_packet_size = SOCKET_IO_MAX_PAYLOAD_BYTES
 FULL_RESTORE_MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024  # 1GB
 AUTH_COOKIE_MAX_AGE_DEFAULT_SECONDS = 15 * 24 * 60 * 60
 AUTH_COOKIE_MAX_AGE_KEEP_ACTIVE_SECONDS = 365 * 24 * 60 * 60
+EVENT_STREAM_CHECK_INTERVAL_SECONDS = 15
 
 # At the top of the file, add a global to track background tasks
 background_tasks: Set[asyncio.Task] = set()
@@ -676,14 +679,8 @@ async def api_station(request: Request):
     }
 
 
-@app.get(
-    "/api/v1/status",
-    dependencies=[Depends(api_bearer_scheme)],
-    summary="Get current station activity",
-)
-async def api_status(request: Request):
-    """Return activity, active observation count, next scheduled observation, and monitored satellite count. Useful for Home Assistant polling; manual radio activity may not change this state. Requires `station:read`."""
-    await _require_api_token(request, "station:read")
+async def _load_public_status() -> Dict[str, Any]:
+    """Build the same status snapshot for REST polling and the event stream."""
     now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
         active_count = await session.scalar(
@@ -713,6 +710,103 @@ async def api_status(request: Request):
         "next_observation_at": next_start.isoformat() if next_start else None,
         "monitored_satellite_count": monitored_count or 0,
     }
+
+
+@app.get(
+    "/api/v1/status",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get current station activity",
+)
+async def api_status(request: Request):
+    """Return activity, active observation count, next scheduled observation, and monitored satellite count. Useful for Home Assistant polling; manual radio activity may not change this state. Requires `station:read`."""
+    await _require_api_token(request, "station:read")
+    return await _load_public_status()
+
+
+def _sse_event(name: str, data: Dict[str, Any]) -> str:
+    return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
+
+
+def _status_values(status: Dict[str, Any]) -> Dict[str, Any]:
+    # server_time changes on every read; it is not itself a station change.
+    return {key: value for key, value in status.items() if key != "server_time"}
+
+
+async def _stream_api_events(
+    raw_token: str, token_id: str, subscription: Subscription
+) -> AsyncIterator[str]:
+    loop = asyncio.get_running_loop()
+    last_auth_check = loop.time()
+    last_status: Optional[Dict[str, Any]] = None
+    try:
+        # No event IDs are sent: this process-local stream does not promise replay.
+        yield "retry: 3000\n\n"
+        yield _sse_event("connected", {"replay": False})
+        if "station:read" in subscription.scopes:
+            status = await _load_public_status()
+            last_status = _status_values(status)
+            yield _sse_event("station.status", status)
+
+        while True:
+            try:
+                remaining = max(
+                    0.0, EVENT_STREAM_CHECK_INTERVAL_SECONDS - (loop.time() - last_auth_check)
+                )
+                item = await asyncio.wait_for(subscription.queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                item = ("_heartbeat", {})
+
+            if loop.time() - last_auth_check >= EVENT_STREAM_CHECK_INTERVAL_SECONDS:
+                # Revocation, password reset, and account disablement close open streams.
+                context = await apitokens.authenticate_token(raw_token)
+                if not context or context["token_id"] != token_id:
+                    return
+                last_auth_check = loop.time()
+                if "station:read" in subscription.scopes:
+                    status = await _load_public_status()
+                    current = _status_values(status)
+                    if current != last_status:
+                        last_status = current
+                        yield _sse_event("station.status", status)
+                yield ": keepalive\n\n"
+
+            if item is None:
+                return
+            name, data = item
+            if name == "_status_dirty":
+                status = await _load_public_status()
+                current = _status_values(status)
+                if current != last_status:
+                    last_status = current
+                    yield _sse_event("station.status", status)
+            elif name == "observations.changed":
+                yield _sse_event(name, data)
+    finally:
+        public_events.unsubscribe(subscription)
+
+
+@app.get(
+    "/api/v1/events",
+    dependencies=[Depends(api_bearer_scheme)],
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    summary="Stream station status and observation changes",
+)
+async def api_events(request: Request):
+    """Stream `station.status` snapshots (`station:read`) and `observations.changed` notices (`observations:read`). An initial `connected` event means clients should refresh REST lists; missed events are not replayed. Requires a Bearer API token with at least one of those scopes."""
+    context = await _require_api_token(request)
+    if not {"station:read", "observations:read"}.intersection(context["scopes"]):
+        raise HTTPException(status_code=403, detail="Station or observations read scope required.")
+    try:
+        subscription = public_events.subscribe(context["token_id"], context["scopes"])
+    except ValueError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    raw_token = authsvc.extract_bearer_token(request.headers.get("authorization"))
+    return StreamingResponse(
+        _stream_api_events(raw_token, context["token_id"], subscription),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get(

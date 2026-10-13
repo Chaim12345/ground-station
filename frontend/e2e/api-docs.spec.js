@@ -77,8 +77,9 @@ test('API docs show public calls, authorize a token, and remember dark mode', as
   await page.route('**/favicon.png', (route) => route.fulfill({ status: 204 }));
 
   await page.goto('/api/docs');
-  await expect(page.locator('.swagger-ui .opblock')).toHaveCount(11);
+  await expect(page.locator('.swagger-ui .opblock')).toHaveCount(12);
   await expect(page.getByText('/api/v1/me', { exact: true })).toBeVisible();
+  await expect(page.getByText('/api/v1/events', { exact: true })).toBeVisible();
   await expect(page.getByText('/api/auth/login', { exact: true })).toHaveCount(0);
 
   const toggle = page.getByRole('button', { name: 'Dark mode' });
