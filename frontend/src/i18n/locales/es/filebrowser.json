@@ -103,5 +103,39 @@
     "delete_failed": "Error al eliminar: {{error}}",
     "batch_delete_partial": "Algunos artículos no se pueden eliminar",
     "batch_delete_failed": "Error al eliminar elementos: {{error}}"
+  },
+  "purge_dialog": {
+    "button": "Purgar",
+    "title": "Purgar archivos antiguos",
+    "description": "Arrastre el marcador hasta una fecha; todo lo que se usó por última vez antes de ella se elimina permanentemente del disco. Los paquetes de observación y los productos decodificados de varios archivos cuentan como un solo elemento.",
+    "delete_before": "Eliminar anteriores a",
+    "now": "ahora",
+    "items_files": "elementos se eliminarán ({{files}} archivos)",
+    "frees": "Espacio liberado",
+    "empty": "Nada es más antiguo que la fecha seleccionada.",
+    "loading": "Explorando la biblioteca...",
+    "distribution": "Composición",
+    "protected": "{{count}} elementos en curso están protegidos contra la eliminación.",
+    "none_protected": "No hay elementos en curso en el intervalo de fechas seleccionado.",
+    "purge": "Purgar",
+    "close": "Cerrar",
+    "confirm_title": "¿Purgar {{count}} elementos?",
+    "confirm_message": "Todo lo que se usó por última vez antes del {{date}} se eliminará del disco, liberando unos {{bytes}}. Esto no se puede deshacer.",
+    "freed_so_far": "{{bytes}} liberados hasta ahora",
+    "removing": "Eliminando {{name}}...",
+    "result_message": "Se eliminaron {{count}} elementos ({{files}} archivos) y se liberaron {{bytes}}.",
+    "failed_count": "No se pudieron eliminar {{count}} elementos.",
+    "result_toast": "Purgados {{count}} elementos, {{bytes}} liberados",
+    "failed": "Error al purgar",
+    "categories": {
+      "observation": "Observaciones automáticas",
+      "decoded_folder": "Productos decodificados",
+      "recording": "Grabaciones",
+      "snapshot": "Capturas",
+      "decoded": "Archivos decodificados",
+      "audio": "Audio",
+      "transcription": "Transcripciones"
+    },
+    "retry": "Reintentar"
   }
 }

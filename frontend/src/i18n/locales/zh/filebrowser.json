@@ -497,5 +497,39 @@
     "scroll_or_pinch_to_zoom_x_axis_drag_to_pan": "滚动或双指缩放可缩放 X 轴，拖动可平移",
     "zoom_in_x": "放大 X 轴",
     "zoom_out_x": "缩小 X 轴"
+  },
+  "purge_dialog": {
+    "button": "清理",
+    "title": "清理旧文件",
+    "description": "将滑块拖到某个日期；在此之前最后使用过的所有内容都将从磁盘中永久删除。观测包和多文件解码产物各自算作一项。",
+    "delete_before": "删除早于",
+    "now": "现在",
+    "items_files": "项将被删除（{{files}} 个文件）",
+    "frees": "释放空间",
+    "empty": "没有早于所选日期的内容。",
+    "loading": "正在扫描库...",
+    "distribution": "组成",
+    "protected": "{{count}} 个正在进行的条目受到保护，不会被删除。",
+    "none_protected": "所选日期范围内没有进行中的项目。",
+    "purge": "清理",
+    "close": "关闭",
+    "confirm_title": "清理 {{count}} 项？",
+    "confirm_message": "在 {{date}} 之前最后使用过的所有内容都将从磁盘删除，大约释放 {{bytes}}。此操作无法撤销。",
+    "freed_so_far": "已释放 {{bytes}}",
+    "removing": "正在删除 {{name}}...",
+    "result_message": "已删除 {{count}} 项（{{files}} 个文件），释放 {{bytes}}。",
+    "failed_count": "有 {{count}} 项无法删除。",
+    "result_toast": "已清理 {{count}} 项，释放 {{bytes}}",
+    "failed": "清理失败",
+    "categories": {
+      "observation": "自动观测",
+      "decoded_folder": "解码产物",
+      "recording": "录音",
+      "snapshot": "快照",
+      "decoded": "解码文件",
+      "audio": "音频",
+      "transcription": "转录文本"
+    },
+    "retry": "重试"
   }
 }

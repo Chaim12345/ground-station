@@ -1,7 +1,11 @@
 """Tests for the rebuildable filesystem library catalogue."""
 
+import asyncio
 import json
 import logging
+import os
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -17,6 +21,21 @@ def _write(path: Path, content: bytes | str = b"") -> Path:
     else:
         path.write_bytes(content)
     return path
+
+
+def _backdate(path: Path, days: int) -> None:
+    """Make every file under a path appear older than the given age."""
+    stamp = time.time() - days * 86400
+    if path.is_dir():
+        for member in path.rglob("*"):
+            if member.is_file():
+                os.utime(member, (stamp, stamp))
+    else:
+        os.utime(path, (stamp, stamp))
+
+
+def _cutoff(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
 @pytest.fixture
@@ -243,3 +262,203 @@ async def test_transcription_file_creation_rebuilds_and_notifies_library(monkeyp
 
     assert calls == ["rebuild"]
     assert sio.events[0][0] == "library.changed"
+
+
+def test_purge_preview_counts_each_group_as_a_single_item(inventory):
+    folder = inventory.roots.decoded / "METEOR_M2.satdump_meteor_m2-x_lrpt"
+    _write(folder / "dataset.json", "{}")
+    _write(folder / "products" / "image.png", b"image data")
+    _write(folder / "products" / "packets.cadu", b"packets")
+    _backdate(inventory.roots.data, 400)
+    inventory.rebuild()
+
+    preview = inventory.purge_preview(_cutoff(100))
+
+    # Bundles and multi-file products collapse into one item each.
+    assert preview["items"] == 7
+    bundle = inventory.roots.observations / "NOAA.gsobs"
+    bundle_bytes = sum(path.stat().st_size for path in bundle.rglob("*") if path.is_file())
+    assert preview["categories"]["observation"] == {"items": 1, "files": 3, "bytes": bundle_bytes}
+    assert preview["categories"]["decoded_folder"]["items"] == 1
+    assert preview["categories"]["decoded_folder"]["files"] == 3
+    assert preview["categories"]["audio"]["files"] == 2  # wav + metadata sidecar
+    assert preview["oldest"] and preview["newest"]
+    assert preview["skippedInProgress"] == 0
+
+
+def test_purge_preview_and_purge_skip_in_progress_work(inventory):
+    _backdate(inventory.roots.data, 400)
+    recording_root = inventory.roots.recordings
+    _write(
+        recording_root / "live.sigmf-meta",
+        json.dumps({"global": {"gs:recording_in_progress": True}}),
+    )
+    _write(recording_root / "live.sigmf-data", b"iq")
+    _write(
+        inventory.roots.observations / "RUNNING.gsobs" / "manifest.json",
+        json.dumps({"status": "running", "in_progress": True}),
+    )
+    _backdate(recording_root / "live.sigmf-meta", 400)
+    _backdate(recording_root / "live.sigmf-data", 400)
+    _backdate(inventory.roots.observations / "RUNNING.gsobs", 400)
+    inventory.rebuild()
+
+    preview = inventory.purge_preview(_cutoff(100))
+
+    assert preview["skippedInProgress"] == 2
+    assert inventory.purge_preview(_cutoff(500))["skippedInProgress"] == 0
+    assert preview["categories"]["recording"]["items"] == 1  # only the finished capture
+    assert preview["categories"]["observation"]["items"] == 1  # only the finished bundle
+
+    result = inventory.purge(_cutoff(100))
+
+    assert result["deleted"] == 6
+    assert (recording_root / "live.sigmf-data").exists()
+    assert (inventory.roots.observations / "RUNNING.gsobs").exists()
+    assert not (inventory.roots.snapshots / "waterfall.png").exists()
+    assert not (inventory.roots.audio / "voice.json").exists()  # sidecar cascade
+
+
+def test_purge_keeps_recent_items_and_reports_progress(inventory):
+    _backdate(inventory.roots.data, 400)
+    recent_audio = inventory.roots.audio / "voice.wav"
+    os.utime(recent_audio, None)  # keep one item fresh
+    inventory.rebuild()
+
+    events = []
+    revision_before = inventory.revision
+    result = inventory.purge(_cutoff(100), progress_callback=events.append)
+
+    assert result["deleted"] == 5
+    assert recent_audio.exists()
+    assert (inventory.roots.audio / "voice.json").exists()  # kept together with its wav
+    assert not (inventory.roots.observations / "NOAA.gsobs").exists()  # whole bundle removed
+    assert not (inventory.roots.recordings / "capture.sigmf-meta").exists()
+    assert result["bytesFreed"] > 0
+    assert result["revision"] == inventory.revision > revision_before
+    assert events[0]["total"] == 5 and events[0]["done"] == 0
+    assert events[-1]["done"] == 5 and events[-1]["current"] is None
+    assert any(event["current"] for event in events)  # per-item progress names
+
+    assert inventory.purge_preview(_cutoff(100))["items"] == 0
+
+
+def test_purge_rechecks_a_recording_that_became_active(inventory):
+    _backdate(inventory.roots.data, 400)
+    inventory.rebuild()
+    data = inventory.roots.recordings / "capture.sigmf-data"
+    meta = inventory.roots.recordings / "capture.sigmf-meta"
+
+    # The index still says this capture is finished when its writer resumes.
+    meta.write_text(json.dumps({"global": {"gs:recording_in_progress": True}}))
+    assert inventory.purge_preview(_cutoff(100))["categories"]["recording"]["items"] == 0
+    assert inventory.purge(_cutoff(100))["deleted"] == 5
+    assert data.exists()
+
+
+def test_purge_rechecks_status_during_the_sweep(inventory):
+    _backdate(inventory.roots.data, 400)
+    inventory.rebuild()
+    meta = inventory.roots.recordings / "capture.sigmf-meta"
+
+    def on_progress(progress):
+        if progress["current"] == "capture":
+            meta.write_text(json.dumps({"global": {"gs:recording_in_progress": True}}))
+
+    result = inventory.purge(_cutoff(100), on_progress)
+    assert result["deleted"] == 5
+    assert (inventory.roots.recordings / "capture.sigmf-data").exists()
+
+
+def test_purge_includes_owned_sidecars_and_thumbnails(inventory):
+    snapshot_thumbnail = _write(
+        inventory.roots.snapshots / "thumbnails" / "waterfall.jpg", b"thumb"
+    )
+    _backdate(inventory.roots.data, 400)
+    inventory.rebuild()
+
+    preview = inventory.purge_preview(_cutoff(100))
+    assert preview["categories"]["decoded"]["files"] == 2
+    assert preview["categories"]["snapshot"]["files"] == 2
+    assert preview["categories"]["decoded"]["bytes"] == len(b"packet") + len(
+        (inventory.roots.decoded / "packet.json").read_bytes()
+    )
+
+    inventory.purge(_cutoff(100))
+    assert not (inventory.roots.decoded / "packet.json").exists()
+    assert not snapshot_thumbnail.exists()
+
+
+def test_purge_rejects_invalid_cutoff(inventory):
+    with pytest.raises(ValueError):
+        inventory.purge_preview("yesterday")
+    with pytest.raises(ValueError):
+        inventory.purge("yesterday")
+
+
+@pytest.mark.asyncio
+async def test_purge_preview_command_returns_aggregates(inventory, monkeypatch):
+    monkeypatch.setattr(library, "get_inventory", lambda: inventory)
+    _backdate(inventory.roots.data, 400)
+    inventory.rebuild()
+
+    reply = await library.purge_preview_library(None, {"cutoff": _cutoff(100)}, None, "sid")
+
+    assert reply["success"] is True
+    assert reply["data"]["items"] == 6
+    assert set(reply["data"]["categories"]) == {
+        "observation",
+        "decoded_folder",
+        "recording",
+        "snapshot",
+        "decoded",
+        "audio",
+        "transcription",
+    }
+
+    bad = await library.purge_preview_library(None, {"cutoff": "nope"}, None, "sid")
+    assert bad["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_purge_command_streams_progress_and_done_events(inventory, monkeypatch):
+    monkeypatch.setattr(library, "get_inventory", lambda: inventory)
+    _backdate(inventory.roots.data, 400)
+    inventory.rebuild()
+
+    class FakeSio:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, event, payload, room=None):
+            self.events.append((event, payload))
+
+    sio = FakeSio()
+    reply = await library.purge_library(
+        sio, {"cutoff": _cutoff(100)}, logging.getLogger(__name__), "sid"
+    )
+    assert reply == {"success": True, "data": {"started": True}}
+
+    # The purge task runs asynchronously; wait for its terminal event.
+    for _ in range(200):
+        if any(event == "library_purge_done" for event, _payload in sio.events):
+            break
+        await asyncio.sleep(0.01)
+
+    done = next(payload for event, payload in sio.events if event == "library_purge_done")
+    assert done["success"] is True
+    assert done["deleted"] == 6
+    assert any(event == "library.changed" for event, _payload in sio.events)
+    assert not inventory.purge_preview(_cutoff(100))["items"]
+
+    # The concurrency guard releases so a second purge can start.
+    second = await library.purge_library(
+        sio, {"cutoff": _cutoff(100)}, logging.getLogger(__name__), "sid"
+    )
+    assert second["success"] is True
+    for _ in range(200):
+        done_events = [payload for event, payload in sio.events if event == "library_purge_done"]
+        if len(done_events) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert len(done_events) >= 2 and done_events[-1]["deleted"] == 0

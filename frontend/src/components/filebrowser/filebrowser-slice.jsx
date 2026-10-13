@@ -247,6 +247,30 @@ export const deleteLibraryItems = createAsyncThunk(
     }
 );
 
+// Aggregate what a date-based purge would remove, without deleting anything.
+export const fetchPurgePreview = createAsyncThunk(
+    'filebrowser/fetchPurgePreview',
+    async ({ socket, cutoff }, { rejectWithValue }) => {
+        try {
+            return await callLibrary(socket, 'filebrowser.purge-preview', { cutoff });
+        } catch (error) {
+            return rejectWithValue(error.message || 'Failed to compute purge preview');
+        }
+    }
+);
+
+// Start a date-based purge; execution streams via library_purge_* events.
+export const startLibraryPurge = createAsyncThunk(
+    'filebrowser/startLibraryPurge',
+    async ({ socket, cutoff }, { rejectWithValue }) => {
+        try {
+            return await callLibrary(socket, 'filebrowser.purge', { cutoff });
+        } catch (error) {
+            return rejectWithValue(error.message || 'Failed to start purge');
+        }
+    }
+);
+
 // Async thunk to start a background task via Socket.IO
 export const startBackgroundTask = createAsyncThunk(
     'filebrowser/startBackgroundTask',
@@ -310,6 +334,16 @@ const initialState = {
     hasNewFiles: false, // Flag indicating if new files were added since last visit
     // View mode
     viewMode: 'table', // 'card' or 'table'
+    // Date-based purge dialog state
+    purge: {
+        preview: null, // latest aggregate from filebrowser.purge-preview
+        previewLoading: false,
+        previewError: null,
+        previewRequestId: null,
+        running: false, // a purge sweep is currently in flight
+        progress: null, // latest library_purge_progress event
+        done: null, // latest library_purge_done event
+    },
 };
 
 const fileBrowserSlice = createSlice({
@@ -390,6 +424,34 @@ const fileBrowserSlice = createSlice({
             state.playbackRecordingsLoading = false;
             state.playbackRecordingsError = null;
         },
+        // Streamed purge progress from socket broadcasts (see useSocketEventHandlers)
+        purgeProgressUpdated: (state, action) => {
+            state.purge.progress = action.payload;
+            state.purge.running = true;
+            state.purge.done = null;
+        },
+        purgeFinished: (state, action) => {
+            state.purge.running = false;
+            state.purge.progress = null;
+            state.purge.done = action.payload;
+            // The completed sweep invalidates both the visible preview and
+            // any earlier preview reply still in flight.
+            state.purge.preview = null;
+            state.purge.previewLoading = false;
+            state.purge.previewError = null;
+            state.purge.previewRequestId = null;
+        },
+        clearPurgeState: (state) => {
+            state.purge.preview = null;
+            state.purge.previewLoading = false;
+            state.purge.previewError = null;
+            state.purge.previewRequestId = null;
+            // Reopening the dialog must not erase a sweep already in flight.
+            if (!state.purge.running) {
+                state.purge.progress = null;
+                state.purge.done = null;
+            }
+        },
     },
     extraReducers: (builder) => {
         // Server-side paged query
@@ -438,6 +500,39 @@ const fileBrowserSlice = createSlice({
             state.files = state.files.filter((file) => !deletedIds.has(file.id));
             state.total = Math.max(0, state.total - deletedIds.size);
             state.selectedItems = state.selectedItems.filter((id) => !deletedIds.has(id));
+        });
+
+        builder.addCase(fetchPurgePreview.pending, (state, action) => {
+            state.purge.previewLoading = true;
+            state.purge.previewError = null;
+            state.purge.previewRequestId = action.meta.requestId;
+        });
+        builder.addCase(fetchPurgePreview.fulfilled, (state, action) => {
+            if (state.purge.previewRequestId !== action.meta.requestId) return;
+            state.purge.previewLoading = false;
+            state.purge.preview = action.payload;
+            state.purge.previewRequestId = null;
+        });
+        builder.addCase(fetchPurgePreview.rejected, (state, action) => {
+            if (state.purge.previewRequestId !== action.meta.requestId) return;
+            state.purge.previewLoading = false;
+            state.purge.previewError = action.payload || 'Failed to compute purge preview';
+            state.purge.previewRequestId = null;
+        });
+
+        builder.addCase(startLibraryPurge.pending, (state) => {
+            state.purge.running = true;
+            state.purge.progress = null;
+            state.purge.done = null;
+        });
+        builder.addCase(startLibraryPurge.fulfilled, (state) => {
+            // The acknowledgement only confirms the sweep started; terminal
+            // event may have arrived before it for a very short sweep.
+            if (!state.purge.done) state.purge.running = true;
+        });
+        builder.addCase(startLibraryPurge.rejected, (state) => {
+            // The initiating dialog surfaces the rejection toast itself.
+            state.purge.running = false;
         });
 
         // Delete recording - optimistic update
@@ -537,6 +632,9 @@ export const {
     setHasNewFiles,
     setViewMode,
     setPlaybackRecordings,
+    purgeProgressUpdated,
+    purgeFinished,
+    clearPurgeState,
 } = fileBrowserSlice.actions;
 
 export default fileBrowserSlice.reducer;

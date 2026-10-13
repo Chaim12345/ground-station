@@ -19,9 +19,59 @@ from urllib.parse import quote
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 DECODED_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.txt", "*.bin")
 
+# Maps an inventory item to the category the purge dialog groups it under.
+# ``decoded_folder`` items with the observation marker are automated
+# observation bundles; every other decoded folder is a SatDump product.
+PURGE_CATEGORIES = (
+    "observation",
+    "decoded_folder",
+    "recording",
+    "snapshot",
+    "decoded",
+    "audio",
+    "transcription",
+)
+
 
 def _iso(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+
+
+def _parse_cutoff(value: Any) -> datetime:
+    """Parse a purge cutoff ISO string; naive timestamps are read as UTC."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("cutoff must be a valid ISO datetime") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _purge_category(item: Dict[str, Any]) -> Optional[str]:
+    item_type = str(item.get("type") or "")
+    if item_type == "decoded_folder":
+        return "observation" if item.get("folder_kind") == "observation" else "decoded_folder"
+    return item_type if item_type in PURGE_CATEGORIES else None
+
+
+def _is_in_progress(item: Dict[str, Any]) -> bool:
+    """Active recordings and still-running observation bundles are protected."""
+    return bool(item.get("recording_in_progress") or item.get("observation_in_progress"))
+
+
+def _activity_time(item: Dict[str, Any]) -> Optional[datetime]:
+    """Parse the item's last-activity timestamp (content mtime when known)."""
+    raw = item.get("latest_activity") or item.get("modified") or item.get("created")
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -235,6 +285,168 @@ class LibraryInventory:
         revision = self.rebuild() if any(result["success"] for result in results) else self.revision
         return {"results": results, "revision": revision}
 
+    def _purge_candidates(self, deadline: datetime) -> List[tuple]:
+        """Items older than the deadline, oldest first, minus in-progress work."""
+        with self._lock:
+            snapshot = list(self._items.values())
+        candidates: List[tuple] = []
+        for item in snapshot:
+            if _purge_category(item) is None:
+                continue
+            if _is_in_progress(item):
+                continue
+            activity = _activity_time(item)
+            if activity is None or activity >= deadline:
+                continue
+            candidates.append((activity, item))
+        candidates.sort(key=lambda pair: pair[0])
+        return candidates
+
+    def purge_preview(self, cutoff: str) -> Dict[str, Any]:
+        """Aggregate what a purge at the cutoff would remove, without deleting."""
+        deadline = _parse_cutoff(cutoff)
+        # The preview is a deletion promise, so read current filesystem state.
+        self.rebuild()
+        with self._lock:
+            snapshot = list(self._items.values())
+        candidates = self._purge_candidates(deadline)
+        categories: Dict[str, Dict[str, int]] = {
+            category: {"items": 0, "files": 0, "bytes": 0} for category in PURGE_CATEGORIES
+        }
+        total_files = 0
+        total_bytes = 0
+        for _activity, item in candidates:
+            category = _purge_category(item)
+            if category is None:
+                continue
+            files = int(item.get("file_count") or 1)
+            byte_size = int(
+                item.get("purge_bytes") or item.get("size") or item.get("data_size") or 0
+            )
+            total_files += files
+            total_bytes += byte_size
+            bucket = categories[category]
+            bucket["items"] += 1
+            bucket["files"] += files
+            bucket["bytes"] += byte_size
+        # Only active items inside the chosen age range would otherwise be deleted.
+        skipped = sum(
+            1
+            for item in snapshot
+            if _is_in_progress(item)
+            and _purge_category(item)
+            and (activity := _activity_time(item)) is not None
+            and activity < deadline
+        )
+        activities = [
+            activity for activity in (_activity_time(item) for item in snapshot) if activity
+        ]
+        return {
+            "cutoff": deadline.isoformat(),
+            "items": len(candidates),
+            "files": total_files,
+            "bytes": total_bytes,
+            "skippedInProgress": skipped,
+            "categories": categories,
+            "oldest": min(activities).isoformat() if activities else None,
+            "newest": max(activities).isoformat() if activities else None,
+        }
+
+    def purge(self, cutoff: str, progress_callback: Optional[Any] = None) -> Dict[str, Any]:
+        """Delete every eligible item older than the cutoff, oldest first.
+
+        The candidate set is recomputed at execution time so the caller cannot
+        smuggle arbitrary IDs through the cutoff protocol. The callback receives
+        compact progress dictionaries so long multi-GB sweeps can stream to the UI.
+        """
+        deadline = _parse_cutoff(cutoff)
+        # A recording or bundle may have become active since the last index refresh.
+        self.rebuild()
+        candidates = self._purge_candidates(deadline)
+        total = len(candidates)
+        deleted = 0
+        files = 0
+        bytes_freed = 0
+        failed: List[Dict[str, str]] = []
+
+        def report(done: int, current: Optional[str]) -> None:
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "done": done,
+                        "total": total,
+                        "deleted": deleted,
+                        "files": files,
+                        "bytesFreed": bytes_freed,
+                        "current": current,
+                    }
+                )
+
+        report(0, None)
+        for index, (_activity, item) in enumerate(candidates):
+            name = str(item.get("display_name") or item.get("name") or item.get("id") or "")
+            report(index, name)
+            try:
+                # A worker may start writing after the initial rebuild. Check
+                # status and content mtimes immediately before each deletion.
+                if not self._purge_item_is_eligible(item, deadline):
+                    continue
+                self._delete_item(item)
+                deleted += 1
+                files += int(item.get("file_count") or 1)
+                bytes_freed += int(
+                    item.get("purge_bytes") or item.get("size") or item.get("data_size") or 0
+                )
+            except OSError as exc:
+                failed.append({"id": str(item.get("id")), "error": str(exc)})
+        revision = self.rebuild() if deleted else self.revision
+        report(total, None)
+        return {
+            "deleted": deleted,
+            "files": files,
+            "bytesFreed": bytes_freed,
+            "failed": failed,
+            "revision": revision,
+        }
+
+    def _purge_item_is_eligible(self, item: Dict[str, Any], deadline: datetime) -> bool:
+        """Recheck live status and the newest owned file before deletion."""
+        path = Path(str(item["_path"]))
+        if not path.exists():
+            return False
+        owned: Iterable[Path]
+        if item.get("type") == "recording":
+            if _sigmf_summary(path.with_suffix(".sigmf-meta"))["recording_in_progress"]:
+                return False
+            base = path.with_suffix("")
+            owned = (
+                path,
+                base.with_suffix(".sigmf-meta"),
+                base.with_suffix(".png"),
+                base.parent / "thumbnails" / f"{base.name}.jpg",
+            )
+        elif item.get("folder_kind") == "observation":
+            if _read_json(path / "manifest.json").get("in_progress"):
+                return False
+            owned = path.rglob("*")
+        elif path.is_dir():
+            owned = path.rglob("*")
+        elif item.get("type") == "snapshot":
+            owned = (path, path.parent / "thumbnails" / f"{path.stem}.jpg")
+        elif item.get("type") in {"decoded", "audio"}:
+            owned = (path, path.with_suffix(".json"))
+        else:
+            owned = (path,)
+
+        latest: float | None = None
+        for owned_path in owned:
+            if owned_path.is_file():
+                mtime = owned_path.stat().st_mtime
+                latest = mtime if latest is None else max(latest, mtime)
+        if latest is None:
+            latest = path.stat().st_mtime
+        return latest < deadline.timestamp()
+
     def _matches(
         self,
         item: Dict[str, Any],
@@ -291,10 +503,13 @@ class LibraryInventory:
             if not data.is_file():
                 continue
             stat = data.stat()
+            meta_stat = meta.stat()
             metadata = _sigmf_summary(meta)
             name = meta.stem
             snapshot = root / f"{name}.png"
             thumbnail = root / "thumbnails" / f"{name}.jpg"
+            snapshot_stat = snapshot.stat() if snapshot.is_file() else None
+            thumbnail_stat = thumbnail.stat() if thumbnail.is_file() else None
             self._add(
                 items,
                 {
@@ -305,9 +520,27 @@ class LibraryInventory:
                     "data_file": data.name,
                     "meta_file": meta.name,
                     "data_size": stat.st_size,
-                    "meta_size": meta.stat().st_size,
+                    "meta_size": meta_stat.st_size,
                     "created": _iso(stat.st_ctime),
                     "modified": _iso(stat.st_mtime),
+                    "latest_activity": _iso(
+                        max(
+                            stat.st_mtime,
+                            meta_stat.st_mtime,
+                            snapshot_stat.st_mtime if snapshot_stat else 0,
+                            thumbnail_stat.st_mtime if thumbnail_stat else 0,
+                        )
+                    ),
+                    "file_count": 2
+                    + int(snapshot_stat is not None)
+                    + int(thumbnail_stat is not None),
+                    # A purge removes data, meta, waterfall, and cached preview too.
+                    "purge_bytes": (
+                        stat.st_size
+                        + meta_stat.st_size
+                        + (snapshot_stat.st_size if snapshot_stat else 0)
+                        + (thumbnail_stat.st_size if thumbnail_stat else 0)
+                    ),
                     "metadata": metadata,
                     "session_id": metadata.get("session_id"),
                     "recording_in_progress": metadata.get("recording_in_progress", False),
@@ -327,6 +560,7 @@ class LibraryInventory:
         for path in root.glob("*.png"):
             stat = path.stat()
             thumbnail = root / "thumbnails" / f"{path.stem}.jpg"
+            thumbnail_stat = thumbnail.stat() if thumbnail.is_file() else None
             self._add(
                 items,
                 {
@@ -338,6 +572,11 @@ class LibraryInventory:
                     "size": stat.st_size,
                     "created": _iso(stat.st_ctime),
                     "modified": _iso(stat.st_mtime),
+                    "latest_activity": _iso(
+                        max(stat.st_mtime, thumbnail_stat.st_mtime if thumbnail_stat else 0)
+                    ),
+                    "file_count": 1 + int(thumbnail_stat is not None),
+                    "purge_bytes": stat.st_size + (thumbnail_stat.st_size if thumbnail_stat else 0),
                     "url": f"/snapshots/{quote(path.name)}",
                     "thumbnail_url": (
                         f"/snapshots/thumbnails/{quote(thumbnail.name)}"
@@ -358,14 +597,30 @@ class LibraryInventory:
             stat = folder.stat()
             # The card needs an image count before the detail view is opened.
             # Count images while walking nested output files for the size total.
+            # The same walk yields the purge metadata: every file counts toward
+            # the group's file total and its newest mtime is the last activity.
             total_size = 0
             image_count = 0
+            file_count = 0
+            # Content mtimes only: a directory's own mtime shifts on unrelated
+            # entry churn, which would wrongly keep old folders out of purges.
+            latest_mtime: float | None = None
             for path in folder.rglob("*"):
                 if not path.is_file():
                     continue
-                total_size += path.stat().st_size
+                file_stat = path.stat()
+                total_size += file_stat.st_size
+                latest_mtime = (
+                    file_stat.st_mtime
+                    if latest_mtime is None
+                    else max(latest_mtime, file_stat.st_mtime)
+                )
+                file_count += 1
                 if path.suffix.lower() in IMAGE_EXTENSIONS:
                     image_count += 1
+            # An empty folder falls back to its own mtime.
+            if latest_mtime is None:
+                latest_mtime = stat.st_mtime
             dataset = _read_json(folder / "dataset.json")
             folder_parts = folder.name.split(".")
             pipeline = folder_parts[1].replace("satdump_", "") if len(folder_parts) > 1 else None
@@ -380,6 +635,9 @@ class LibraryInventory:
                     "size": total_size,
                     "created": _iso(stat.st_ctime),
                     "modified": _iso(stat.st_mtime),
+                    "latest_activity": _iso(latest_mtime),
+                    "file_count": file_count,
+                    "purge_bytes": total_size,
                     "url": f"/decoded/{quote(folder.name)}",
                     "thumbnail_url": (
                         f"/decoded/{quote(folder.name)}/thumbnail.jpg"
@@ -399,7 +657,9 @@ class LibraryInventory:
                 if not path.is_file():
                     continue
                 stat = path.stat()
-                metadata = _read_json(path.with_suffix(".json"))
+                sidecar = path.with_suffix(".json")
+                sidecar_stat = sidecar.stat() if sidecar.is_file() else None
+                metadata = _read_json(sidecar)
                 decoder: Dict[str, Any] = {}
                 decoder_value = metadata.get("decoder")
                 if isinstance(decoder_value, dict):
@@ -419,6 +679,11 @@ class LibraryInventory:
                         "size": stat.st_size,
                         "created": _iso(stat.st_ctime),
                         "modified": _iso(stat.st_mtime),
+                        "latest_activity": _iso(
+                            max(stat.st_mtime, sidecar_stat.st_mtime if sidecar_stat else 0)
+                        ),
+                        "file_count": 1 + int(sidecar_stat is not None),
+                        "purge_bytes": stat.st_size + (sidecar_stat.st_size if sidecar_stat else 0),
                         "url": f"/decoded/{quote(path.name)}",
                         "file_type": path.suffix.lower(),
                         "decoder_type": str(decoder.get("type") or "").upper() or None,
@@ -436,7 +701,9 @@ class LibraryInventory:
             return
         for path in root.glob("*.wav"):
             stat = path.stat()
-            metadata = _read_json(path.with_suffix(".json"))
+            sidecar = path.with_suffix(".json")
+            sidecar_stat = sidecar.stat() if sidecar.is_file() else None
+            metadata = _read_json(sidecar)
             self._add(
                 items,
                 {
@@ -448,6 +715,12 @@ class LibraryInventory:
                     "size": stat.st_size,
                     "created": _iso(stat.st_ctime),
                     "modified": _iso(stat.st_mtime),
+                    "latest_activity": _iso(
+                        max(stat.st_mtime, sidecar_stat.st_mtime if sidecar_stat else 0)
+                    ),
+                    "file_count": 2 if sidecar_stat else 1,
+                    # Deleting audio also unlinks its metadata sidecar.
+                    "purge_bytes": stat.st_size + (sidecar_stat.st_size if sidecar_stat else 0),
                     "url": f"/audio/{quote(path.name)}",
                     "file_type": ".wav",
                     "vfo_number": metadata.get("vfo_number"),
@@ -482,6 +755,9 @@ class LibraryInventory:
                     "size": stat.st_size,
                     "created": _iso(stat.st_ctime),
                     "modified": _iso(stat.st_mtime),
+                    "latest_activity": _iso(stat.st_mtime),
+                    "file_count": 1,
+                    "purge_bytes": stat.st_size,
                     "url": f"/transcriptions/{quote(path.name)}",
                     "file_type": ".txt",
                     **metadata,
@@ -512,16 +788,33 @@ class LibraryInventory:
             manifest_path = folder / "manifest.json"
             artifact_count = 0
             total_size = 0
+            # ``total_size`` only covers dialog-visible artifacts, while a purge
+            # also frees manifests, sidecars, and thumbnails. Track both.
+            disk_size = 0
+            file_count = 0
+            # Content mtimes only, same as the decoded folder scan.
+            latest_mtime: float | None = None
             for path in folder.rglob("*"):
+                if not path.is_file():
+                    continue
+                file_stat = path.stat()
+                file_count += 1
+                disk_size += file_stat.st_size
+                latest_mtime = (
+                    file_stat.st_mtime
+                    if latest_mtime is None
+                    else max(latest_mtime, file_stat.st_mtime)
+                )
                 if (
-                    not path.is_file()
-                    or path == manifest_path
+                    path == manifest_path
                     or path.suffix.lower() == ".json"
                     or "thumbnails" in path.relative_to(folder).parent.parts
                 ):
                     continue
                 artifact_count += 1
-                total_size += path.stat().st_size
+                total_size += file_stat.st_size
+            if latest_mtime is None:
+                latest_mtime = stat.st_mtime
             self._add(
                 items,
                 {
@@ -534,6 +827,9 @@ class LibraryInventory:
                     "size": total_size,
                     "created": _iso(stat.st_ctime),
                     "modified": _iso(stat.st_mtime),
+                    "latest_activity": _iso(latest_mtime),
+                    "file_count": file_count,
+                    "purge_bytes": disk_size,
                     "url": f"/observations/{quote(folder.name)}",
                     "download_url": f"/api/observations/{quote(folder.name)}/download",
                     "thumbnail_url": (
@@ -744,10 +1040,14 @@ class LibraryInventory:
             shutil.rmtree(path)
         elif path.is_file():
             path.unlink()
-            if item_type == "audio":
+            if item_type in {"audio", "decoded"}:
                 sidecar = path.with_suffix(".json")
                 if sidecar.is_file():
                     sidecar.unlink()
+            elif item_type == "snapshot":
+                thumbnail = path.parent / "thumbnails" / f"{path.stem}.jpg"
+                if thumbnail.is_file():
+                    thumbnail.unlink()
 
 
 _inventories: Dict[Path, LibraryInventory] = {}

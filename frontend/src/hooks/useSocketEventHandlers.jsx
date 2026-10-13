@@ -63,7 +63,7 @@ import {
     updateGnssFixLifecycleFromStatus,
     updateGnssFixLifecycleFromOutput,
 } from '../components/waterfall/gnss-slice.jsx';
-import { fetchFiles, setPlaybackRecordings } from '../components/filebrowser/filebrowser-slice.jsx';
+import { fetchFiles, setPlaybackRecordings, purgeProgressUpdated, purgeFinished } from '../components/filebrowser/filebrowser-slice.jsx';
 import {
     setConnected,
     setConnecting,
@@ -391,6 +391,13 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
         // A library mutation is compact and includes stable IDs; refetching
         // just the current server-side page also handles sort-position moves.
         socket.on("library.changed", refreshLibraryPage);
+
+        // Date-based purge sweeps stream coarse-grained progress and a single
+        // terminal event; the purge dialog renders them from the store.
+        const handlePurgeProgress = (data) => store.dispatch(purgeProgressUpdated(data));
+        const handlePurgeDone = (data) => store.dispatch(purgeFinished(data));
+        socket.on("library_purge_progress", handlePurgeProgress);
+        socket.on("library_purge_done", handlePurgeDone);
 
         // File browser errors
         socket.on("file_browser_error", (errorData) => {
@@ -1042,6 +1049,8 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
             socket.off("tracker-instances");
             socket.off("file_browser_state", handleFileBrowserState);
             socket.off("library.changed", refreshLibraryPage);
+            socket.off("library_purge_progress", handlePurgeProgress);
+            socket.off("library_purge_done", handlePurgeDone);
             socket.off("file_browser_error");
             socket.off("recording_state");
             socket.off("vfo-states");

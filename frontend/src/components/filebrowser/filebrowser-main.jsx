@@ -83,6 +83,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import FolderIcon from '@mui/icons-material/Folder';
 import BuildIcon from '@mui/icons-material/Build';
+import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
 import { useSocket } from '../common/socket.jsx';
 import {
     fetchFiles,
@@ -112,6 +113,7 @@ import MeteorM2xLrptFolderDialog from './meteor-m2x-lrpt-folder-dialog.jsx';
 import MeteorHrptFolderDialog from './meteor-hrpt-folder-dialog.jsx';
 import ObservationFolderDialog from './observation-folder-dialog.jsx';
 import ProcessingDialog from './processing-dialog.jsx';
+import PurgeDialog from './purge-dialog.jsx';
 import ZoomableImage from '../common/zoomable-image.jsx';
 import DecodedFolderThumbnail from './decoded-folder-thumbnail.jsx';
 import { buildFileBrowserDisplayItem } from './filebrowser-display-item.js';
@@ -376,6 +378,7 @@ export default function FileBrowserMain() {
     const [waterfallTaskOptions, setWaterfallTaskOptions] = useState(() =>
         buildWaterfallDialogDefaults()
     );
+    const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
 
     // Mark file browser as visited after list refreshes while on the page
     useEffect(() => {
@@ -1013,6 +1016,15 @@ export default function FileBrowserMain() {
                         sx={{ flex: { xs: 1, sm: 'initial' } }}
                     >
                         {t('refresh', 'Refresh')}
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<CleaningServicesIcon />}
+                        onClick={() => setPurgeDialogOpen(true)}
+                        sx={{ flex: { xs: 1, sm: 'initial' } }}
+                    >
+                        {t('purge_dialog.button', { defaultValue: 'Purge' })}
                     </Button>
                 </Box>
             </Box>
@@ -2831,6 +2843,13 @@ export default function FileBrowserMain() {
                 open={processingDialogOpen}
                 onClose={() => setProcessingDialogOpen(false)}
                 recording={processingRecording}
+            />
+
+            {/* Date-based storage purge */}
+            <PurgeDialog
+                open={purgeDialogOpen}
+                onClose={() => setPurgeDialogOpen(false)}
+                socket={socket}
             />
         </Box>
     );

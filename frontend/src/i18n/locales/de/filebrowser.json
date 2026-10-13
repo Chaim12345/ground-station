@@ -103,5 +103,39 @@
     "delete_failed": "Löschen fehlgeschlagen: {{error}}",
     "batch_delete_partial": "Einige Elemente konnten nicht gelöscht werden",
     "batch_delete_failed": "Elemente konnten nicht gelöscht werden: {{error}}"
+  },
+  "purge_dialog": {
+    "button": "Bereinigen",
+    "title": "Alte Dateien bereinigen",
+    "description": "Marker auf ein Datum ziehen; alles, was vor diesem Zeitpunkt zuletzt verwendet wurde, wird dauerhaft von der Festplatte entfernt. Beobachtungs-Bundles und mehrteilige Decode-Produkte zählen jeweils als ein Eintrag.",
+    "delete_before": "Löschen vor",
+    "now": "jetzt",
+    "items_files": "Einträge werden gelöscht ({{files}} Dateien)",
+    "frees": "Freigegebener Speicher",
+    "empty": "Älter als das gewählte Datum ist nichts.",
+    "loading": "Bibliothek wird durchsucht...",
+    "distribution": "Zusammensetzung",
+    "protected": "{{count}} laufende Einträge sind vor dem Löschen geschützt.",
+    "none_protected": "Keine laufenden Einträge im ausgewählten Zeitraum.",
+    "purge": "Bereinigen",
+    "close": "Schließen",
+    "confirm_title": "{{count}} Einträge bereinigen?",
+    "confirm_message": "Alles, was vor dem {{date}} zuletzt verwendet wurde, wird von der Festplatte gelöscht und gibt etwa {{bytes}} frei. Das lässt sich nicht rückgängig machen.",
+    "freed_so_far": "{{bytes}} bisher freigegeben",
+    "removing": "Entferne {{name}}...",
+    "result_message": "{{count}} Einträge gelöscht ({{files}} Dateien), {{bytes}} freigegeben.",
+    "failed_count": "{{count}} Einträge konnten nicht gelöscht werden.",
+    "result_toast": "{{count}} Einträge bereinigt, {{bytes}} freigegeben",
+    "failed": "Bereinigung fehlgeschlagen",
+    "categories": {
+      "observation": "Automatische Beobachtungen",
+      "decoded_folder": "Decode-Produkte",
+      "recording": "Aufnahmen",
+      "snapshot": "Snapshots",
+      "decoded": "Decodierte Dateien",
+      "audio": "Audio",
+      "transcription": "Transkripte"
+    },
+    "retry": "Erneut versuchen"
   }
 }

@@ -103,5 +103,39 @@
     "delete_failed": "Failed to delete: {{error}}",
     "batch_delete_partial": "Some items could not be deleted",
     "batch_delete_failed": "Failed to delete items: {{error}}"
+  },
+  "purge_dialog": {
+    "button": "Purge",
+    "title": "Purge old files",
+    "description": "Drag the marker to a date; everything last used before it is permanently removed from disk. Observation bundles and multi-file decoded products each count as a single item.",
+    "delete_before": "Delete before",
+    "now": "now",
+    "items_files": "items will be deleted ({{files}} files)",
+    "frees": "Space freed",
+    "empty": "Nothing is older than the selected date.",
+    "loading": "Scanning the library...",
+    "distribution": "Composition",
+    "protected": "{{count}} in-progress items are protected from deletion.",
+    "none_protected": "No in-progress items in the selected date range.",
+    "purge": "Purge",
+    "close": "Close",
+    "confirm_title": "Purge {{count}} items?",
+    "confirm_message": "Everything last used before {{date}} will be deleted from disk, freeing about {{bytes}}. This cannot be undone.",
+    "freed_so_far": "{{bytes}} freed so far",
+    "removing": "Removing {{name}}...",
+    "result_message": "Deleted {{count}} items ({{files}} files), freed {{bytes}}.",
+    "failed_count": "{{count}} items could not be deleted.",
+    "result_toast": "Purged {{count}} items, freed {{bytes}}",
+    "failed": "Purge failed",
+    "categories": {
+      "observation": "Automated observations",
+      "decoded_folder": "Decoded products",
+      "recording": "Recordings",
+      "snapshot": "Snapshots",
+      "decoded": "Decoded files",
+      "audio": "Audio",
+      "transcription": "Transcriptions"
+    },
+    "retry": "Retry"
   }
 }

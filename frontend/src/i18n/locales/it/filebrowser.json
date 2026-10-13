@@ -1,1 +1,36 @@
-{}
+{
+  "purge_dialog": {
+    "button": "Pulisci",
+    "title": "Pulizia file vecchi",
+    "description": "Trascina il marcatore su una data; tutto ciò che è stato usato l'ultima volta prima di tale data viene rimosso definitivamente dal disco. I bundle di osservazione e i prodotti decodificati multi-file contano ciascuno come un singolo elemento.",
+    "delete_before": "Elimina precedenti al",
+    "now": "adesso",
+    "items_files": "elementi verranno eliminati ({{files}} file)",
+    "frees": "Spazio liberato",
+    "empty": "Niente è più vecchio della data selezionata.",
+    "loading": "Scansione della libreria...",
+    "distribution": "Composizione",
+    "protected": "{{count}} elementi in corso sono protetti dall'eliminazione.",
+    "none_protected": "Nessun elemento in corso nell'intervallo di date selezionato.",
+    "purge": "Pulisci",
+    "close": "Chiudi",
+    "confirm_title": "Pulire {{count}} elementi?",
+    "confirm_message": "Tutto ciò che è stato usato l'ultima volta prima del {{date}} verrà eliminato dal disco, liberando circa {{bytes}}. L'operazione non può essere annullata.",
+    "freed_so_far": "{{bytes}} liberati finora",
+    "removing": "Eliminazione di {{name}}...",
+    "result_message": "Eliminati {{count}} elementi ({{files}} file), liberati {{bytes}}.",
+    "failed_count": "Impossibile eliminare {{count}} elementi.",
+    "result_toast": "Puliti {{count}} elementi, liberati {{bytes}}",
+    "failed": "Pulizia fallita",
+    "categories": {
+      "observation": "Osservazioni automatiche",
+      "decoded_folder": "Prodotti decodificati",
+      "recording": "Registrazioni",
+      "snapshot": "Istantanee",
+      "decoded": "File decodificati",
+      "audio": "Audio",
+      "transcription": "Trascrizioni"
+    },
+    "retry": "Riprova"
+  }
+}

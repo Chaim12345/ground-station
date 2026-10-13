@@ -2,16 +2,24 @@
 
 List and delete commands return normal RPC acknowledgements.  Broadcasts are
 reserved for compact change notifications, so a browser never receives another
-client's full library listing.
+client's full library listing.  Purges stream progress events because deleting
+multi-gigabyte sweeps outgrows a single request/response exchange.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Dict, List, Optional
 
 from common import auth as authsvc
-from library.inventory import get_inventory
+from library.inventory import _parse_cutoff, get_inventory
+
+# A purge executes in a worker thread inside this server process (the
+# inventory is a process-local singleton, so child processes cannot use it).
+# This guard keeps concurrent purge requests from racing each other.
+_purge_state = {"running": False}
+_purge_tasks: set = set()
 
 
 async def _emit_changed(sio: Any, revision: int, changes: List[Dict[str, str]]) -> None:
@@ -85,6 +93,92 @@ async def delete_library_items(
     return {"success": True, "data": result}
 
 
+async def purge_preview_library(
+    _sio: Any, data: Optional[Dict], _logger: Any, _sid: str
+) -> Dict[str, Any]:
+    """Aggregate items older than a cutoff without deleting anything."""
+    request = data if isinstance(data, dict) else {}
+    cutoff = request.get("cutoff")
+    if not isinstance(cutoff, str) or not cutoff:
+        return {"success": False, "error": "cutoff must be an ISO datetime string"}
+    try:
+        result = await asyncio.to_thread(get_inventory().purge_preview, cutoff)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True, "data": result}
+
+
+async def purge_library(sio: Any, data: Optional[Dict], logger: Any, _sid: str) -> Dict[str, Any]:
+    """Start a date-based purge; progress and completion stream via events.
+
+    The RPC reply only confirms the job started.  ``library_purge_progress``
+    events stream while the sweep runs and a single ``library_purge_done``
+    event carries the terminal summary to every authenticated client.
+    """
+    request = data if isinstance(data, dict) else {}
+    cutoff = request.get("cutoff")
+    if not isinstance(cutoff, str) or not cutoff:
+        return {"success": False, "error": "cutoff must be an ISO datetime string"}
+    try:
+        _parse_cutoff(cutoff)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    if _purge_state["running"]:
+        return {"success": False, "error": "A purge is already running"}
+    _purge_state["running"] = True
+    loop = asyncio.get_running_loop()
+
+    last_emit = 0.0
+
+    def on_progress(progress: Dict[str, Any]) -> None:
+        """Forward worker-thread progress, throttled to keep the socket light."""
+        nonlocal last_emit
+        now = time.monotonic()
+        final = progress["done"] >= progress["total"]
+        if not final and now - last_emit < 0.1:
+            return
+        last_emit = now
+        try:
+            asyncio.run_coroutine_threadsafe(
+                sio.emit(
+                    "library_purge_progress",
+                    {"phase": "running", **progress},
+                    room=authsvc.AUTHENTICATED_SOCKET_ROOM,
+                ),
+                loop,
+            )
+        except RuntimeError:
+            # Event loop already shutting down; progress is moot.
+            pass
+
+    async def run_purge() -> None:
+        try:
+            result = await asyncio.to_thread(get_inventory().purge, cutoff, on_progress)
+            if result["deleted"]:
+                await _emit_changed(
+                    sio, result["revision"], [{"operation": "reconciled", "id": "*"}]
+                )
+            await sio.emit(
+                "library_purge_done",
+                {"phase": "done", "success": True, **result},
+                room=authsvc.AUTHENTICATED_SOCKET_ROOM,
+            )
+        except Exception as exc:  # noqa: BLE001 - terminal failure must reach every client
+            logger.exception("Library purge failed")
+            await sio.emit(
+                "library_purge_done",
+                {"phase": "done", "success": False, "error": str(exc)},
+                room=authsvc.AUTHENTICATED_SOCKET_ROOM,
+            )
+        finally:
+            _purge_state["running"] = False
+
+    task = asyncio.create_task(run_purge())
+    _purge_tasks.add(task)
+    task.add_done_callback(_purge_tasks.discard)
+    return {"success": True, "data": {"started": True}}
+
+
 def register_handlers(registry: Any) -> None:
     """Register the new inventory protocol under the File Browser namespace."""
     registry.register_batch(
@@ -93,5 +187,7 @@ def register_handlers(registry: Any) -> None:
             "filebrowser.item": (get_library_item, "api_call"),
             "filebrowser.reconcile": (reconcile_library, "api_call"),
             "filebrowser.delete": (delete_library_items, "api_call"),
+            "filebrowser.purge-preview": (purge_preview_library, "api_call"),
+            "filebrowser.purge": (purge_library, "api_call"),
         }
     )

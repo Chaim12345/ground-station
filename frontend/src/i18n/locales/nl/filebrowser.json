@@ -103,5 +103,39 @@
     "delete_failed": "Verwijderen is mislukt: {{error}}",
     "batch_delete_partial": "Sommige items konden niet verwijderd worden",
     "batch_delete_failed": "Verwijderen van items mislukt: {{error}}"
+  },
+  "purge_dialog": {
+    "button": "Opschonen",
+    "title": "Oude bestanden opschonen",
+    "description": "Sleep de marker naar een datum; alles dat vóór die datum voor het laatst is gebruikt, wordt permanent van de schijf verwijderd. Observatiebundels en meerdelige decodeerproducten tellen elk als één item.",
+    "delete_before": "Verwijderen vóór",
+    "now": "nu",
+    "items_files": "items worden verwijderd ({{files}} bestanden)",
+    "frees": "Vrijgekomen ruimte",
+    "empty": "Niets is ouder dan de geselecteerde datum.",
+    "loading": "Bibliotheek wordt doorzocht...",
+    "distribution": "Samenstelling",
+    "protected": "{{count}} items in uitvoering zijn beschermd tegen verwijdering.",
+    "none_protected": "Geen items in uitvoering binnen de geselecteerde periode.",
+    "purge": "Opschonen",
+    "close": "Sluiten",
+    "confirm_title": "{{count}} items opschonen?",
+    "confirm_message": "Alles dat vóór {{date}} voor het laatst is gebruikt, wordt van de schijf verwijderd; ongeveer {{bytes}} komt vrij. Dit kan niet ongedaan worden gemaakt.",
+    "freed_so_far": "{{bytes}} tot nu toe vrijgegeven",
+    "removing": "{{name}} wordt verwijderd...",
+    "result_message": "{{count}} items verwijderd ({{files}} bestanden), {{bytes}} vrijgegeven.",
+    "failed_count": "{{count}} items konden niet worden verwijderd.",
+    "result_toast": "{{count}} items opgeschoond, {{bytes}} vrijgegeven",
+    "failed": "Opschonen mislukt",
+    "categories": {
+      "observation": "Automatische observaties",
+      "decoded_folder": "Decodeerproducten",
+      "recording": "Opnames",
+      "snapshot": "Momentopnames",
+      "decoded": "Gedecodeerde bestanden",
+      "audio": "Audio",
+      "transcription": "Transcripties"
+    },
+    "retry": "Opnieuw proberen"
   }
 }
