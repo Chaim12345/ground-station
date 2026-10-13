@@ -52,7 +52,7 @@ export async function initializeAppData(socket) {
         },
         {
             name: 'version',
-            run: () => store.dispatch(fetchVersionInfo()),
+            run: () => store.dispatch(fetchVersionInfo({ socket })),
         },
         {
             name: 'location',

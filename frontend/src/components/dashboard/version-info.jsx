@@ -1,12 +1,10 @@
 
-import React, { useEffect } from 'react';
-import { useDispatch, useSelector, shallowEqual } from 'react-redux';
+import React from 'react';
+import { useSelector, shallowEqual } from 'react-redux';
 import { Typography, Box, Chip, Tooltip } from '@mui/material';
-import { fetchVersionInfo } from './version-slice';
 import { useTranslation } from 'react-i18next';
 
 const VersionInfo = ({ minimal = false }) => {
-    const dispatch = useDispatch();
     const { t } = useTranslation('dashboard');
     const { data, loading, error } = useSelector((state) => state.version);
     // Select only static systemInfo fields to avoid re-renders on live metrics updates
@@ -23,19 +21,9 @@ const VersionInfo = ({ minimal = false }) => {
         }),
         shallowEqual
     );
-    const hasFetchedRef = React.useRef(false);
-
     // Determine environment
     const environment = import.meta.env.MODE || 'unknown';
     const envColor = environment === 'production' ? 'error' : 'success';
-
-    useEffect(() => {
-        // Fetch version info only once when component mounts
-        if (!hasFetchedRef.current) {
-            hasFetchedRef.current = true;
-            dispatch(fetchVersionInfo());
-        }
-    }, [dispatch]);
 
     if (minimal) {
         // Extract CPU architecture (e.g., x86_64 -> x64, aarch64 -> arm64)

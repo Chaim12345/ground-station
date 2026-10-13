@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from common import auth as authsvc
 from common.logger import logger
 from handlers.entities import (
+    apitokens,
     appsettings,
     celestial,
     control,
@@ -35,6 +36,7 @@ from session.tracker import session_tracker
 
 def _register_all_handlers():
     """Register all command handlers with the global registry."""
+    apitokens.register_handlers(handler_registry)
     appsettings.register_handlers(handler_registry)
     satellites.register_handlers(handler_registry)
     orbitalsources.register_handlers(handler_registry)

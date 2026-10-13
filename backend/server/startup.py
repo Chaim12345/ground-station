@@ -7,7 +7,6 @@ import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
-from urllib.parse import urlsplit
 
 import socketio
 from engineio.payload import Payload
@@ -15,7 +14,6 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from sqlalchemy import select
 
 from audio.audiobroadcaster import AudioBroadcaster
@@ -54,12 +52,7 @@ from server.scheduler import (
 from server.sessionsnapshot import start_session_runtime_emitter
 from server.spapaths import is_static_asset_request, resolve_static_asset_path
 from server.systeminfo import start_system_info_emitter
-from server.version import (
-    UpdateCheckError,
-    get_full_version_info,
-    get_update_check,
-    get_version_base,
-)
+from server.version import get_version_base
 from tasks.manager import BackgroundTaskManager
 from tasks.registry import get_task
 from tlesync.persist import load_orbital_sync_state
@@ -482,23 +475,6 @@ async def _require_request_auth(
     return auth_context
 
 
-async def _require_browser_auth(request: Request) -> Dict[str, Any]:
-    """Token management is available to the logged-in browser, never to a PAT."""
-    site = request.headers.get("sec-fetch-site")
-    if site and site not in {"same-origin", "none"}:
-        raise HTTPException(status_code=403, detail="Same-origin request required.")
-    origin = request.headers.get("origin")
-    if origin and site != "same-origin" and urlsplit(origin).netloc != request.headers.get("host"):
-        raise HTTPException(status_code=403, detail="Same-origin request required.")
-    if request.method not in {"GET", "HEAD"} and not origin and not site:
-        raise HTTPException(status_code=403, detail="Same-origin request required.")
-    token = authsvc.extract_cookie_token(request.cookies.get(authsvc.AUTH_SESSION_COOKIE_NAME))
-    context = await authsvc.authenticate_token(token) if token else None
-    if not context:
-        raise HTTPException(status_code=401, detail="Browser login required.")
-    return dict(context)
-
-
 async def _require_api_token(request: Request, scope: Optional[str] = None) -> Dict[str, Any]:
     raw_token = authsvc.extract_bearer_token(request.headers.get("authorization"))
     context = await apitokens.authenticate_token(raw_token)
@@ -507,17 +483,6 @@ async def _require_api_token(request: Request, scope: Optional[str] = None) -> D
     if scope and scope not in context["scopes"]:
         raise HTTPException(status_code=403, detail=f"Scope {scope} required.")
     return dict(context)
-
-
-class CreateApiTokenRequest(BaseModel):
-    name: str
-    password: str
-    scopes: list[str]
-    expires_in_days: Optional[int] = 365
-
-
-class RenameApiTokenRequest(BaseModel):
-    name: str
 
 
 class AuthenticatedStaticFiles:
@@ -660,58 +625,6 @@ async def auth_me(request: Request):
     return {"success": True, "data": auth_context}
 
 
-@app.get("/api/auth/tokens/scopes")
-async def auth_token_scopes(request: Request):
-    await _require_browser_auth(request)
-    return {
-        "scopes": [{"id": key, "description": label} for key, label in apitokens.SCOPES.items()]
-    }
-
-
-@app.get("/api/auth/tokens")
-async def auth_list_tokens(request: Request, response: Response):
-    context = await _require_browser_auth(request)
-    response.headers["Cache-Control"] = "no-store"
-    return {"data": await apitokens.list_tokens(str(context["user_id"]))}
-
-
-@app.post("/api/auth/tokens", status_code=201)
-async def auth_create_token(request: Request, payload: CreateApiTokenRequest, response: Response):
-    context = await _require_browser_auth(request)
-    try:
-        result = await apitokens.create_token(
-            str(context["user_id"]),
-            password=payload.password,
-            name=payload.name,
-            scopes=payload.scopes,
-            expires_in_days=payload.expires_in_days,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    response.headers["Cache-Control"] = "no-store"
-    return result
-
-
-@app.patch("/api/auth/tokens/{token_id}")
-async def auth_rename_token(token_id: str, request: Request, payload: RenameApiTokenRequest):
-    context = await _require_browser_auth(request)
-    try:
-        result = await apitokens.rename_token(str(context["user_id"]), token_id, payload.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if result is None:
-        raise HTTPException(status_code=404, detail="API token not found.")
-    return {"data": result}
-
-
-@app.delete("/api/auth/tokens/{token_id}")
-async def auth_revoke_token(token_id: str, request: Request):
-    context = await _require_browser_auth(request)
-    if not await apitokens.revoke_token(str(context["user_id"]), token_id):
-        raise HTTPException(status_code=404, detail="API token not found.")
-    return {"success": True}
-
-
 @app.get("/api/v1/me")
 async def api_me(request: Request):
     return await _require_api_token(request)
@@ -850,34 +763,6 @@ app.mount(
 )
 app.mount("/body-icons", StaticFiles(directory=bodies_dir, html=True), name="body-icons")
 app.mount("/mission-icons", StaticFiles(directory=missions_dir, html=True), name="mission-icons")
-
-
-# Add the version API endpoint BEFORE the catch-all route
-@app.get("/api/version")
-async def get_version():
-    """Return the current version information of the application."""
-    try:
-        version_info = get_full_version_info()
-        return version_info
-    except Exception as e:
-        logger.error(f"Error retrieving version information: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve version information: {str(e)}"
-        )
-
-
-@app.get("/api/update-check")
-async def update_check(refresh: bool = False):
-    """Return update availability based on GitHub releases."""
-    try:
-        return await get_update_check(force_refresh=refresh)
-    except UpdateCheckError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    except Exception as e:
-        logger.error(f"Error retrieving update information: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve update information: {str(e)}"
-        )
 
 
 def _resolve_decoded_folder(decoded_root: Path, foldername: str) -> Path:

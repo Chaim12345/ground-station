@@ -48,6 +48,9 @@ describe('SocketProvider', () => {
 
     expect(redactSocketDebugArgs('api.call', args)[0].data.password).toBe('[REDACTED]');
     expect(payload.data.password).toBe('private');
+    const tokenPayload = { cmd: 'tokens.create', data: { password: 'token-password' } };
+    expect(redactSocketDebugArgs('api.call', [tokenPayload])[0].data.password).toBe('[REDACTED]');
+    expect(tokenPayload.data.password).toBe('token-password');
   });
 
   it('provides socket instance to children', () => {

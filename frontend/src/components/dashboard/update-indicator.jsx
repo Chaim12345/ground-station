@@ -4,21 +4,29 @@ import { Box, Chip, Tooltip } from '@mui/material';
 import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import { fetchUpdateCheck } from './update-slice.jsx';
 import { useTranslation } from 'react-i18next';
+import { useSocket } from '../common/socket.jsx';
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 function UpdateIndicator({ compact = true }) {
     const dispatch = useDispatch();
+    const { socket } = useSocket();
     const { t } = useTranslation('dashboard');
     const { data } = useSelector((state) => state.updateCheck || {});
 
     useEffect(() => {
-        dispatch(fetchUpdateCheck());
+        if (!socket) return;
+        const checkForUpdate = () => dispatch(fetchUpdateCheck({ socket }));
+        if (socket.connected) checkForUpdate();
+        socket.on('connect', checkForUpdate);
         const interval = setInterval(() => {
-            dispatch(fetchUpdateCheck());
+            if (socket.connected) checkForUpdate();
         }, CHECK_INTERVAL_MS);
-        return () => clearInterval(interval);
-    }, [dispatch]);
+        return () => {
+            socket.off('connect', checkForUpdate);
+            clearInterval(interval);
+        };
+    }, [dispatch, socket]);
 
     if (!data?.isUpdateAvailable) {
         return null;

@@ -1,4 +1,4 @@
-"""Scoped API token behavior across the HTTP and account boundaries."""
+"""Personal token management over Socket.IO and scoped public HTTP access."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -9,7 +9,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from common import apitokens, auth
 from db.models import AuthSessions, UserRole, Users
+from handlers import socket as sockethandlers
 from server import startup
+
+
+class FakeSio:
+    def __init__(self):
+        self.handlers = {}
+        self.disconnected = []
+
+    def on(self, event):
+        def register(handler):
+            self.handlers[event] = handler
+            return handler
+
+        return register
+
+    async def disconnect(self, sid):
+        self.disconnected.append(sid)
 
 
 @pytest.fixture
@@ -18,7 +35,16 @@ def token_store(db_engine, monkeypatch):
     monkeypatch.setattr(auth, "AsyncSessionLocal", maker)
     monkeypatch.setattr(apitokens, "AsyncSessionLocal", maker)
     monkeypatch.setattr(startup, "AsyncSessionLocal", maker)
-    return maker
+
+    async def setup_not_required():
+        return False
+
+    monkeypatch.setattr(auth, "is_setup_required", setup_not_required)
+    sockethandlers.SOCKET_TOKENS.clear()
+    sockethandlers.SOCKET_AUTH.clear()
+    yield maker
+    sockethandlers.SOCKET_TOKENS.clear()
+    sockethandlers.SOCKET_AUTH.clear()
 
 
 async def _make_user(maker, username: str) -> tuple[str, str]:
@@ -44,35 +70,46 @@ async def _make_user(maker, username: str) -> tuple[str, str]:
         return str(user.id), browser_secret
 
 
+def _socket_call(sio, sid, cmd, data=None):
+    return sio.handlers["api.call"](sid, {"cmd": cmd, "data": data})
+
+
 @pytest.mark.asyncio
 async def test_token_is_shown_once_scoped_and_revoked(token_store):
     owner_id, browser_secret = await _make_user(token_store, "owner")
-    headers = {"Origin": "http://testserver"}
+    sio = FakeSio()
+    sockethandlers.register_socketio_handlers(sio)
+    sockethandlers.SOCKET_TOKENS["owner"] = browser_secret
+
+    scopes = await _socket_call(sio, "owner", "tokens.scopes")
+    assert scopes["success"] is True
+    assert "station:read" in {scope["id"] for scope in scopes["data"]}
+    assert (await _socket_call(sio, "owner", "tokens.list"))["data"] == []
+
+    wrong_password = await _socket_call(
+        sio,
+        "owner",
+        "tokens.create",
+        {"name": "Bad", "password": "wrong", "scopes": ["station:read"]},
+    )
+    assert wrong_password["error"] == "Incorrect password."
+    created = await _socket_call(
+        sio,
+        "owner",
+        "tokens.create",
+        {"name": "Home Assistant", "password": "password123", "scopes": ["station:read"]},
+    )
+    assert created["success"] is True
+    secret = created["data"]["token"]
+    token_id = created["data"]["data"]["id"]
+    assert secret.startswith(apitokens.TOKEN_PREFIX)
+    listed = await _socket_call(sio, "owner", "tokens.list")
+    assert listed["data"][0]["id"] == token_id
+    assert secret not in str(listed)
+
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
     ) as client:
-        client.cookies.set(auth.AUTH_SESSION_COOKIE_NAME, browser_secret)
-        created = await client.post(
-            "/api/auth/tokens",
-            headers=headers,
-            json={
-                "name": "Home Assistant",
-                "password": "password123",
-                "scopes": ["station:read"],
-                "expires_in_days": 365,
-            },
-        )
-        assert created.status_code == 201
-        secret = created.json()["token"]
-        token_id = created.json()["data"]["id"]
-        assert secret.startswith(apitokens.TOKEN_PREFIX)
-        assert created.headers["cache-control"] == "no-store"
-
-        listed = await client.get("/api/auth/tokens")
-        assert listed.status_code == 200
-        assert listed.json()["data"][0]["id"] == token_id
-        assert secret not in listed.text
-
         bearer = {"Authorization": f"Bearer {secret}"}
         me = await client.get("/api/v1/me", headers=bearer)
         assert me.status_code == 200
@@ -84,49 +121,56 @@ async def test_token_is_shown_once_scoped_and_revoked(token_store):
         assert (
             await client.get("/api/v1/me", headers={"Authorization": f"Bearer {browser_secret}"})
         ).status_code == 401
+        assert (await client.get("/api/auth/tokens", headers=bearer)).status_code == 404
 
-        # PATs never authenticate as browser sessions or enter legacy commands.
-        client.cookies.clear()
-        assert (await client.get("/api/auth/tokens", headers=bearer)).status_code == 401
-        assert await auth.authenticate_token(secret) is None
-        client.cookies.set(auth.AUTH_SESSION_COOKIE_NAME, browser_secret)
+    # A PAT cannot be used as a browser session on api.call.
+    sockethandlers.SOCKET_TOKENS["pat"] = secret
+    denied = await _socket_call(sio, "pat", "tokens.list")
+    assert denied["success"] is False
+    assert sio.disconnected == ["pat"]
 
-        revoked = await client.delete(f"/api/auth/tokens/{token_id}", headers=headers)
-        assert revoked.status_code == 200
+    renamed = await _socket_call(
+        sio, "owner", "tokens.rename", {"token_id": token_id, "name": "Renamed"}
+    )
+    assert renamed["data"]["name"] == "Renamed"
+    assert (await _socket_call(sio, "owner", "tokens.revoke", {"token_id": token_id}))[
+        "success"
+    ] is True
+    assert (await _socket_call(sio, "owner", "tokens.list"))["data"][0]["status"] == "revoked"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
         assert (await client.get("/api/v1/me", headers=bearer)).status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_token_ownership_and_origin(token_store):
-    owner_id, owner_cookie = await _make_user(token_store, "owner")
+async def test_token_ownership_and_invalid_scopes(token_store):
+    _, owner_cookie = await _make_user(token_store, "owner")
     _, other_cookie = await _make_user(token_store, "other")
-    result = await apitokens.create_token(owner_id, "password123", "Automation", ["station:read"])
-    token_id = result["data"]["id"]
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
-    ) as client:
-        client.cookies.set(auth.AUTH_SESSION_COOKIE_NAME, other_cookie)
-        assert (await client.get("/api/auth/tokens")).json()["data"] == []
-        assert (
-            await client.delete(
-                f"/api/auth/tokens/{token_id}", headers={"Origin": "http://testserver"}
-            )
-        ).status_code == 404
-        client.cookies.set(auth.AUTH_SESSION_COOKIE_NAME, owner_cookie)
-        assert (
-            await client.post(
-                "/api/auth/tokens",
-                headers={"Origin": "http://evil.example"},
-                json={"name": "Bad", "password": "password123", "scopes": ["station:read"]},
-            )
-        ).status_code == 403
-        assert (
-            await client.post(
-                "/api/auth/tokens",
-                headers={"Origin": "http://testserver"},
-                json={"name": "Bad", "password": "password123", "scopes": ["unknown:scope"]},
-            )
-        ).status_code == 400
+    sio = FakeSio()
+    sockethandlers.register_socketio_handlers(sio)
+    sockethandlers.SOCKET_TOKENS.update({"owner": owner_cookie, "other": other_cookie})
+    created = await _socket_call(
+        sio,
+        "owner",
+        "tokens.create",
+        {"name": "Automation", "password": "password123", "scopes": ["station:read"]},
+    )
+    token_id = created["data"]["data"]["id"]
+    assert (await _socket_call(sio, "other", "tokens.list"))["data"] == []
+    assert (
+        await _socket_call(sio, "other", "tokens.rename", {"token_id": token_id, "name": "Stolen"})
+    )["error"] == "API token not found."
+    assert (await _socket_call(sio, "other", "tokens.revoke", {"token_id": token_id}))[
+        "error"
+    ] == "API token not found."
+    invalid = await _socket_call(
+        sio,
+        "owner",
+        "tokens.create",
+        {"name": "Bad", "password": "password123", "scopes": ["unknown:scope"]},
+    )
+    assert invalid["error"] == "Unknown API token scope."
 
 
 @pytest.mark.asyncio

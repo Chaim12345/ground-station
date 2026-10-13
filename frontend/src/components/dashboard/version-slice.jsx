@@ -2,15 +2,21 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 
 export const fetchVersionInfo = createAsyncThunk(
     'version/fetchVersionInfo',
-    async (_, { rejectWithValue }) => {
+    async ({ socket }, { rejectWithValue }) => {
         try {
-            const response = await fetch('/api/version');
-            if (!response.ok) {
-                throw new Error('Failed to fetch version info');
+            if (!socket?.connected) {
+                throw new Error('Socket is disconnected.');
             }
-            return await response.json();
+            const reply = await socket.timeout(10000).emitWithAck('api.call', {
+                cmd: 'system.version',
+                data: null,
+            });
+            if (!reply?.success || !reply.data) {
+                throw new Error(reply?.error || 'Failed to fetch version info');
+            }
+            return reply.data;
         } catch (error) {
-            return rejectWithValue(error.message);
+            return rejectWithValue(error?.message || 'Failed to fetch version info');
         }
     }
 );

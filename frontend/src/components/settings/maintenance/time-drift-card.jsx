@@ -17,6 +17,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { useTranslation } from 'react-i18next';
 import { useUserTimeSettings } from '../../../hooks/useUserTimeSettings.jsx';
 import { formatDateTime } from '../../../utils/date-time.js';
+import { useSocket } from '../../common/socket.jsx';
 
 const CLOCK_POLL_INTERVAL_MS = 10000;
 const WARN_DRIFT_MS = 250;
@@ -30,6 +31,7 @@ const getSeverity = (absOffsetMs) => {
 
 const TimeDriftCard = () => {
     const { t } = useTranslation('settings');
+    const { socket } = useSocket();
     const { timezone, locale } = useUserTimeSettings();
     const [tickNow, setTickNow] = useState(Date.now());
     const [loading, setLoading] = useState(false);
@@ -46,20 +48,26 @@ const TimeDriftCard = () => {
 
         const requestStartMs = Date.now();
         try {
-            const response = await fetch('/api/version', { cache: 'no-store' });
+            if (!socket?.connected) {
+                throw new Error('Socket is disconnected.');
+            }
+            const reply = await socket.timeout(5000).emitWithAck('api.call', {
+                cmd: 'system.version',
+                data: null,
+            });
             const requestEndMs = Date.now();
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+            if (!reply?.success || !reply.data) {
+                throw new Error(reply?.error || 'Version request failed.');
             }
 
-            const payload = await response.json();
+            const payload = reply.data;
             const serverEpochMsRaw = Number(payload?.serverTimeEpochMs);
             const serverEpochMs = Number.isFinite(serverEpochMsRaw)
                 ? serverEpochMsRaw
                 : Number(new Date(payload?.serverTimeIsoUtc || '').getTime());
 
             if (!Number.isFinite(serverEpochMs)) {
-                throw new Error('Missing server time in /api/version response');
+                throw new Error('Missing server time in version response');
             }
 
             const midpointMs = (requestStartMs + requestEndMs) / 2;
@@ -73,13 +81,18 @@ const TimeDriftCard = () => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [socket]);
 
     useEffect(() => {
-        sampleBackendClock();
+        if (!socket) return;
+        if (socket.connected) sampleBackendClock();
+        socket.on('connect', sampleBackendClock);
         const intervalId = setInterval(sampleBackendClock, CLOCK_POLL_INTERVAL_MS);
-        return () => clearInterval(intervalId);
-    }, [sampleBackendClock]);
+        return () => {
+            socket.off('connect', sampleBackendClock);
+            clearInterval(intervalId);
+        };
+    }, [sampleBackendClock, socket]);
 
     useEffect(() => {
         const tickId = setInterval(() => {

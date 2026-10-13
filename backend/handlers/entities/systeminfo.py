@@ -18,6 +18,29 @@
 from typing import Any, Dict, Optional
 
 from server.libraryinfo import get_frontend_library_versions, get_library_versions
+from server.version import UpdateCheckError, get_full_version_info, get_update_check
+
+
+async def fetch_version_info(
+    sio: Any, data: Optional[Dict], logger: Any, sid: str
+) -> Dict[str, Any]:
+    """Return build details and a fresh server timestamp for clock sampling."""
+    del sio, data, logger, sid
+    return {"success": True, "data": get_full_version_info()}
+
+
+async def fetch_update_check(
+    sio: Any, data: Optional[Dict], logger: Any, sid: str
+) -> Dict[str, Any]:
+    """Check GitHub releases, bypassing the cache only for an explicit refresh."""
+    del sio, sid
+    refresh = isinstance(data, dict) and data.get("refresh") is True
+    try:
+        result = await get_update_check(force_refresh=refresh)
+        return {"success": True, "data": result}
+    except UpdateCheckError as exc:
+        logger.warning("Update check failed: %s", exc)
+        return {"success": False, "error": str(exc)}
 
 
 async def fetch_library_versions(
@@ -72,6 +95,8 @@ def register_handlers(registry):
     """Register system info handlers with the command registry."""
     registry.register_batch(
         {
+            "system.version": (fetch_version_info, "api_call"),
+            "system.update_check": (fetch_update_check, "api_call"),
             "fetch_library_versions": (fetch_library_versions, "api_call"),
             "fetch_frontend_library_versions": (
                 fetch_frontend_library_versions,

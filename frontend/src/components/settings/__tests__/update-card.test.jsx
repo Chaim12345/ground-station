@@ -16,6 +16,10 @@ vi.mock('../../../hooks/useUserTimeSettings.jsx', () => ({
     useUserTimeSettings: () => ({ timezone: 'UTC', locale: 'en-US' }),
 }));
 
+vi.mock('../../common/socket.jsx', () => ({
+    useSocket: () => ({ socket: null }),
+}));
+
 test('shows GitHub check errors and copies release commands', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {

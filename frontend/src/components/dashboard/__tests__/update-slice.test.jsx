@@ -1,12 +1,8 @@
 import { configureStore } from '@reduxjs/toolkit';
-import { afterEach, expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import reducer, { fetchUpdateCheck } from '../update-slice.jsx';
 
 const createStore = () => configureStore({ reducer: { updateCheck: reducer } });
-
-afterEach(() => {
-    vi.unstubAllGlobals();
-});
 
 test('forces a fresh update check and stores successful release status', async () => {
     const payload = {
@@ -18,33 +14,36 @@ test('forces a fresh update check and stores successful release status', async (
         checkedAt: '2026-10-07T11:00:00Z',
         isUpdateAvailable: true,
     };
-    const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(payload),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const emitWithAck = vi.fn().mockResolvedValue({ success: true, data: payload });
+    const socket = { connected: true, timeout: vi.fn().mockReturnValue({ emitWithAck }) };
     const store = createStore();
 
-    await store.dispatch(fetchUpdateCheck({ force: true }));
+    await store.dispatch(fetchUpdateCheck({ socket, force: true }));
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/update-check?refresh=true', { cache: 'no-store' });
+    expect(socket.timeout).toHaveBeenCalledWith(15000);
+    expect(emitWithAck).toHaveBeenCalledWith('api.call', {
+        cmd: 'system.update_check',
+        data: { refresh: true },
+    });
     expect(store.getState().updateCheck.data).toEqual(payload);
     expect(store.getState().updateCheck.error).toBeNull();
     expect(store.getState().updateCheck.lastChecked).toEqual(expect.any(Number));
 });
 
 test('stores the backend error returned by a failed GitHub check', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        status: 502,
-        json: vi.fn().mockResolvedValue({
-            detail: 'Unable to check GitHub Releases: connection timed out',
-        }),
-    }));
+    const emitWithAck = vi.fn().mockResolvedValue({
+        success: false,
+        error: 'Unable to check GitHub Releases: connection timed out',
+    });
+    const socket = { connected: true, timeout: vi.fn().mockReturnValue({ emitWithAck }) };
     const store = createStore();
 
-    await store.dispatch(fetchUpdateCheck());
+    await store.dispatch(fetchUpdateCheck({ socket }));
 
+    expect(emitWithAck).toHaveBeenCalledWith('api.call', {
+        cmd: 'system.update_check',
+        data: { refresh: false },
+    });
     const state = store.getState().updateCheck;
     expect(state.loading).toBe(false);
     expect(state.error).toBe('Unable to check GitHub Releases: connection timed out');

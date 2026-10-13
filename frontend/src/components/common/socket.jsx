@@ -29,7 +29,7 @@ import {setSocketForMiddleware} from '../waterfall/vfo-marker/vfo-middleware.jsx
 const SocketContext = createContext();
 
 export const redactSocketDebugArgs = (eventName, args) => {
-    if (eventName !== 'api.call' || !['users.create', 'users.reset_password'].includes(args[0]?.cmd)) {
+    if (eventName !== 'api.call' || !['users.create', 'users.reset_password', 'tokens.create'].includes(args[0]?.cmd)) {
         return args;
     }
     // Only the event-console copy is redacted. Socket.IO still receives the real password.

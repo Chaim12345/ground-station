@@ -24,10 +24,10 @@ in that metadata are browser routes and require a browser login; API token file
 downloads will be added with a separate scope. Live events and controls are
 also outside this first API slice.
 
-Token management uses the owner's browser login and current password. Its routes
-are `GET /api/auth/tokens/scopes`, `GET /api/auth/tokens`,
-`POST /api/auth/tokens`, `PATCH /api/auth/tokens/{id}`, and
-`DELETE /api/auth/tokens/{id}`. Deletion revokes the token immediately while
+Token management uses the owner's browser login over Socket.IO `api.call`.
+The commands are `tokens.scopes`, `tokens.list`, `tokens.create`,
+`tokens.rename`, and `tokens.revoke`. Creating a token also requires the
+current password. Revocation takes effect immediately while
 retaining its metadata in the list. Scopes are fixed at creation; replace a token
 to change its access. Password resets revoke the user's API tokens, and disabled
 accounts cannot use them.

@@ -1,7 +1,9 @@
+import logging
 from datetime import datetime
 
 import pytest
 
+from handlers.entities import systeminfo
 from server import version
 from server.version import get_full_version_info, get_system_info
 
@@ -89,3 +91,38 @@ async def test_update_check_surfaces_and_briefly_caches_failures(monkeypatch):
         await version.get_update_check(force_refresh=True)
 
     assert calls == 2
+
+
+@pytest.mark.unit
+async def test_socket_update_check_respects_refresh_and_returns_errors(monkeypatch):
+    refresh_values = []
+
+    async def fake_update_check(*, force_refresh=False):
+        refresh_values.append(force_refresh)
+        return {"latestVersion": "1.3.0"}
+
+    monkeypatch.setattr(systeminfo, "get_update_check", fake_update_check)
+    logger = logging.getLogger(__name__)
+
+    cached = await systeminfo.fetch_update_check(None, None, logger, "sid")
+    refreshed = await systeminfo.fetch_update_check(None, {"refresh": True}, logger, "sid")
+
+    assert cached == {"success": True, "data": {"latestVersion": "1.3.0"}}
+    assert refreshed == cached
+    assert refresh_values == [False, True]
+
+    async def failed_update_check(*, force_refresh=False):
+        raise version.UpdateCheckError("GitHub unavailable")
+
+    monkeypatch.setattr(systeminfo, "get_update_check", failed_update_check)
+    failed = await systeminfo.fetch_update_check(None, None, logger, "sid")
+    assert failed == {"success": False, "error": "GitHub unavailable"}
+
+
+@pytest.mark.unit
+async def test_socket_version_info_includes_clock_sample():
+    reply = await systeminfo.fetch_version_info(None, None, None, "sid")
+
+    assert reply["success"] is True
+    assert reply["data"]["version"]
+    assert isinstance(reply["data"]["serverTimeEpochMs"], int)

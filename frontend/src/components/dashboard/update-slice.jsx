@@ -2,21 +2,19 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 
 export const fetchUpdateCheck = createAsyncThunk(
     'updateCheck/fetchUpdateCheck',
-    async ({ force = false } = {}, { rejectWithValue }) => {
+    async ({ socket, force = false }, { rejectWithValue }) => {
         try {
-            const response = await fetch(force ? '/api/update-check?refresh=true' : '/api/update-check', {
-                cache: 'no-store',
+            if (!socket?.connected) {
+                throw new Error('Socket is disconnected.');
+            }
+            const reply = await socket.timeout(15000).emitWithAck('api.call', {
+                cmd: 'system.update_check',
+                data: { refresh: force },
             });
-            let payload = null;
-            try {
-                payload = await response.json();
-            } catch {
-                // Preserve the HTTP status below when the response has no JSON body.
+            if (!reply?.success || !reply.data) {
+                throw new Error(reply?.error || 'Update check failed');
             }
-            if (!response.ok) {
-                throw new Error(payload?.detail || `Update check failed (HTTP ${response.status})`);
-            }
-            return payload;
+            return reply.data;
         } catch (error) {
             return rejectWithValue(error instanceof Error ? error.message : 'Update check failed');
         }

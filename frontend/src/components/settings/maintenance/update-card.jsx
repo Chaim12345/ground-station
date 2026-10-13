@@ -33,6 +33,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt';
 import { useTranslation } from 'react-i18next';
 import { fetchUpdateCheck } from '../../dashboard/update-slice.jsx';
+import { useSocket } from '../../common/socket.jsx';
 import { useUserTimeSettings } from '../../../hooks/useUserTimeSettings.jsx';
 import { formatDateTime } from '../../../utils/date-time.js';
 
@@ -121,6 +122,7 @@ const Detail = ({ label, value, mono = false }) => (
 
 const UpdateCard = () => {
     const dispatch = useDispatch();
+    const { socket } = useSocket();
     const { t } = useTranslation('settings');
     const { timezone, locale } = useUserTimeSettings();
     const {
@@ -133,10 +135,12 @@ const UpdateCard = () => {
     const shouldCheckOnMount = !lastAttempted;
 
     useEffect(() => {
-        if (shouldCheckOnMount) {
-            dispatch(fetchUpdateCheck());
-        }
-    }, [dispatch, shouldCheckOnMount]);
+        if (!shouldCheckOnMount || !socket) return;
+        const checkForUpdate = () => dispatch(fetchUpdateCheck({ socket }));
+        if (socket.connected) checkForUpdate();
+        else socket.on('connect', checkForUpdate);
+        return () => socket.off('connect', checkForUpdate);
+    }, [dispatch, shouldCheckOnMount, socket]);
 
     const latestVersion = data?.latestVersion || null;
     const imageVersion = latestVersion || '<version>';
@@ -182,8 +186,8 @@ const UpdateCard = () => {
                     variant="outlined"
                     size="small"
                     startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
-                    onClick={() => dispatch(fetchUpdateCheck({ force: true }))}
-                    disabled={loading}
+                    onClick={() => dispatch(fetchUpdateCheck({ socket, force: true }))}
+                    disabled={loading || !socket?.connected}
                 >
                     {loading
                         ? t('maintenance.updates.checking', { defaultValue: 'Checking…' })

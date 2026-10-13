@@ -11,9 +11,8 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import { alpha } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
+import { useSocket } from '../common/socket.jsx';
 import { SettingsSection, SettingsSurface, SettingsSurfaceHeader } from '../settings/shared/index.js';
-
-const API_BASE = '/api/auth/tokens';
 
 const tokenCardSx = {
     p: { xs: 1.5, sm: 2 },
@@ -23,20 +22,15 @@ const tokenCardSx = {
         : alpha(theme.palette.grey[100], 0.9),
 };
 
-async function request(path, options = {}) {
-    const response = await fetch(path, {
-        credentials: 'same-origin',
-        ...options,
-        headers: {
-            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-            ...options.headers,
-        },
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(payload.detail || 'Request failed.');
+async function request(socket, cmd, data = null) {
+    if (!socket?.connected) {
+        throw new Error('Socket is disconnected. Reconnect before managing API tokens.');
     }
-    return payload;
+    const reply = await socket.timeout(20000).emitWithAck('api.call', { cmd, data });
+    if (!reply?.success) {
+        throw new Error(reply?.error || 'API-token request failed.');
+    }
+    return reply.data;
 }
 
 function showDate(value) {
@@ -45,6 +39,7 @@ function showDate(value) {
 
 export default function ApiTokensPage() {
     const { t } = useTranslation('dashboard');
+    const { socket } = useSocket();
     const [tokens, setTokens] = React.useState([]);
     const [scopes, setScopes] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
@@ -64,35 +59,42 @@ export default function ApiTokensPage() {
     const [revokeTarget, setRevokeTarget] = React.useState(null);
 
     const reload = React.useCallback(async () => {
-        const payload = await request(API_BASE);
-        setTokens(payload.data || []);
-    }, []);
+        const data = await request(socket, 'tokens.list');
+        setTokens(data || []);
+    }, [socket]);
 
     React.useEffect(() => {
         let active = true;
-        Promise.all([request(API_BASE), request(`${API_BASE}/scopes`)])
-            .then(([tokenPayload, scopePayload]) => {
-                if (!active) return;
-                setTokens(tokenPayload.data || []);
-                setScopes(scopePayload.scopes || []);
-            })
-            .catch((cause) => { if (active) setError(cause.message); })
-            .finally(() => { if (active) setLoading(false); });
-        return () => { active = false; };
-    }, []);
+        const load = () => {
+            setLoading(true);
+            Promise.all([request(socket, 'tokens.list'), request(socket, 'tokens.scopes')])
+                .then(([tokenData, scopeData]) => {
+                    if (!active) return;
+                    setTokens(tokenData || []);
+                    setScopes(scopeData || []);
+                    setError('');
+                })
+                .catch((cause) => { if (active) setError(cause.message); })
+                .finally(() => { if (active) setLoading(false); });
+        };
+        if (socket?.connected) load();
+        socket?.on('connect', load);
+        if (!socket) {
+            setError('Socket is unavailable.');
+            setLoading(false);
+        }
+        return () => { active = false; socket?.off('connect', load); };
+    }, [socket]);
 
     const createToken = async () => {
         setBusy(true);
         setVerificationError('');
         try {
-            const payload = await request(API_BASE, {
-                method: 'POST',
-                body: JSON.stringify({
-                    name,
-                    password,
-                    scopes: selectedScopes,
-                    expires_in_days: expiry === 'never' ? null : Number(expiry),
-                }),
+            const payload = await request(socket, 'tokens.create', {
+                name,
+                password,
+                scopes: selectedScopes,
+                expires_in_days: expiry === 'never' ? null : Number(expiry),
             });
             setVerificationOpen(false);
             setCreatedSecret(payload.token);
@@ -125,10 +127,7 @@ export default function ApiTokensPage() {
         setBusy(true);
         setError('');
         try {
-            await request(`${API_BASE}/${renameTarget.id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ name: renameValue }),
-            });
+            await request(socket, 'tokens.rename', { token_id: renameTarget.id, name: renameValue });
             setRenameTarget(null);
             await reload();
         } catch (cause) {
@@ -142,7 +141,7 @@ export default function ApiTokensPage() {
         setBusy(true);
         setError('');
         try {
-            await request(`${API_BASE}/${revokeTarget.id}`, { method: 'DELETE' });
+            await request(socket, 'tokens.revoke', { token_id: revokeTarget.id });
             setRevokeTarget(null);
             await reload();
         } catch (cause) {
