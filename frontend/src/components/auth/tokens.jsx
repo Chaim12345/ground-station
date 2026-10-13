@@ -2,7 +2,7 @@ import React from 'react';
 import {
     Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent,
     DialogContentText, DialogTitle, FormControlLabel, FormGroup, IconButton,
-    MenuItem, Paper, Stack, TextField, Typography,
+    Link, MenuItem, Paper, Stack, TextField, Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -166,6 +166,14 @@ export default function ApiTokensPage() {
                         </Button>
                     )}
                 />
+
+                <Alert severity="info">
+                    {t('api_tokens.reference_help', { defaultValue: 'Building a custom app or Home Assistant integration? The API reference lists endpoints and lets you try requests using a token from this page.' })}
+                    {' '}
+                    <Link href="/api/docs" target="_blank" rel="noopener noreferrer">
+                        {t('api_tokens.reference_link', { defaultValue: 'Open API reference' })}
+                    </Link>
+                </Alert>
 
                 {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
                 <SettingsSection

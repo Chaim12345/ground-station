@@ -125,6 +125,8 @@
     "menu": "API Tokens",
     "title": "API Tokens",
     "intro": "Create personal tokens for external applications. Each token has only the access you select.",
+    "reference_help": "Building a custom app or Home Assistant integration? The API reference lists endpoints and lets you try requests using a token from this page.",
+    "reference_link": "Open API reference",
     "list_title": "Your tokens",
     "list_help": "Review access, expiration, and usage. Revoke tokens you no longer need.",
     "create": "Create token",

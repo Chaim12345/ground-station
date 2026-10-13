@@ -5,16 +5,18 @@ import queue
 import tempfile
 import zipfile
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 import socketio
 from engineio.payload import Payload
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from audio.audiobroadcaster import AudioBroadcaster
 from audio.audiostreamer import WebAudioStreamer
@@ -27,7 +29,13 @@ from common.logger import logger
 from crud.scheduledobservations import fetch_scheduled_observations
 from db import AsyncSessionLocal, engine
 from db.migrations import run_migrations
-from db.models import Locations
+from db.models import (
+    Locations,
+    MonitoredSatellites,
+    ObservationStatus,
+    Satellites,
+    ScheduledObservations,
+)
 from handlers.entities.control import restore_full_backup_file
 from library.inventory import get_inventory
 from observations import events as obs_events
@@ -42,6 +50,7 @@ from observations.executor import (
 from observations.sync import ObservationSchedulerSync
 from pipeline.orchestration.processmanager import process_manager
 from server import runtimestate, shutdown
+from server.docs import get_themed_swagger_ui_html
 from server.firsttime import first_time_initialization, run_initial_sync
 from server.scheduler import (
     run_initial_observation_generation,
@@ -359,11 +368,24 @@ app = FastAPI(
     title="Ground Station API",
     description="API for satellite tracking, SDR control, and radio communication",
     version="1.0.0",
-    docs_url="/api/docs",
+    docs_url=None,
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def api_docs(request: Request):
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    return get_themed_swagger_ui_html(
+        openapi_url=f"{root_path}{app.openapi_url}", title=f"{app.title} - Swagger UI"
+    )
+
+
+# Document Bearer authentication in OpenAPI while _require_api_token enforces
+# the actual PAT and scope checks with consistent 401/403 responses.
+api_bearer_scheme = HTTPBearer(auto_error=False)
 
 app.add_middleware(
     CORSMiddleware,
@@ -515,9 +537,11 @@ class AuthenticatedStaticFiles:
         await self._static_files(scope, receive, send)
 
 
-@app.get("/api/auth/status")
+# Browser-session routes remain available to the frontend but are not part of the
+# personal-token API advertised to custom applications.
+@app.get("/api/auth/status", summary="Check setup and sign-in status", include_in_schema=False)
 async def auth_status(request: Request):
-    """Return setup/authentication status for frontend app bootstrapping."""
+    """Show whether initial setup is needed, whether this browser is signed in, and the station identity."""
     setup_mode = await authsvc.resolve_setup_mode()
     setup_required = setup_mode != authsvc.SETUP_MODE_NONE
     station_identity = await _load_station_identity()
@@ -537,9 +561,11 @@ async def auth_status(request: Request):
     }
 
 
-@app.post("/api/auth/setup-admin")
+@app.post(
+    "/api/auth/setup-admin", summary="Create the first administrator", include_in_schema=False
+)
 async def setup_admin(request: Request, response: Response):
-    """One-time bootstrap endpoint to create the initial admin account."""
+    """Complete one-time setup with a JSON body containing `username` and `password`. Sets a browser session cookie on success."""
     payload = await request.json()
     username = str(payload.get("username") or "")
     password = str(payload.get("password") or "")
@@ -569,9 +595,9 @@ async def setup_admin(request: Request, response: Response):
     }
 
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", summary="Sign in to the browser app", include_in_schema=False)
 async def auth_login(request: Request, response: Response):
-    """Login endpoint that sets an HttpOnly auth session cookie."""
+    """Send `username` and `password` as JSON to create a browser session. Set `keep_session_active` to extend its lifetime."""
     payload = await request.json()
     username = str(payload.get("username") or "")
     password = str(payload.get("password") or "")
@@ -608,9 +634,9 @@ async def auth_login(request: Request, response: Response):
     }
 
 
-@app.post("/api/auth/logout")
+@app.post("/api/auth/logout", summary="Sign out of the browser app", include_in_schema=False)
 async def auth_logout(request: Request, response: Response):
-    """Revoke the current auth session token and clear cookie state."""
+    """Revoke the current browser session and clear its cookie."""
     token = _extract_request_token(request, allow_cookie_token=True)
     if token:
         await authsvc.logout(token, reason="logout")
@@ -618,20 +644,30 @@ async def auth_logout(request: Request, response: Response):
     return {"success": True}
 
 
-@app.get("/api/auth/me")
+@app.get("/api/auth/me", summary="Get the signed-in browser user", include_in_schema=False)
 async def auth_me(request: Request):
-    """Return current user context from the authenticated request session."""
+    """Return the current user's session context. Requires a valid browser login."""
     auth_context = await _require_request_auth(request, require_auth=True, require_admin=False)
     return {"success": True, "data": auth_context}
 
 
-@app.get("/api/v1/me")
+@app.get(
+    "/api/v1/me",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Check an API token and its scopes",
+)
 async def api_me(request: Request):
+    """Return the token owner's identity and granted scopes. Requires a personal API token."""
     return await _require_api_token(request)
 
 
-@app.get("/api/v1/station")
+@app.get(
+    "/api/v1/station",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get station identity and software version",
+)
 async def api_station(request: Request):
+    """Return the station name, callsign, software version, and API version. Requires `station:read`."""
     await _require_api_token(request, "station:read")
     return {
         "station": await _load_station_identity(),
@@ -640,8 +676,52 @@ async def api_station(request: Request):
     }
 
 
-@app.get("/api/v1/observations")
+@app.get(
+    "/api/v1/status",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get current station activity",
+)
+async def api_status(request: Request):
+    """Return activity, active observation count, next scheduled observation, and monitored satellite count. Useful for Home Assistant polling; manual radio activity may not change this state. Requires `station:read`."""
+    await _require_api_token(request, "station:read")
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        active_count = await session.scalar(
+            select(func.count())
+            .select_from(ScheduledObservations)
+            .where(ScheduledObservations.status == ObservationStatus.RUNNING)
+        )
+        next_start = await session.scalar(
+            select(ScheduledObservations.event_start)
+            .where(
+                ScheduledObservations.enabled.is_(True),
+                ScheduledObservations.status == ObservationStatus.SCHEDULED,
+                ScheduledObservations.event_start >= now,
+            )
+            .order_by(ScheduledObservations.event_start)
+            .limit(1)
+        )
+        monitored_count = await session.scalar(
+            select(func.count())
+            .select_from(MonitoredSatellites)
+            .where(MonitoredSatellites.enabled.is_(True))
+        )
+    return {
+        "server_time": now.isoformat(),
+        "observation_state": "observing" if active_count else "idle",
+        "active_observation_count": active_count or 0,
+        "next_observation_at": next_start.isoformat() if next_start else None,
+        "monitored_satellite_count": monitored_count or 0,
+    }
+
+
+@app.get(
+    "/api/v1/observations",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="List scheduled observations",
+)
 async def api_observations(request: Request):
+    """Return the full scheduled observation records for custom applications. Requires `observations:read`."""
     await _require_api_token(request, "observations:read")
     async with AsyncSessionLocal() as session:
         result = await fetch_scheduled_observations(session)
@@ -650,14 +730,206 @@ async def api_observations(request: Request):
     return {"data": result.get("data", [])}
 
 
-@app.get("/api/v1/artifacts")
+@app.get(
+    "/api/v1/observations/upcoming",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="List upcoming scheduled observations",
+)
+async def api_upcoming_observations(
+    request: Request,
+    hours: int = Query(default=24, ge=1, le=168),
+    limit: int = Query(default=25, ge=1, le=100),
+    norad_id: Optional[int] = Query(default=None, gt=0),
+):
+    """Return compact scheduled jobs within the requested time window, optionally filtered by satellite. These are scheduled observations, not every predicted pass. Requires `observations:read`."""
+    await _require_api_token(request, "observations:read")
+    now = datetime.now(timezone.utc)
+    conditions = [
+        ScheduledObservations.enabled.is_(True),
+        ScheduledObservations.status == ObservationStatus.SCHEDULED,
+        ScheduledObservations.event_end >= now,
+        ScheduledObservations.event_start <= now + timedelta(hours=hours),
+    ]
+    if norad_id is not None:
+        conditions.append(ScheduledObservations.norad_id == norad_id)
+    async with AsyncSessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(ScheduledObservations)
+                    .where(*conditions)
+                    .order_by(ScheduledObservations.event_start, ScheduledObservations.id)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "data": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "status": row.status.value,
+                "norad_id": row.norad_id,
+                "satellite_name": (row.satellite_config or {}).get("name"),
+                "event_start": row.event_start.isoformat(),
+                "event_end": row.event_end.isoformat(),
+                "peak_altitude": (row.pass_config or {}).get("peak_altitude"),
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get(
+    "/api/v1/observations/{observation_id}",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get a scheduled observation",
+)
+async def api_observation(observation_id: str, request: Request):
+    """Return the full record for one scheduled observation by ID. Requires `observations:read`."""
+    await _require_api_token(request, "observations:read")
+    async with AsyncSessionLocal() as session:
+        result = await fetch_scheduled_observations(session, observation_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail="Could not load observation.")
+    if result.get("data") is None:
+        raise HTTPException(status_code=404, detail="Observation not found.")
+    return {"data": result["data"]}
+
+
+@app.get(
+    "/api/v1/satellites",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Search the satellite catalog",
+)
+async def api_satellites(
+    request: Request,
+    query: Optional[str] = Query(default=None, min_length=1, max_length=80),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Search satellite names and page through catalog summaries. The response includes the total match count but no orbit payloads. Requires `satellites:read`."""
+    await _require_api_token(request, "satellites:read")
+    # Treat user search text literally; SQL LIKE wildcards should not expand the result set.
+    escaped_query = (
+        query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") if query else None
+    )
+    conditions = [Satellites.name.ilike(f"%{escaped_query}%", escape="\\")] if query else []
+    async with AsyncSessionLocal() as session:
+        total = await session.scalar(
+            select(func.count()).select_from(Satellites).where(*conditions)
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(Satellites)
+                    .where(*conditions)
+                    .order_by(Satellites.name, Satellites.norad_id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "data": [
+            {"norad_id": row.norad_id, "name": row.name, "status": row.status} for row in rows
+        ],
+        "pagination": {"limit": limit, "offset": offset, "total": total or 0},
+    }
+
+
+@app.get(
+    "/api/v1/satellites/monitored",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="List monitored satellites",
+)
+async def api_monitored_satellites(
+    request: Request,
+    enabled_only: bool = True,
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """List satellites configured for observation generation. By default, only enabled entries are returned; use `enabled_only=false` to include disabled entries. Requires `satellites:read`."""
+    await _require_api_token(request, "satellites:read")
+    conditions = [MonitoredSatellites.enabled.is_(True)] if enabled_only else []
+    async with AsyncSessionLocal() as session:
+        total = await session.scalar(
+            select(func.count()).select_from(MonitoredSatellites).where(*conditions)
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(MonitoredSatellites)
+                    .where(*conditions)
+                    .order_by(MonitoredSatellites.norad_id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "data": [
+            {
+                "id": row.id,
+                "norad_id": row.norad_id,
+                "name": (row.satellite_config or {}).get("name"),
+                "enabled": row.enabled,
+                "min_elevation": (row.generation_config or {}).get("min_elevation"),
+            }
+            for row in rows
+        ],
+        "pagination": {"limit": limit, "offset": offset, "total": total or 0},
+    }
+
+
+@app.get(
+    "/api/v1/satellites/{norad_id}",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get a satellite's catalog details",
+)
+async def api_satellite(norad_id: int, request: Request):
+    """Return a satellite's name, status, operator, countries, and launch date by NORAD ID. Requires `satellites:read`."""
+    await _require_api_token(request, "satellites:read")
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Satellites, norad_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Satellite not found.")
+    return {
+        "data": {
+            "norad_id": row.norad_id,
+            "name": row.name,
+            "status": row.status,
+            "operator": row.operator,
+            "countries": row.countries,
+            "launched": row.launched.isoformat() if row.launched else None,
+        }
+    }
+
+
+@app.get(
+    "/api/v1/artifacts",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Browse artifact metadata",
+)
 async def api_artifacts(request: Request, page: int = 1, page_size: int = 25):
+    """Page through captured-artifact metadata. File downloads still require a browser session. Requires `artifacts:read`."""
     await _require_api_token(request, "artifacts:read")
     return await asyncio.to_thread(get_inventory().query, page=page, page_size=page_size)
 
 
-@app.get("/api/v1/artifacts/{artifact_id}")
+@app.get(
+    "/api/v1/artifacts/{artifact_id}",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get artifact metadata",
+)
 async def api_artifact(artifact_id: str, request: Request):
+    """Return metadata for one captured artifact by ID. File downloads still require a browser session. Requires `artifacts:read`."""
     await _require_api_token(request, "artifacts:read")
     item = await asyncio.to_thread(get_inventory().detail, artifact_id)
     if item is None:
@@ -665,9 +937,11 @@ async def api_artifact(artifact_id: str, request: Request):
     return {"data": item}
 
 
-@app.post("/api/database/restore")
+@app.post(
+    "/api/database/restore", summary="Restore a database from SQL backup", include_in_schema=False
+)
 async def restore_database_backup(request: Request):
-    """Restore an admin-uploaded SQL backup without placing it in browser or Socket.IO memory."""
+    """Stream a raw SQL backup in the request body (up to 1 GB). Requires an administrator browser session. Tables are dropped before restore by default; set `drop_tables=false` to retain them."""
     await _require_request_auth(request, require_auth=True, require_admin=True)
     content_length = request.headers.get("content-length")
     if content_length:
@@ -790,10 +1064,15 @@ def _resolve_observation_bundle(observations_root: Path, foldername: str) -> Pat
     return folder_path
 
 
-@app.get("/api/decoded/{foldername}/download")
+@app.get(
+    "/api/decoded/{foldername}/download",
+    summary="Download decoded files as ZIP",
+    include_in_schema=False,
+)
 async def download_decoded_folder(
     foldername: str, request: Request, background_tasks: BackgroundTasks
 ):
+    """Package one decoded-output folder into a ZIP download. Requires a browser session."""
     await _require_request_auth(request, require_auth=True, require_admin=False)
     decoded_root = Path(decoded_dir).resolve()
     folder_path = _resolve_decoded_folder(decoded_root, foldername)
@@ -819,11 +1098,15 @@ async def download_decoded_folder(
     )
 
 
-@app.get("/api/observations/{foldername}/download")
+@app.get(
+    "/api/observations/{foldername}/download",
+    summary="Download an observation bundle as ZIP",
+    include_in_schema=False,
+)
 async def download_observation_bundle(
     foldername: str, request: Request, background_tasks: BackgroundTasks
 ):
-    """Return an automated-observation bundle as one ZIP download."""
+    """Package a `.gsobs` automated-observation bundle into a ZIP download. Requires a browser session."""
     await _require_request_auth(request, require_auth=True, require_admin=False)
     bundle_path = _resolve_observation_bundle(Path(observations_dir).resolve(), foldername)
     temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
@@ -848,7 +1131,7 @@ async def download_observation_bundle(
 
 
 # This catch-all route comes AFTER specific API routes
-@app.get("/{full_path:path}")
+@app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(request: Request, full_path: str):
     # Unknown API URLs must fail as API calls rather than return the SPA HTML.
     if full_path == "api" or full_path.startswith("api/"):

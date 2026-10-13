@@ -16,6 +16,7 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "test:e2e": "playwright test",
+    "test:api-docs": "playwright test --config playwright.api-docs.config.js",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug"
   },
@@ -85,6 +86,7 @@
     "eslint-plugin-react-refresh": "^0.4.26",
     "globals": "^17.4.0",
     "jsdom": "^29.0.1",
+    "swagger-ui-dist": "^5.33.2",
     "vite": "^8.0.16",
     "vitest": "^4.1.2"
   },
