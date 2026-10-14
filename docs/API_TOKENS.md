@@ -12,6 +12,7 @@ Select only the scopes an application needs. The currently available scopes are:
 | `satellites:read` | `GET /api/v1/satellites`, `GET /api/v1/satellites/monitored`, `GET /api/v1/satellites/{norad_id}` |
 | `observations:read` | `GET /api/v1/observations`, `GET /api/v1/observations/upcoming`, `GET /api/v1/observations/{id}`, `GET /api/v1/events` (observation events) |
 | `artifacts:read` | `GET /api/v1/artifacts`, `GET /api/v1/artifacts/{id}` |
+| `artifacts:download` | `GET /api/v1/artifacts/{id}/download`, `GET /api/v1/artifacts/{id}/files/{path}` |
 
 `GET /api/v1/me` checks a token and returns its owner and granted scopes. For
 example:
@@ -40,8 +41,7 @@ intended for custom applications that need the complete schedule data.
 
 Upcoming observations are scheduled jobs, not every predicted satellite pass.
 A separate predicted-pass endpoint would need a bounded forecast and protection
-against expensive repeated propagation. Another possible addition is scoped
-artifact downloads.
+against expensive repeated propagation.
 
 `GET /api/v1/events` is a read-only Server-Sent Events (SSE) stream for custom
 applications and Home Assistant custom integrations. Use an API token with
@@ -69,10 +69,30 @@ an Authorization header, so browser applications should use a fetch-based SSE
 client. Do not put API tokens in URLs. The stream is process-local and requires
 a shared event broker before deploying multiple backend workers.
 
-The artifacts endpoints currently provide library metadata. Existing file URLs
-in that metadata are browser routes and require a browser login; API token file
-downloads will be added with a separate scope. Control endpoints remain outside
-this API slice.
+Artifact metadata includes `api_download_url` alongside browser-facing `url`
+fields. A token with `artifacts:download` can follow the API link to fetch a
+single file, or a ZIP containing a decoded folder or observation bundle. A token
+can have `artifacts:read` without download access, or download access without
+metadata access when the artifact ID is already known. Recording metadata also
+includes `api_download_urls` for its SigMF data, SigMF metadata, and available
+waterfall images. Snapshot thumbnails and decoded/audio sidecars have part links
+when present. Folder detail responses include API links for individual listed
+files. Other folder members can be fetched at
+`/api/v1/artifacts/{id}/files/{relative_path}`; the path must stay inside the
+indexed folder. Large direct files support HTTP `Range` requests. For example:
+
+```sh
+curl -H 'Authorization: Bearer YOUR_TOKEN' \
+  'http://localhost:5000/api/v1/artifacts/recording:capture/download' \
+  --output capture.sigmf-data
+curl -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Range: bytes=0-1048575' \
+  'http://localhost:5000/api/v1/artifacts/recording:capture/download' \
+  --output first-megabyte.bin
+```
+
+The existing browser-facing file URLs still use browser-session authentication,
+including `/snapshots`. Control endpoints remain outside this API slice.
 
 Token management uses the owner's browser login over Socket.IO `api.call`.
 The commands are `tokens.scopes`, `tokens.list`, `tokens.create`,

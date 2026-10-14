@@ -36,6 +36,8 @@ async def test_api_docs_theme_and_schema_routes():
         "/api/v1/satellites/{norad_id}",
         "/api/v1/artifacts",
         "/api/v1/artifacts/{artifact_id}",
+        "/api/v1/artifacts/{artifact_id}/download",
+        "/api/v1/artifacts/{artifact_id}/files/{file_path}",
     }
     for methods in operations.values():
         for operation in methods.values():

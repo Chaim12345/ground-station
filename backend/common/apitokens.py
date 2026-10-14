@@ -22,6 +22,7 @@ SCOPES = {
     "satellites:read": "Read monitored satellites and satellite metadata",
     "observations:read": "Read scheduled observations and their status",
     "artifacts:read": "Read file library metadata",
+    "artifacts:download": "Download file library contents",
 }
 
 

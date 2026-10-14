@@ -1,11 +1,14 @@
 """Personal token management over Socket.IO and scoped public HTTP access."""
 
+import io
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from fastapi import Request
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from common import apitokens, auth
@@ -22,6 +25,7 @@ from db.models import (
     Users,
 )
 from handlers import socket as sockethandlers
+from library.inventory import LibraryInventory
 from server import startup
 
 
@@ -449,6 +453,154 @@ async def test_every_public_route_requires_a_pat_and_its_scope(token_store, monk
         )
         assert artifact_page.json()["page"] == 2
         assert artifact_page.json()["page_size"] == 1
+
+
+@pytest.mark.asyncio
+async def test_artifact_downloads_are_scoped_and_support_ranges(token_store, monkeypatch, tmp_path):
+    download_spec = startup.app.openapi()["paths"]["/api/v1/artifacts/{artifact_id}/download"][
+        "get"
+    ]
+    assert "application/octet-stream" in download_spec["responses"]["200"]["content"]
+    assert "application/zip" in download_spec["responses"]["200"]["content"]
+    owner_id, browser_secret = await _make_user(token_store, "artifact-consumer")
+    read_token = await apitokens.create_token(
+        owner_id, "password123", "Metadata", ["artifacts:read"]
+    )
+    download_token = await apitokens.create_token(
+        owner_id, "password123", "Downloads", ["artifacts:download"]
+    )
+    read_headers = {"Authorization": f"Bearer {read_token['token']}"}
+    download_headers = {"Authorization": f"Bearer {download_token['token']}"}
+
+    backend = tmp_path / "backend"
+    data = backend / "data"
+    for name in ("recordings", "snapshots", "decoded", "audio", "transcriptions", "observations"):
+        (data / name).mkdir(parents=True)
+    (data / "recordings" / "capture.sigmf-data").write_bytes(b"abcdefgh")
+    (data / "recordings" / "capture.sigmf-meta").write_text('{"global":{}}')
+    (data / "recordings" / "capture.png").write_bytes(b"waterfall")
+    (data / "recordings" / "capture_waterfall_thumb.png").write_bytes(b"preview")
+    (data / "snapshots" / "waterfall.png").write_bytes(b"snapshot")
+    (data / "decoded" / "packet.bin").write_bytes(b"packet")
+    (data / "decoded" / "packet.json").write_text("{}")
+    (data / "audio" / "voice.wav").write_bytes(b"voice")
+    (data / "transcriptions" / "voice.txt").write_text("transcript")
+    bundle = data / "observations" / "NOAA.gsobs"
+    (bundle / "decoded").mkdir(parents=True)
+    (bundle / "manifest.json").write_text("{}")
+    (bundle / "decoded" / "image.png").write_bytes(b"image")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("private")
+    (bundle / "outside.txt").symlink_to(outside)
+    inventory = LibraryInventory(backend)
+    inventory.rebuild()
+    monkeypatch.setattr(startup, "get_inventory", lambda: inventory)
+
+    # Exercise the actual snapshot mount with fixture files, preserving its
+    # browser-session contract after switching it to authenticated static files.
+    snapshot_mount = next(route for route in startup.app.routes if route.path == "/snapshots")
+    assert isinstance(snapshot_mount.app, startup.AuthenticatedStaticFiles)
+    monkeypatch.setattr(
+        snapshot_mount.app,
+        "_static_files",
+        StaticFiles(directory=str(data / "snapshots"), html=True),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
+        metadata = await client.get("/api/v1/artifacts", headers=read_headers)
+        assert metadata.status_code == 200
+        recording = next(
+            item for item in metadata.json()["items"] if item["id"] == "recording:capture"
+        )
+        assert recording["api_download_urls"]["meta"].endswith("?part=meta")
+        assert (await client.get(recording["api_download_url"])).status_code == 401
+        assert (
+            await client.get(recording["api_download_url"], headers=read_headers)
+        ).status_code == 403
+        assert (await client.get("/api/v1/artifacts", headers=download_headers)).status_code == 403
+
+        downloaded = await client.get(recording["api_download_url"], headers=download_headers)
+        assert downloaded.status_code == 200
+        assert downloaded.content == b"abcdefgh"
+        assert downloaded.headers["accept-ranges"] == "bytes"
+        partial = await client.get(
+            recording["api_download_url"],
+            headers={**download_headers, "Range": "bytes=2-4"},
+        )
+        assert partial.status_code == 206
+        assert partial.content == b"cde"
+        assert partial.headers["content-range"] == "bytes 2-4/8"
+        assert (
+            await client.get(recording["api_download_urls"]["meta"], headers=download_headers)
+        ).json() == {"global": {}}
+        assert (
+            await client.get(recording["api_download_urls"]["thumbnail"], headers=download_headers)
+        ).content == b"preview"
+
+        for item_id, expected in (
+            ("snapshot:waterfall.png", b"snapshot"),
+            ("decoded:packet.bin", b"packet"),
+            ("audio:voice.wav", b"voice"),
+            ("transcription:voice.txt", b"transcript"),
+        ):
+            detail = await client.get(f"/api/v1/artifacts/{item_id}", headers=read_headers)
+            assert detail.status_code == 200
+            response = await client.get(
+                detail.json()["data"]["api_download_url"], headers=download_headers
+            )
+            assert response.content == expected
+        assert (
+            await client.get(
+                "/api/v1/artifacts/decoded:packet.bin/download?part=sidecar",
+                headers=download_headers,
+            )
+        ).json() == {}
+
+        detail = await client.get("/api/v1/artifacts/observation:NOAA.gsobs", headers=read_headers)
+        assert detail.status_code == 200
+        item = detail.json()["data"]
+        member_url = next(
+            entry["api_download_url"]
+            for entry in item["artifacts"]
+            if entry["path"] == "decoded/image.png"
+        )
+        assert (await client.get(member_url, headers=download_headers)).content == b"image"
+        assert all(entry["path"] != "outside.txt" for entry in item["artifacts"])
+        zipped = await client.get(item["api_download_url"], headers=download_headers)
+        assert zipped.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(zipped.content)) as archive:
+            assert archive.read("decoded/image.png") == b"image"
+            assert "outside.txt" not in archive.namelist()
+        assert (
+            await client.get(
+                "/api/v1/artifacts/observation:NOAA.gsobs/files/outside.txt",
+                headers=download_headers,
+            )
+        ).status_code == 404
+        assert inventory.resolve_download("observation:NOAA.gsobs", member="../outside.txt") is None
+        assert (
+            await client.get(
+                "/api/v1/artifacts/recording:capture/download?part=unknown",
+                headers=download_headers,
+            )
+        ).status_code == 404
+
+        assert (await client.get("/snapshots/waterfall.png")).status_code == 401
+        assert (
+            await client.get("/snapshots/waterfall.png", headers=download_headers)
+        ).status_code == 401
+        browser = await client.get(
+            "/snapshots/waterfall.png", cookies={auth.AUTH_SESSION_COOKIE_NAME: browser_secret}
+        )
+        assert browser.status_code == 200
+        assert browser.content == b"snapshot"
+
+        assert await apitokens.revoke_token(owner_id, download_token["data"]["id"])
+        assert (
+            await client.get(recording["api_download_url"], headers=download_headers)
+        ).status_code == 401
 
 
 def _event_request(secret: str) -> Request:

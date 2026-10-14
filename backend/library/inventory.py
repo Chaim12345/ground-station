@@ -268,6 +268,76 @@ class LibraryInventory:
             return self._decoded_folder_detail(self._public(internal), path)
         return self._public(internal)
 
+    def resolve_download(
+        self, item_id: str, *, part: Optional[str] = None, member: Optional[str] = None
+    ) -> Optional[Path]:
+        """Resolve an indexed artifact or one of its owned files for a download."""
+        if not self._ready:
+            self.rebuild()
+        with self._lock:
+            item = self._items.get(item_id)
+            if item is None:
+                return None
+            indexed_path = Path(str(item["_path"]))
+            item_type = str(item.get("type"))
+            storage_root = (
+                self.roots.observations
+                if item.get("folder_kind") == "observation"
+                else {
+                    "recording": self.roots.recordings,
+                    "snapshot": self.roots.snapshots,
+                    "decoded": self.roots.decoded,
+                    "decoded_folder": self.roots.decoded,
+                    "audio": self.roots.audio,
+                    "transcription": self.roots.transcriptions,
+                }.get(item_type)
+            )
+        if storage_root is None:
+            return None
+
+        candidate: Optional[Path]
+        if member is not None:
+            if part is not None or not member or Path(member).is_absolute():
+                return None
+            candidate = indexed_path / member
+        elif part is None or (item_type == "recording" and part == "data"):
+            candidate = indexed_path
+        elif item_type == "recording":
+            waterfall_thumbnail = indexed_path.with_name(f"{indexed_path.stem}_waterfall_thumb.png")
+            jpeg_thumbnail = indexed_path.parent / "thumbnails" / f"{indexed_path.stem}.jpg"
+            candidates = {
+                "meta": indexed_path.with_suffix(".sigmf-meta"),
+                "snapshot": indexed_path.with_suffix(".png"),
+                "thumbnail": (
+                    waterfall_thumbnail if waterfall_thumbnail.is_file() else jpeg_thumbnail
+                ),
+            }
+            candidate = candidates.get(part)
+        elif item_type == "snapshot" and part == "thumbnail":
+            candidate = indexed_path.parent / "thumbnails" / f"{indexed_path.stem}.jpg"
+        elif item_type in {"decoded", "audio"} and part == "sidecar":
+            candidate = indexed_path.with_suffix(".json")
+        else:
+            return None
+        if candidate is None:
+            return None
+
+        try:
+            root = storage_root.resolve(strict=True)
+            indexed = indexed_path.resolve(strict=True)
+            resolved = candidate.resolve(strict=True)
+            # Inventory entries and nested members must stay under their own
+            # library root even if a symlink appears after a catalogue rebuild.
+            indexed.relative_to(root)
+            resolved.relative_to(indexed if member is not None else root)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if member is not None and not indexed.is_dir():
+            return None
+        if not resolved.is_file() and not (member is None and part is None and resolved.is_dir()):
+            return None
+        return resolved
+
     def delete(self, item_ids: Iterable[str]) -> Dict[str, Any]:
         """Delete indexed items, then rebuild once to guarantee consistency."""
         if not self._ready:
@@ -608,7 +678,7 @@ class LibraryInventory:
             # entry churn, which would wrongly keep old folders out of purges.
             latest_mtime: float | None = None
             for path in folder.rglob("*"):
-                if not path.is_file():
+                if path.is_symlink() or not path.is_file():
                     continue
                 file_stat = path.stat()
                 total_size += file_stat.st_size
@@ -797,7 +867,7 @@ class LibraryInventory:
             # Content mtimes only, same as the decoded folder scan.
             latest_mtime: float | None = None
             for path in folder.rglob("*"):
-                if not path.is_file():
+                if path.is_symlink() or not path.is_file():
                     continue
                 file_stat = path.stat()
                 file_count += 1
@@ -876,7 +946,7 @@ class LibraryInventory:
         images: List[Dict[str, Any]] = []
         total_size = 0
         for path in folder.rglob("*"):
-            if not path.is_file():
+            if path.is_symlink() or not path.is_file():
                 continue
             stat = path.stat()
             total_size += stat.st_size
@@ -930,7 +1000,12 @@ class LibraryInventory:
                         recording_owner_by_path[member.relative_to(folder).as_posix()] = name
 
         for path in folder.rglob("*"):
-            if not path.is_file() or path == manifest_path or path.suffix.lower() == ".json":
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or path == manifest_path
+                or path.suffix.lower() == ".json"
+            ):
                 continue
             relative = path.relative_to(folder)
             if "thumbnails" in relative.parent.parts:

@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional, Set
+from urllib.parse import quote
 
 import socketio
 from engineio.payload import Payload
@@ -1012,9 +1013,10 @@ async def api_satellite(norad_id: int, request: Request):
     summary="Browse artifact metadata",
 )
 async def api_artifacts(request: Request, page: int = 1, page_size: int = 25):
-    """Page through captured-artifact metadata. File downloads still require a browser session. Requires `artifacts:read`."""
+    """Page through captured-artifact metadata. Download links require `artifacts:download`. Requires `artifacts:read`."""
     await _require_api_token(request, "artifacts:read")
-    return await asyncio.to_thread(get_inventory().query, page=page, page_size=page_size)
+    result = await asyncio.to_thread(get_inventory().query, page=page, page_size=page_size)
+    return {**result, "items": [_api_artifact_links(item) for item in result["items"]]}
 
 
 @app.get(
@@ -1023,12 +1025,146 @@ async def api_artifacts(request: Request, page: int = 1, page_size: int = 25):
     summary="Get artifact metadata",
 )
 async def api_artifact(artifact_id: str, request: Request):
-    """Return metadata for one captured artifact by ID. File downloads still require a browser session. Requires `artifacts:read`."""
+    """Return metadata and download links for one captured artifact by ID. Requires `artifacts:read`; following download links requires `artifacts:download`."""
     await _require_api_token(request, "artifacts:read")
     item = await asyncio.to_thread(get_inventory().detail, artifact_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Artifact not found.")
-    return {"data": item}
+    return {"data": _api_artifact_links(item)}
+
+
+def _api_artifact_url(artifact_id: str, member: Optional[str] = None) -> str:
+    base = f"/api/v1/artifacts/{quote(artifact_id, safe='')}"
+    if member is not None:
+        return f"{base}/files/{quote(member, safe='/')}"
+    return f"{base}/download"
+
+
+def _api_artifact_links(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Add PAT download links without replacing browser-session library URLs."""
+    linked = dict(item)
+    artifact_id = str(item["id"])
+    base = _api_artifact_url(artifact_id)
+    linked["api_download_url"] = base
+    item_type = item.get("type")
+    if item_type == "recording":
+        parts = {"data": base, "meta": f"{base}?part=meta"}
+        snapshot = item.get("snapshot")
+        if snapshot:
+            parts["snapshot"] = f"{base}?part=snapshot"
+            if snapshot.get("thumbnail_url"):
+                parts["thumbnail"] = f"{base}?part=thumbnail"
+        linked["api_download_urls"] = parts
+    elif item_type == "snapshot" and item.get("thumbnail_url"):
+        linked["api_download_urls"] = {
+            "image": base,
+            "thumbnail": f"{base}?part=thumbnail",
+        }
+    elif item_type in {"decoded", "audio"} and item.get("file_count", 1) > 1:
+        linked["api_download_urls"] = {"content": base, "sidecar": f"{base}?part=sidecar"}
+
+    # Folder details already list nested files. Point those entries at the
+    # member route so clients can fetch one product without downloading the ZIP.
+    for key in ("images", "artifacts"):
+        if key in item:
+            linked[key] = [
+                {**entry, "api_download_url": _api_artifact_url(artifact_id, entry["path"])}
+                for entry in item[key]
+            ]
+    if "recordings" in item:
+        linked["recordings"] = [
+            {
+                **recording,
+                "api_download_urls": {
+                    "data": _api_artifact_url(artifact_id, f"recordings/{recording['data_file']}"),
+                    "meta": _api_artifact_url(artifact_id, f"recordings/{recording['meta_file']}"),
+                },
+            }
+            for recording in item["recordings"]
+        ]
+    return linked
+
+
+def _zip_api_artifact(folder: Path) -> str:
+    """Build a temporary archive from an inventory-approved folder."""
+    temp_zip = tempfile.NamedTemporaryFile(prefix="gs-artifact-", suffix=".zip", delete=False)
+    temp_zip.close()
+    try:
+        with zipfile.ZipFile(temp_zip.name, "w", zipfile.ZIP_DEFLATED) as archive:
+            for file_path in folder.rglob("*"):
+                # Local symlinks must not pull files from outside the indexed folder.
+                if file_path.is_symlink() or not file_path.is_file():
+                    continue
+                try:
+                    file_path.resolve().relative_to(folder)
+                except ValueError:
+                    continue
+                archive.write(file_path, file_path.relative_to(folder).as_posix())
+    except Exception:
+        os.remove(temp_zip.name)
+        raise
+    return temp_zip.name
+
+
+@app.get(
+    "/api/v1/artifacts/{artifact_id}/download",
+    dependencies=[Depends(api_bearer_scheme)],
+    response_class=FileResponse,
+    responses={
+        200: {
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+                "application/zip": {"schema": {"type": "string", "format": "binary"}},
+            }
+        },
+        206: {"description": "Partial file content"},
+    },
+    summary="Download a library artifact",
+)
+async def api_artifact_download(
+    artifact_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    part: Optional[str] = Query(default=None),
+):
+    """Download a file or a ZIP of a folder by inventory ID. Use `part` for a recording's `meta`, `snapshot`, or `thumbnail`, a snapshot's `thumbnail`, or a decoded/audio `sidecar`. Supports byte ranges for direct files. Requires `artifacts:download`."""
+    await _require_api_token(request, "artifacts:download")
+    path = await asyncio.to_thread(get_inventory().resolve_download, artifact_id, part=part)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Artifact file not found.")
+    if path.is_dir():
+        archive_path = await asyncio.to_thread(_zip_api_artifact, path)
+        background_tasks.add_task(os.remove, archive_path)
+        return FileResponse(
+            archive_path,
+            filename=f"{path.name}.zip",
+            background=background_tasks,
+            headers={"Cache-Control": "private, no-store"},
+        )
+    return FileResponse(path, filename=path.name, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get(
+    "/api/v1/artifacts/{artifact_id}/files/{file_path:path}",
+    dependencies=[Depends(api_bearer_scheme)],
+    response_class=FileResponse,
+    responses={
+        200: {
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+            }
+        },
+        206: {"description": "Partial file content"},
+    },
+    summary="Download one file from a library folder",
+)
+async def api_artifact_file(artifact_id: str, file_path: str, request: Request):
+    """Download one member of an indexed decoded folder or observation bundle. Supports byte ranges. Requires `artifacts:download`."""
+    await _require_api_token(request, "artifacts:download")
+    path = await asyncio.to_thread(get_inventory().resolve_download, artifact_id, member=file_path)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Artifact file not found.")
+    return FileResponse(path, filename=path.name, headers={"Cache-Control": "private, no-store"})
 
 
 @app.post(
@@ -1120,7 +1256,9 @@ app.mount(
     AuthenticatedStaticFiles(directory=observations_dir, html=False),
     name="observations",
 )
-app.mount("/snapshots", StaticFiles(directory=snapshots_dir, html=True), name="snapshots")
+app.mount(
+    "/snapshots", AuthenticatedStaticFiles(directory=snapshots_dir, html=True), name="snapshots"
+)
 app.mount("/decoded", AuthenticatedStaticFiles(directory=decoded_dir, html=True), name="decoded")
 app.mount("/audio", AuthenticatedStaticFiles(directory=audio_dir, html=True), name="audio")
 # Note: html=False for transcriptions to ensure .txt files are served with correct content-type
