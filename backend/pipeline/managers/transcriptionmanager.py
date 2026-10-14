@@ -149,12 +149,14 @@ class TranscriptionManager:
             self.logger.error(f"Unknown transcription provider: {provider}")
             return False
 
-        if translation_backend not in {"google", "libretranslate"}:
+        if translation_backend not in {"none", "google", "libretranslate"}:
             self.logger.error("Unknown translation backend: %s", translation_backend)
             return False
         # Gemini handles its own text translation and ignores this separate choice.
         if provider == "gemini":
             translation_backend = "google"
+        elif translation_backend == "none":
+            translate_to = "none"
         if (
             provider in {"deepgram", "parakeet"}
             and translate_to != "none"

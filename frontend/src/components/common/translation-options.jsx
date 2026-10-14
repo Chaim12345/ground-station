@@ -4,6 +4,11 @@ import { useTranslation } from 'react-i18next';
 
 export const libreLanguageCode = (code) => code === 'zh' ? 'zh-Hans' : code;
 
+// Older saved tasks may have a target language but no backend field.
+export const resolveTranslationBackend = (backend, target) => (
+    backend || (target && target !== 'none' ? 'google' : 'none')
+);
+
 export const isLibrePairSupported = (capabilities, source, target) => {
     if (!capabilities?.configured || !capabilities.languages?.length) return false;
     const targetCode = libreLanguageCode(target);
@@ -48,7 +53,8 @@ export const TranslationBackendField = ({ value, onChange, source, target, capab
         <Stack spacing={1}>
             <FormControl fullWidth size="small" disabled={disabled}>
                 <InputLabel id={labelId}>{t('translation.backend_label', { defaultValue: 'Translation Service' })}</InputLabel>
-                <Select labelId={labelId} value={value || 'google'} label={t('translation.backend_label', { defaultValue: 'Translation Service' })} onChange={(event) => onChange(event.target.value)}>
+                <Select labelId={labelId} value={resolveTranslationBackend(value, target)} label={t('translation.backend_label', { defaultValue: 'Translation Service' })} onChange={(event) => onChange(event.target.value)}>
+                    <MenuItem value="none">{t('translation.no_translation', { defaultValue: 'No translation' })}</MenuItem>
                     <MenuItem value="google">Google Translate</MenuItem>
                     <MenuItem value="libretranslate" disabled={capabilities?.configured === false}>LibreTranslate</MenuItem>
                 </Select>

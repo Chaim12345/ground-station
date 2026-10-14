@@ -814,9 +814,11 @@ const TranscriptionSubtitles = ({ maxLines = 4, maxWordsPerLine = 20, historyLim
         <>
             {activeVFOs.map(({ vfoNumber, transcription }) => {
                 const vfoMarker = vfoMarkers[vfoNumber]; // vfoMarkers is an object with keys 1, 2, 3, 4
-                const translateTo = vfoMarker?.transcriptionTranslateTo || 'none';
-                const sourceLang = vfoMarker?.transcriptionLanguage || 'auto';
                 const provider = vfoMarker?.transcriptionProvider || 'gemini';
+                const translateTo = provider !== 'gemini' && vfoMarker?.transcriptionTranslationBackend === 'none'
+                    ? 'none'
+                    : (vfoMarker?.transcriptionTranslateTo || 'none');
+                const sourceLang = vfoMarker?.transcriptionLanguage || 'auto';
 
                 return (
                             <React.Fragment key={vfoNumber}>

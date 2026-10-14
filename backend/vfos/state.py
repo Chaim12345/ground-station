@@ -29,7 +29,7 @@ class VFOState:
     transcription_translate_to: str = (
         "none"  # Target language for translation (none = no translation)
     )
-    transcription_translation_backend: str = "google"
+    transcription_translation_backend: str = "none"
     decoder: str = "none"  # Decoder type: none, sstv, aprs, fsk, gmsk, gfsk, bpsk, morse, gnss
     locked_transmitter_id: str = "none"
     parameters_enabled: bool = True  # Enable/disable custom decoder parameters
@@ -186,8 +186,22 @@ class VFOManager:
         if transcription_translate_to is not None:
             vfo_state.transcription_translate_to = transcription_translate_to
 
-        if transcription_translation_backend in {"google", "libretranslate"}:
+        if transcription_translation_backend in {"none", "google", "libretranslate"}:
             vfo_state.transcription_translation_backend = transcription_translation_backend
+        elif (
+            transcription_translate_to is not None
+            and transcription_translate_to != "none"
+            and vfo_state.transcription_translation_backend == "none"
+        ):
+            # Older clients sent only a target language and used Google implicitly.
+            vfo_state.transcription_translation_backend = "google"
+
+        # The separate translation service is optional for Deepgram and Parakeet.
+        if (
+            vfo_state.transcription_provider in {"deepgram", "parakeet"}
+            and vfo_state.transcription_translation_backend == "none"
+        ):
+            vfo_state.transcription_translate_to = "none"
 
         # check decoder setting
         if decoder is not None:

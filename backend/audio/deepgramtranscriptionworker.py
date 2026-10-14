@@ -396,7 +396,12 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
             confidence: Optional confidence score (0.0 to 1.0)
         """
         # If translation is requested and enabled
-        if self.translate_to and self.translate_to != "none" and self.translate_to != language:
+        if (
+            self.translation_backend != "none"
+            and self.translate_to
+            and self.translate_to != "none"
+            and self.translate_to != language
+        ):
             try:
                 translated_text = await self._translate_text(text, language, self.translate_to)
                 if translated_text:

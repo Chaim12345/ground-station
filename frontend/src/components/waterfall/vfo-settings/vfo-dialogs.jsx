@@ -24,7 +24,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { useTranslation } from 'react-i18next';
 import SharedTransmittersDialog from '../../satellites/transmitters-dialog.jsx';
 import { useSocket } from '../../common/socket.jsx';
-import { getLibreTargetOptions, isLibrePairSupported, TranslationBackendField, useLibreTranslateCapabilities } from '../../common/translation-options.jsx';
+import { getLibreTargetOptions, isLibrePairSupported, resolveTranslationBackend, TranslationBackendField, useLibreTranslateCapabilities } from '../../common/translation-options.jsx';
 
 const TARGET_LANGUAGES = [
     ['en', '🇬🇧', 'English'], ['el', '🇬🇷', 'Greek'], ['es', '🇪🇸', 'Spanish'],
@@ -66,11 +66,15 @@ export const TranscriptionParamsDialog = ({
     const { socket } = useSocket();
     const vfo = vfoMarkers?.[vfoIndex];
     // Dialogs are mounted on open, so these values remain local until Apply.
-    const [draft, setDraft] = React.useState(() => ({
-        transcriptionLanguage: vfo?.transcriptionLanguage || 'auto',
-        transcriptionTranslationBackend: vfo?.transcriptionTranslationBackend || 'google',
-        transcriptionTranslateTo: vfo?.transcriptionTranslateTo || 'none',
-    }));
+    const [draft, setDraft] = React.useState(() => {
+        const backend = resolveTranslationBackend(vfo?.transcriptionTranslationBackend, vfo?.transcriptionTranslateTo);
+        return {
+            transcriptionLanguage: vfo?.transcriptionLanguage || 'auto',
+            transcriptionTranslationBackend: backend,
+            transcriptionTranslateTo: vfo?.transcriptionProvider !== 'gemini' && backend === 'none'
+                ? 'none' : (vfo?.transcriptionTranslateTo || 'none'),
+        };
+    });
     const [initialDraft] = React.useState(draft);
     const changedFields = Object.keys(draft).filter((field) => draft[field] !== initialDraft[field]);
     const usesSeparateTranslation = ['deepgram', 'parakeet'].includes(vfo?.transcriptionProvider);
@@ -173,7 +177,11 @@ export const TranscriptionParamsDialog = ({
                         <Box sx={{ mb: 2.5 }}>
                             <TranslationBackendField
                                 value={translationBackend}
-                                onChange={(value) => setDraft((current) => ({ ...current, transcriptionTranslationBackend: value }))}
+                                onChange={(value) => setDraft((current) => ({
+                                    ...current,
+                                    transcriptionTranslationBackend: value,
+                                    ...(value === 'none' ? { transcriptionTranslateTo: 'none' } : {}),
+                                }))}
                                 source={draft.transcriptionLanguage}
                                 target={draft.transcriptionTranslateTo}
                                 capabilities={capabilities}
@@ -193,7 +201,7 @@ export const TranscriptionParamsDialog = ({
                                 value={draft.transcriptionTranslateTo}
                                 label={t('vfo.translate_to', 'Translate To')}
                                 onChange={(e) => setDraft((current) => ({ ...current, transcriptionTranslateTo: e.target.value }))}
-                                disabled={!vfo.transcriptionEnabled}
+                                disabled={!vfo.transcriptionEnabled || (usesSeparateTranslation && translationBackend === 'none')}
                                 size="small"
                                 sx={{ fontSize: '0.875rem' }}
                             >
@@ -209,7 +217,7 @@ export const TranscriptionParamsDialog = ({
                         </FormControl>
                     </Box>
 
-                    {usesSeparateTranslation && !isLocal &&
+                    {usesSeparateTranslation && translationBackend === 'google' &&
                      draft.transcriptionTranslateTo !== 'none' && (
                         <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
                             {t('vfo.external_translation_info', 'Translation uses Google Translate API (configured in Settings).')}

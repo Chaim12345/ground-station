@@ -81,6 +81,35 @@ describe('Waterfall VFO parameter dialogs', () => {
         expect(onClose).toHaveBeenCalledTimes(1);
     }, 10000);
 
+    it('disables Parakeet translation and clears its target on Apply', () => {
+        const onVFOPropertyChange = vi.fn();
+        render(
+            <TranscriptionParamsDialog
+                open
+                onClose={vi.fn()}
+                vfoIndex={1}
+                vfoMarkers={{ 1: {
+                    transcriptionProvider: 'parakeet',
+                    transcriptionEnabled: true,
+                    transcriptionLanguage: 'auto',
+                    transcriptionTranslateTo: 'el',
+                    transcriptionTranslationBackend: 'google',
+                } }}
+                onVFOPropertyChange={onVFOPropertyChange}
+            />
+        );
+
+        chooseOption('Translation Service', 'No translation');
+        expect(screen.getByRole('combobox', { name: 'Translate To' })).toHaveAttribute('aria-disabled', 'true');
+        expect(onVFOPropertyChange).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+        expect(onVFOPropertyChange).toHaveBeenCalledExactlyOnceWith(1, {
+            transcriptionTranslationBackend: 'none',
+            transcriptionTranslateTo: 'none',
+        });
+    });
+
     it('commits decoder options and conditional fields in one update', () => {
         const onVFOPropertyChange = vi.fn();
         renderDecoderDialog({

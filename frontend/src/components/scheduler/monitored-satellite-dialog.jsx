@@ -66,7 +66,7 @@ import {
     fetchSDRParameters,
 } from './scheduler-slice.jsx';
 import { useSocket } from '../common/socket.jsx';
-import { getLibreTargetOptions, isLibrePairSupported, TranslationBackendField, useLibreTranslateCapabilities } from '../common/translation-options.jsx';
+import { getLibreTargetOptions, isLibrePairSupported, resolveTranslationBackend, TranslationBackendField, useLibreTranslateCapabilities } from '../common/translation-options.jsx';
 import { SatelliteSelector } from './satellite-selector.jsx';
 import { getSatdumpPipelines, getDecoderParameters, getDecoderDefaultParameters } from '../waterfall/decoder-parameters.js';
 import { DecoderConfigSuggestion } from './decoder-config-suggestion.jsx';
@@ -642,7 +642,7 @@ export default function MonitoredSatelliteDialog() {
                         provider: 'gemini',
                         language: 'auto',
                         translate_to: 'none',
-                        translation_backend: 'google',
+                        translation_backend: 'none',
                     },
                 };
                 break;
@@ -696,6 +696,9 @@ export default function MonitoredSatelliteDialog() {
                     config: {
                         ...currentTask.config,
                         [field]: value,
+                        ...((field === 'translation_backend' && value === 'none')
+                            || (field === 'provider' && value !== 'gemini' && resolveTranslationBackend(currentTask.config.translation_backend, currentTask.config.translate_to) === 'none')
+                            ? { translate_to: 'none' } : {}),
                     },
                 };
             }
@@ -826,9 +829,11 @@ export default function MonitoredSatelliteDialog() {
             const freqMHz = transmitter?.downlink_low ? `${(transmitter.downlink_low / 1000000).toFixed(3)} MHz` : '';
             const modType = getTaskSummaryOptionLabel(MODULATION_TYPES, task.config.modulation, task.config.modulation?.toUpperCase());
             const provider = getProviderSummaryLabel(task.config.provider);
-            const languageSummary = getTranscriptionLanguageSummary(task.config.language, task.config.translate_to);
-            const translationService = task.config.provider !== 'gemini' && task.config.translate_to && task.config.translate_to !== 'none'
-                ? (task.config.translation_backend === 'libretranslate' ? 'LibreTranslate' : 'Google Translate')
+            const translationBackend = resolveTranslationBackend(task.config.translation_backend, task.config.translate_to);
+            const translateTo = translationBackend === 'none' && task.config.provider !== 'gemini' ? 'none' : task.config.translate_to;
+            const languageSummary = getTranscriptionLanguageSummary(task.config.language, translateTo);
+            const translationService = task.config.provider !== 'gemini' && translateTo && translateTo !== 'none'
+                ? (translationBackend === 'libretranslate' ? 'LibreTranslate' : 'Google Translate')
                 : null;
 
             const parts = [transmitterName, freqMHz, modType, provider, languageSummary, translationService, t('scheduler_dialogs.shared.task_transcription')].filter(Boolean);
@@ -2407,7 +2412,7 @@ export default function MonitoredSatelliteDialog() {
 
                                                             {['deepgram', 'parakeet'].includes(task.config.provider) && (
                                                                 <TranslationBackendField
-                                                                    value={task.config.translation_backend || 'google'}
+                                                                    value={resolveTranslationBackend(task.config.translation_backend, task.config.translate_to)}
                                                                     onChange={(value) => handleTaskConfigChange(index, 'translation_backend', value)}
                                                                     source={task.config.language || 'auto'}
                                                                     target={task.config.translate_to || 'none'}
@@ -2415,7 +2420,7 @@ export default function MonitoredSatelliteDialog() {
                                                                 />
                                                             )}
 
-                                                            <FormControl fullWidth size="small">
+                                                            <FormControl fullWidth size="small" disabled={['deepgram', 'parakeet'].includes(task.config.provider) && resolveTranslationBackend(task.config.translation_backend, task.config.translate_to) === 'none'}>
                                                                 <InputLabel>{t('scheduler_dialogs.shared.translate_to_label')}</InputLabel>
                                                                 <Select
                                                                     value={task.config.translate_to || 'none'}

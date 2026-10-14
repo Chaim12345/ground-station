@@ -27,6 +27,7 @@
   "not_available": "N/A",
   "translation": {
     "backend_label": "Translation Service",
+    "no_translation": "No translation",
     "configure_local": "Set the LibreTranslate URL in Application Settings to enable local translation.",
     "unavailable": "LibreTranslate is unavailable. Check the service URL and connection.",
     "unsupported_pair": "This language pair is not supported by the configured LibreTranslate service."

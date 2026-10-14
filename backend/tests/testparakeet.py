@@ -5,7 +5,7 @@ import io
 import logging
 import queue
 import wave
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import numpy as np
@@ -16,6 +16,7 @@ from audio import translation as translationmodule
 from audio.parakeettranscriptionworker import ParakeetTranscriptionWorker
 from common import appsettings
 from pipeline.managers import transcriptionmanager as managermodule
+from vfos.state import VFOManager
 
 
 def make_worker(loop, service_url="http://127.0.0.1:1"):
@@ -187,6 +188,25 @@ def test_manager_rejects_parakeet_without_configured_url(monkeypatch):
 
 
 @pytest.mark.unit
+def test_vfo_translation_can_be_disabled_and_legacy_target_keeps_google():
+    manager = VFOManager()
+    session_id = "test-vfo-optional-translation"
+    try:
+        manager.update_vfo_state(
+            session_id, 1, transcription_provider="parakeet", transcription_translate_to="el"
+        )
+        state = manager.get_vfo_state(session_id, 1)
+        assert state.transcription_translation_backend == "google"
+        assert state.transcription_translate_to == "el"
+
+        manager.update_vfo_state(session_id, 1, transcription_translation_backend="none")
+        assert state.transcription_translation_backend == "none"
+        assert state.transcription_translate_to == "none"
+    finally:
+        manager.clear_session_vfos(session_id)
+
+
+@pytest.mark.unit
 def test_manager_switches_translation_backend_and_restarts_worker(monkeypatch):
     monkeypatch.setattr(managermodule.arguments, "parakeet_url", "https://parakeet.example.org")
     monkeypatch.setattr(managermodule.arguments, "libretranslate_url", "")
@@ -261,6 +281,45 @@ def test_manager_switches_translation_backend_and_restarts_worker(monkeypatch):
         translation_backend="libretranslate",
     )
     assert not second.is_alive()
+
+    manager._last_start_ts.clear()
+    assert manager.start_transcription(
+        "sdr",
+        "session",
+        1,
+        provider="parakeet",
+        translate_to="el",  # A stale target must not enable translation.
+        translation_backend="none",
+    )
+    third = processes["sdr"]["transcription_consumers"]["session"][1]
+    assert third["translate_to"] == "none"
+    assert third["translation_backend"] == "none"
+    assert third["instance"].kwargs["translate_to"] == "none"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_parakeet_no_translation_skips_translation_request(monkeypatch):
+    worker = make_worker(asyncio.get_running_loop())
+    worker.translation_backend = "none"
+    worker.translate_to = "el"  # Defensive guard for old or inconsistent settings.
+    worker._session = MagicMock()
+    response = worker._session.post.return_value.__aenter__.return_value
+    response.raise_for_status = MagicMock()
+    response.json.return_value = {
+        "text": "hello",
+        "words": [{"word": "hello", "end": 0.5}],
+    }
+    worker._emit_transcription = AsyncMock()
+    translate = AsyncMock()
+    monkeypatch.setattr("audio.parakeettranscriptionworker.translate_text", translate)
+
+    await worker._send_audio_to_provider((b"wav", 0, 44100))
+
+    translate.assert_not_awaited()
+    worker._emit_transcription.assert_awaited_once_with(
+        text="hello", language="auto", is_final=True
+    )
 
 
 @pytest.mark.unit

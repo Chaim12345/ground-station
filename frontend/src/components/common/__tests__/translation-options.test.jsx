@@ -6,7 +6,7 @@ vi.mock('react-i18next', () => ({
     useTranslation: () => ({ t: (_key, options) => options?.defaultValue || _key }),
 }));
 
-import { getLibreTargetOptions, isLibrePairSupported, TranslationBackendField } from '../translation-options.jsx';
+import { getLibreTargetOptions, isLibrePairSupported, resolveTranslationBackend, TranslationBackendField } from '../translation-options.jsx';
 
 const capabilities = {
     configured: true,
@@ -19,6 +19,12 @@ const capabilities = {
 };
 
 describe('LibreTranslate language choices', () => {
+    it('keeps Google for older tasks with a target but no service field', () => {
+        expect(resolveTranslationBackend(undefined, 'el')).toBe('google');
+        expect(resolveTranslationBackend(undefined, 'none')).toBe('none');
+        expect(resolveTranslationBackend('none', 'el')).toBe('none');
+    });
+
     it('maps legacy Chinese to Simplified and checks each source/target pair', () => {
         expect(isLibrePairSupported(capabilities, 'en', 'zh')).toBe(true);
         expect(isLibrePairSupported(capabilities, 'auto', 'zh')).toBe(true);

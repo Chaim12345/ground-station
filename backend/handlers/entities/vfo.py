@@ -351,11 +351,15 @@ async def toggle_transcription(
     # Get language, translation, and provider settings
     language = data.get("language", "auto")
     translate_to = data.get("translateTo", "none")
-    translation_backend = data.get("translationBackend", "google")
+    translation_backend = data.get("translationBackend") or (
+        "google" if translate_to != "none" else "none"
+    )
     provider = data.get("provider", "gemini")  # Default to gemini for backward compatibility
 
-    if translation_backend not in {"google", "libretranslate"}:
+    if translation_backend not in {"none", "google", "libretranslate"}:
         return {"success": False, "error": "Unknown translation backend"}
+    if provider in {"deepgram", "parakeet"} and translation_backend == "none":
+        translate_to = "none"
     if (
         enabled
         and provider in {"deepgram", "parakeet"}

@@ -719,7 +719,7 @@ export const getDefaultVFOConfig = () => {
         transcriptionEnabled: false,
         transcriptionLanguage: 'auto',
         transcriptionTranslateTo: 'none',
-        transcriptionTranslationBackend: 'google',
+        transcriptionTranslationBackend: 'none',
 
         // Decoder-specific parameters (flat object, prefixed by decoder type)
         parameters: {

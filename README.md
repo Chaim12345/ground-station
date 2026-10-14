@@ -509,14 +509,15 @@ transcription workers without a backend restart; direct file edits require a res
 workers keep their current endpoint until they are stopped and started again. Parakeet
 transcription cannot start until a URL is configured.
 
-For Deepgram and Parakeet transcripts, choose Google Translate or LibreTranslate in the
-waterfall transcription options or in a scheduled transcription task. The `libretranslate_url`
-backend setting is empty by default; set it to your LibreTranslate base URL in the same
-Transcription settings group. The backend queries `/languages` to show supported target
-languages and sends transcript text to `/translate` when LibreTranslate is selected.
-Google remains the default for existing VFOs and scheduled tasks. Gemini continues to
-translate through Gemini. If local translation fails, the original transcript is shown;
-it is never sent to Google as a fallback.
+For Deepgram and Parakeet transcripts, choose No translation, Google Translate, or
+LibreTranslate in the waterfall transcription options or in a scheduled transcription task.
+New VFOs and tasks default to No translation; existing saved Google selections remain in
+place. Selecting No translation clears the target language and skips translation requests.
+The `libretranslate_url` backend setting is empty by default; set it to your LibreTranslate
+base URL in the same Transcription settings group. The backend queries `/languages` to show
+supported target languages and sends transcript text to `/translate` when LibreTranslate is
+selected. Gemini continues to translate through Gemini. If local translation fails, the
+original transcript is shown; it is never sent to Google as a fallback.
 
 `/settings/preferences` is kept as a compatibility route and is now rendered as a tab inside the unified Settings page.
 

@@ -152,3 +152,27 @@ async def test_capabilities_without_url_are_unconfigured(monkeypatch):
     monkeypatch.setattr(arguments, "libretranslate_url", "")
     response = await get_libretranslate_capabilities(None, None, logging.getLogger(__name__), "sid")
     assert response == {"success": True, "data": {"configured": False, "languages": []}}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_deepgram_no_translation_skips_translation_request(monkeypatch):
+    worker = DeepgramTranscriptionWorker(
+        transcription_queue=queue.Queue(),
+        sio=None,
+        loop=asyncio.get_running_loop(),
+        api_key="deepgram-key",
+        session_id="session",
+        vfo_number=1,
+        translate_to="el",  # A stale target must not enable translation.
+        translation_backend="none",
+    )
+    translate = AsyncMock()
+    emit = AsyncMock()
+    monkeypatch.setattr(worker, "_translate_text", translate)
+    monkeypatch.setattr(TranscriptionWorker, "_emit_transcription", emit)
+
+    await worker._emit_transcription("original", "en", True)
+
+    translate.assert_not_awaited()
+    emit.assert_awaited_once_with("original", "en", True, None)

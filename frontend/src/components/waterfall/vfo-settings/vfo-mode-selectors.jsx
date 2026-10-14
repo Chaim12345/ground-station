@@ -171,7 +171,9 @@ export const TranscriptionSelector = ({
         if (!vfo?.transcriptionEnabled) return '- no transcription -';
 
         const sourceLang = vfo.transcriptionLanguage || 'auto';
-        const translateTo = vfo.transcriptionTranslateTo || 'none';
+        const translateTo = vfo.transcriptionProvider !== 'gemini' && vfo.transcriptionTranslationBackend === 'none'
+            ? 'none'
+            : (vfo.transcriptionTranslateTo || 'none');
 
         const sourceFlag = flagMap[sourceLang] || '🏳️';
         const sourceDisplay = langMap[sourceLang] || sourceLang.toUpperCase();

@@ -213,7 +213,7 @@ class ParakeetTranscriptionWorker(TranscriptionWorker):
         text = self._extract_new_text(result, clip_start_sample, stable_end_sample)
         if not text:
             return
-        if self.translate_to and self.translate_to != "none":
+        if self.translation_backend != "none" and self.translate_to and self.translate_to != "none":
             translated = await translate_text(
                 text,
                 self.language,

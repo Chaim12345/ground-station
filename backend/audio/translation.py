@@ -51,6 +51,9 @@ async def translate_text(
     translation_backend: str = "google",
     libretranslate_url: str = "",
 ) -> Optional[str]:
+    if translation_backend == "none" or target_lang == "none":
+        return text
+
     if translation_backend == "libretranslate":
         if not libretranslate_url.strip():
             logger.error("LibreTranslate URL is not configured; keeping original transcript")

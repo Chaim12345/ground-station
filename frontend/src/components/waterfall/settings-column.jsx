@@ -96,6 +96,7 @@ import {
 import { setTranscriptionActive } from './transcription-slice';
 
 import {useSocket} from "../common/socket.jsx";
+import { resolveTranslationBackend } from '../common/translation-options.jsx';
 import { toast } from "../../utils/toast-with-timestamp.jsx";
 import getValue from "lodash/_getValue.js";
 import FrequencyControlAccordion from "./settings-frequency.jsx";
@@ -1152,8 +1153,9 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         // would otherwise make it rerender at doppler tracking cadence.
         const currentVfo = store.getState().vfo.vfoMarkers[vfoNumber];
         const language = currentVfo?.transcriptionLanguage || 'auto';
-        const translateTo = currentVfo?.transcriptionTranslateTo || 'none';
-        const translationBackend = currentVfo?.transcriptionTranslationBackend || 'google';
+        const selectedTarget = currentVfo?.transcriptionTranslateTo || 'none';
+        const translationBackend = resolveTranslationBackend(currentVfo?.transcriptionTranslationBackend, selectedTarget);
+        const translateTo = provider !== 'gemini' && translationBackend === 'none' ? 'none' : selectedTarget;
 
         socket.emit("api.call", {
   cmd: 'toggle-transcription',
@@ -1172,7 +1174,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
       vfoNumber,
       updates: {
         transcriptionEnabled: enabled,
-        transcriptionProvider: provider
+        transcriptionProvider: provider,
+        transcriptionTranslateTo: translateTo,
       }
     }));
 
