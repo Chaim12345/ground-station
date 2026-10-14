@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Box, Typography, ToggleButtonGroup, ToggleButton, Link, Tooltip } from '@mui/material';
+import { Box, Button, Typography, ToggleButtonGroup, ToggleButton, Tooltip } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useTranslation } from 'react-i18next';
 import { BANDWIDTHS, STEP_SIZES } from './vfo-constants.js';
@@ -61,6 +61,56 @@ const toggleButtonStyles = {
         }
     }
 };
+
+// Both options dialogs use the same trigger so their layout and interaction states match.
+const OptionsDialogButton = ({ disabled, onClick, summary, ariaLabel, status }) => (
+    <Button
+        fullWidth
+        size="small"
+        variant="outlined"
+        disabled={disabled}
+        onClick={onClick}
+        aria-label={`${ariaLabel}: ${summary}${status ? `, ${status}` : ''}`}
+        sx={{
+            minHeight: 34,
+            px: 1.5,
+            py: 0.75,
+            borderRadius: 1,
+            borderColor: 'divider',
+            backgroundColor: 'action.hover',
+            color: 'text.secondary',
+            fontSize: '0.8rem',
+            fontWeight: 400,
+            textTransform: 'none',
+            '&:hover': {
+                borderColor: 'text.disabled',
+                backgroundColor: 'action.selected',
+            },
+            '&.Mui-focusVisible': {
+                outline: '2px solid',
+                outlineColor: 'primary.main',
+                outlineOffset: 2,
+            },
+            '&.Mui-disabled': {
+                borderColor: 'divider',
+                backgroundColor: 'action.disabledBackground',
+                opacity: 0.5,
+            },
+        }}
+    >
+        <Box sx={{ display: 'grid', gridTemplateColumns: '2.5rem minmax(0, 1fr) 2.5rem', alignItems: 'center', width: '100%' }}>
+            <SettingsIcon sx={{ fontSize: '1rem', justifySelf: 'start' }} />
+            <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', textAlign: 'center' }}>
+                {summary}
+            </Box>
+            {status && (
+                <Box component="span" sx={{ justifySelf: 'end', px: 0.5, border: '1px solid', borderColor: 'divider', borderRadius: 0.5, fontSize: '0.7rem', lineHeight: 1.4 }}>
+                    {status}
+                </Box>
+            )}
+        </Box>
+    </Button>
+);
 
 /**
  * Step Size Selector Component
@@ -216,47 +266,14 @@ export const TranscriptionSelector = ({
                 </ToggleButton>
             </ToggleButtonGroup>
 
-            {/* Transcription Parameters Link */}
+            {/* Transcription options */}
             <Box sx={{ mt: 1.5, width: '100%' }}>
-                <Link
-                    component="button"
-                    variant="body2"
+                <OptionsDialogButton
                     disabled={!vfoActive || !vfo?.transcriptionEnabled}
                     onClick={onOpenParamsDialog}
-                    sx={{
-                        width: '100%',
-                        fontSize: '0.8rem',
-                        color: 'text.primary',
-                        textDecoration: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 0.75,
-                        py: 0.75,
-                        px: 1.5,
-                        borderRadius: 1,
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
-                        transition: 'all 0.2s ease',
-                        '&:hover:not(.Mui-disabled)': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                            borderColor: 'rgba(255, 255, 255, 0.2)',
-                        },
-                        '&.Mui-disabled': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                            borderColor: 'rgba(255, 255, 255, 0.05)',
-                            color: 'rgba(255, 255, 255, 0.3)',
-                            opacity: 0.5,
-                            cursor: 'not-allowed',
-                        },
-                        cursor: 'pointer',
-                    }}
-                >
-                    <SettingsIcon sx={{ fontSize: '1rem', color: 'text.secondary', flexShrink: 0 }} />
-                    <Box component="span" sx={{ fontFamily: 'monospace', color: 'text.secondary', flex: 1, textAlign: 'center' }}>
-                        {getTranscriptionSummary()}
-                    </Box>
-                </Link>
+                    summary={getTranscriptionSummary()}
+                    ariaLabel={t('vfo.transcription_options', { defaultValue: 'Transcription options' })}
+                />
             </Box>
         </Box>
     );
@@ -374,57 +391,19 @@ export const DataDecoderSelector = ({
                 })}
             </ToggleButtonGroup>
 
-            {/* Decoder Parameters Link */}
+            {/* Decoder options */}
             <Box sx={{ mt: 1.5, width: '100%' }}>
-                <Link
-                    component="button"
-                    variant="body2"
+                <OptionsDialogButton
                     disabled={!vfoActive || !decoder || decoder === 'none'}
                     onClick={onOpenParamsDialog}
-                    sx={{
-                        width: '100%',
-                        fontSize: '0.8rem',
-                        color: 'text.primary',
-                        textDecoration: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 0.75,
-                        py: 0.75,
-                        px: 1.5,
-                        borderRadius: 1,
-                        backgroundColor: vfo?.parametersEnabled ? 'rgba(33, 150, 243, 0.08)' : 'rgba(255, 255, 255, 0.05)',
-                        border: vfo?.parametersEnabled ? '1px solid rgba(33, 150, 243, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-                        transition: 'all 0.2s ease',
-                        '&:hover:not(.Mui-disabled)': {
-                            backgroundColor: vfo?.parametersEnabled ? 'rgba(33, 150, 243, 0.12)' : 'rgba(255, 255, 255, 0.08)',
-                            borderColor: vfo?.parametersEnabled ? 'rgba(33, 150, 243, 0.4)' : 'rgba(255, 255, 255, 0.2)',
-                        },
-                        '&.Mui-disabled': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                            borderColor: 'rgba(255, 255, 255, 0.05)',
-                            color: 'rgba(255, 255, 255, 0.3)',
-                            opacity: 0.5,
-                            cursor: 'not-allowed',
-                        },
-                        cursor: 'pointer',
-                    }}
-                >
-                    <SettingsIcon sx={{ fontSize: '1rem', color: vfo?.parametersEnabled ? 'primary.main' : 'text.secondary' }} />
-                    <Box
-                        component="span"
-                        sx={{
-                            fontFamily: 'monospace',
-                            color: 'text.secondary',
-                            flex: 1,
-                            textDecoration: decoder && decoder !== 'none' && !vfo?.parametersEnabled ? 'line-through' : 'none',
-                        }}
-                    >
-                        {decoder === 'none' || !decoder
-                            ? '- no decoder -'
-                            : (formatDecoderParamsSummary(vfo) || 'Decoder Parameters')}
-                    </Box>
-                </Link>
+                    summary={decoder === 'none' || !decoder
+                        ? '- no decoder -'
+                        : (formatDecoderParamsSummary(vfo) || 'Decoder Parameters')}
+                    ariaLabel={t('vfo.decoder_options', { defaultValue: 'Decoder options' })}
+                    status={decoder && decoder !== 'none' && vfo?.parametersEnabled === false
+                        ? t('vfo.decoder_parameters_off', { defaultValue: 'Off' })
+                        : null}
+                />
             </Box>
         </Box>
     );

@@ -320,7 +320,7 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
 
                                 # Get language (Deepgram provides detected language)
                                 detected_language = (
-                                    self.language if self.language != "auto" else "en"
+                                    self.language if self.language != "auto" else "auto"
                                 )
                                 if "language" in channel:
                                     detected_language = channel.get("language", detected_language)
@@ -395,6 +395,11 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
             is_final: Whether this is a final or partial transcription
             confidence: Optional confidence score (0.0 to 1.0)
         """
+        # Identify the source text before the optional translation replaces it.
+        detected_language = (
+            self._detect_source_language(text) if is_final else self._last_detected_language
+        )
+
         # If translation is requested and enabled
         if (
             self.translation_backend != "none"
@@ -407,17 +412,39 @@ class DeepgramTranscriptionWorker(TranscriptionWorker):
                 if translated_text:
                     # Emit translated text with original language preserved
                     await super()._emit_transcription(
-                        translated_text, language, is_final, confidence
+                        translated_text,
+                        language,
+                        is_final,
+                        confidence,
+                        detected_language=detected_language,
                     )
                 else:
                     # Translation failed, emit original text
                     logger.debug("Translation failed, emitting original text")
                     await self._report_translation_failure()
-                    await super()._emit_transcription(text, language, is_final, confidence)
+                    await super()._emit_transcription(
+                        text,
+                        language,
+                        is_final,
+                        confidence,
+                        detected_language=detected_language,
+                    )
             except Exception as e:
                 logger.warning(f"Translation failed: {e}, emitting original text")
                 await self._report_translation_failure()
-                await super()._emit_transcription(text, language, is_final, confidence)
+                await super()._emit_transcription(
+                    text,
+                    language,
+                    is_final,
+                    confidence,
+                    detected_language=detected_language,
+                )
         else:
             # No translation needed
-            await super()._emit_transcription(text, language, is_final, confidence)
+            await super()._emit_transcription(
+                text,
+                language,
+                is_final,
+                confidence,
+                detected_language=detected_language,
+            )

@@ -72,7 +72,7 @@ const initialState = {
     lastUpdated: null,
 
     // Live accumulating transcription per session+VFO
-    // {`${sessionId}_${vfoNumber}`: {id, segments, timestamp, language, startTime, sessionId, vfoNumber}}
+    // {`${sessionId}_${vfoNumber}`: {id, segments, timestamp, language, detectedLanguage, startTime, sessionId, vfoNumber}}
     liveTranscription: {},
 
     // Per-VFO subtitle settings (persisted)
@@ -99,7 +99,7 @@ const transcriptionSlice = createSlice({
          * Continuously appends to live transcription, never-ending stream
          */
         addTranscription: (state, action) => {
-            const { text, sessionId, vfoNumber, language, is_final } = action.payload;
+            const { text, sessionId, vfoNumber, language, detectedLanguage, is_final } = action.payload;
             const trimmedText = text.trim();
 
             console.log('[Redux] addTranscription called:', { text: trimmedText, sessionId, vfoNumber, language, is_final });
@@ -127,6 +127,7 @@ const transcriptionSlice = createSlice({
                     sessionId,
                     vfoNumber,
                     language: language || 'auto',
+                    detectedLanguage: detectedLanguage || null,
                 };
             } else {
                 console.log('[Redux] Appending to existing transcription. Adding segment:', trimmedText.length, 'chars');
@@ -137,6 +138,8 @@ const transcriptionSlice = createSlice({
                 });
                 state.liveTranscription[transcriptionKey].timestamp = new Date().toISOString();
                 state.liveTranscription[transcriptionKey].language = language || state.liveTranscription[transcriptionKey].language;
+                // A restarted worker with no detection yet must clear the previous label.
+                state.liveTranscription[transcriptionKey].detectedLanguage = detectedLanguage || null;
             }
 
             console.log('[Redux] Live transcription updated. Total segments:', state.liveTranscription[transcriptionKey].segments.length);

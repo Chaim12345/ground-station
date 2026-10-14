@@ -71,22 +71,49 @@ const initialState = {
     }
 };
 
+export const isStaleDecoderStatus = (existing, incoming) => {
+    if (!existing) return false;
+
+    const { decoder_id, decoder_type, worker_started_at, status, timestamp } = incoming;
+    if (decoder_id && existing.retiredDecoderIds?.includes(decoder_id)) return true;
+
+    // Transcription workers include their creation time, which also orders
+    // statuses emitted after a replacement has begun.
+    if (decoder_type === 'transcription' && existing.decoder_type === 'transcription' &&
+        worker_started_at !== undefined && existing.worker_started_at !== undefined &&
+        worker_started_at < existing.worker_started_at) return true;
+
+    if (decoder_id && existing.decoder_id && decoder_id !== existing.decoder_id) {
+        // Terminal events only close the instance that currently owns the VFO.
+        if (status === 'idle' || status === 'error' || status === 'closed') return true;
+        // Queued events from an unseen older process can arrive after the new start.
+        if (Number.isFinite(timestamp) && Number.isFinite(existing.started_at) &&
+            timestamp < existing.started_at) return true;
+    }
+
+    return false;
+};
+
 export const decodersSlice = createSlice({
     name: 'decoders',
     initialState,
     reducers: {
         // Decoder status changed
         decoderStatusChanged: (state, action) => {
-            const { session_id, status, mode, decoder_type, decoder_id, vfo, timestamp, progress, info } = action.payload;
+            const { session_id, status, mode, decoder_type, decoder_id, worker_started_at, vfo, timestamp, progress, info } = action.payload;
 
             // Create unique key combining session_id and VFO number
             const decoderKey = vfo ? `${session_id}_vfo${vfo}` : session_id;
+            const existing = state.active[decoderKey];
+
+            if (isStaleDecoderStatus(existing, action.payload)) {
+                return;
+            }
 
             if (status === 'idle' || status === 'error' || status === 'closed') {
                 // Only remove from active decoders if the decoder_id matches
                 // This prevents stale "closed" messages from old decoder instances
                 // from clearing the status of newly restarted decoders
-                const existing = state.active[decoderKey];
                 if (existing) {
                     // If decoder_id is provided, only delete if it matches
                     // If no decoder_id (legacy), delete anyway for backward compatibility
@@ -98,15 +125,20 @@ export const decodersSlice = createSlice({
                 }
             } else {
                 // Update or create active decoder entry
-                if (!state.active[decoderKey]) {
+                const instanceChanged = existing?.decoder_id && decoder_id && existing.decoder_id !== decoder_id;
+                if (!existing || instanceChanged) {
                     state.active[decoderKey] = {
                         decoder_type,
                         decoder_id,  // Track decoder instance ID
                         session_id,
                         vfo,
                         started_at: timestamp,
+                        worker_started_at,
                         progress: null,
                         info: null,  // Initialize info field
+                        retiredDecoderIds: instanceChanged
+                            ? [...(existing.retiredDecoderIds || []), existing.decoder_id].slice(-16)
+                            : [],
                     };
                 } else {
                     // Update decoder_id and decoder_type if provided (handles decoder restarts and type changes)
@@ -115,6 +147,9 @@ export const decodersSlice = createSlice({
                     }
                     if (decoder_type) {
                         state.active[decoderKey].decoder_type = decoder_type;
+                    }
+                    if (worker_started_at !== undefined) {
+                        state.active[decoderKey].worker_started_at = worker_started_at;
                     }
                 }
 
@@ -141,12 +176,15 @@ export const decodersSlice = createSlice({
 
         // Progress update
         decoderProgressUpdated: (state, action) => {
-            const { session_id, vfo, progress, timestamp, info } = action.payload;
+            const { session_id, decoder_id, vfo, progress, timestamp, info } = action.payload;
 
             // Create unique key combining session_id and VFO number
             const decoderKey = vfo ? `${session_id}_vfo${vfo}` : session_id;
 
-            if (state.active[decoderKey]) {
+            // Progress belongs to the decoder instance that produced it.
+            if (state.active[decoderKey] &&
+                (!decoder_id || !state.active[decoderKey].decoder_id ||
+                    decoder_id === state.active[decoderKey].decoder_id)) {
                 state.active[decoderKey].progress = progress;
                 state.active[decoderKey].last_update = timestamp;
 

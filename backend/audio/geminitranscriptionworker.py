@@ -38,14 +38,6 @@ except ImportError:
     GEMINI_AVAILABLE = False
     logging.warning("google-genai package not installed. Gemini transcription will be disabled.")
 
-try:
-    from langdetect import LangDetectException, detect
-
-    LANGDETECT_AVAILABLE = True
-except ImportError:
-    LANGDETECT_AVAILABLE = False
-    logging.warning("langdetect package not installed. Language detection will be disabled.")
-
 logger = logging.getLogger("transcription.gemini")
 
 # Reduce websockets logging verbosity to prevent API key exposure
@@ -387,10 +379,16 @@ class GeminiTranscriptionWorker(TranscriptionWorker):
                             if self.translate_to and self.translate_to != "none":
                                 await self._queue_translation(text)
                             else:
+                                source_language = self._determine_source_language(text)
                                 await self._emit_transcription(
                                     text=text,
-                                    language=self._determine_source_language(text),
+                                    language=source_language,
                                     is_final=True,
+                                    detected_language=(
+                                        source_language
+                                        if self.language == "auto" and source_language != "unknown"
+                                        else None
+                                    ),
                                 )
 
                     if not received_any:
@@ -464,11 +462,6 @@ class GeminiTranscriptionWorker(TranscriptionWorker):
         """Determine the language of source speech for captions and fallback."""
         if self.language and self.language != "auto":
             return str(self.language)
-
-        if LANGDETECT_AVAILABLE and text:
-            try:
-                return str(detect(text))
-            except LangDetectException:
-                return "unknown"
-
-        return "unknown"
+        if self.translate_to and self.translate_to != "none":
+            return "unknown"
+        return self._detect_source_language(text) or "unknown"

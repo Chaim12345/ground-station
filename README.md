@@ -519,6 +519,12 @@ supported target languages and sends transcript text to `/translate` when LibreT
 selected. Gemini continues to translate through Gemini. If local translation fails, the
 original transcript is shown; it is never sent to Google as a fallback.
 
+When the transcription source language is Auto, the backend identifies the language from
+recent original transcript text before any Deepgram or Parakeet translation. Gemini text
+is identified only when translation is off. The detected language appears in the
+waterfall subtitle title bar when there is enough text for a confident result; otherwise
+it remains Auto.
+
 `/settings/preferences` is kept as a compatibility route and is now rendered as a tab inside the unified Settings page.
 
 ## Docker

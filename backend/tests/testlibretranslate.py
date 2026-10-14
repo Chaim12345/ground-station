@@ -140,7 +140,7 @@ async def test_libre_failure_keeps_original_and_does_not_call_google(monkeypatch
         monkeypatch.setattr(TranscriptionWorker, "_emit_transcription", emit)
         monkeypatch.setattr(worker, "_report_translation_failure", report)
         await worker._emit_transcription("original", "en", True)
-        emit.assert_awaited_once_with("original", "en", True, None)
+        emit.assert_awaited_once_with("original", "en", True, None, detected_language=None)
         report.assert_awaited_once()
     finally:
         await runner.cleanup()
@@ -175,4 +175,4 @@ async def test_deepgram_no_translation_skips_translation_request(monkeypatch):
     await worker._emit_transcription("original", "en", True)
 
     translate.assert_not_awaited()
-    emit.assert_awaited_once_with("original", "en", True, None)
+    emit.assert_awaited_once_with("original", "en", True, None, detected_language=None)

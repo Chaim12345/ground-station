@@ -155,6 +155,9 @@ const VFOSubtitle = ({
     const { t } = useTranslation('waterfall');
     const [lines, setLines] = useState([]);
     const subtitleColor = darken(vfoColor || '#000000', 0.32);
+    const detectedLanguage = sourceLang === 'auto' ? transcription?.detectedLanguage : null;
+    const displayedSourceLanguage = detectedLanguage || sourceLang;
+    const displayedTranscriptionLanguage = detectedLanguage || transcription?.language;
 
     // Individual position state per VFO
     const [position, setPosition] = useState(() => {
@@ -503,7 +506,7 @@ const VFOSubtitle = ({
                                 <>
                                     {/* Source Language */}
                                     <span style={{ fontSize: '1rem', lineHeight: 1 }}>
-                                        {getLanguageFlag(sourceLang)}
+                                        {getLanguageFlag(displayedSourceLanguage)}
                                     </span>
                                     <span style={{
                                         fontSize: '0.6rem',
@@ -511,7 +514,7 @@ const VFOSubtitle = ({
                                         fontWeight: 400,
                                         textTransform: 'uppercase'
                                     }}>
-                                        {sourceLang === 'auto' ? 'AUTO' : sourceLang}
+                                        {displayedSourceLanguage === 'auto' ? 'AUTO' : displayedSourceLanguage}
                                     </span>
 
                                     {/* Arrow */}
@@ -532,10 +535,10 @@ const VFOSubtitle = ({
                                 </>
                             ) : (
                                 // No translation: show detected language
-                                transcription.language && transcription.language !== 'auto' && transcription.language !== 'unknown' && (
+                                displayedTranscriptionLanguage && displayedTranscriptionLanguage !== 'auto' && displayedTranscriptionLanguage !== 'unknown' && (
                                     <>
                                         <span style={{ fontSize: '1rem', lineHeight: 1 }}>
-                                            {getLanguageFlag(transcription.language)}
+                                            {getLanguageFlag(displayedTranscriptionLanguage)}
                                         </span>
                                         <span style={{
                                             fontSize: '0.6rem',
@@ -543,7 +546,7 @@ const VFOSubtitle = ({
                                             fontWeight: 400,
                                             textTransform: 'uppercase'
                                         }}>
-                                            {transcription.language}
+                                            {displayedTranscriptionLanguage}
                                         </span>
                                     </>
                                 )

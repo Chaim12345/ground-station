@@ -32,6 +32,7 @@ import os
 import queue
 import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from asyncio import Task
 from concurrent.futures import Future
@@ -39,9 +40,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, TextIO
 
 import numpy as np
+from langdetect import DetectorFactory, LangDetectException, detect_langs
 from scipy import signal
 
 from handlers.entities.filebrowser import emit_file_browser_state
+
+DetectorFactory.seed = 0
 
 # Configure logging
 logger = logging.getLogger("transcription")
@@ -101,10 +105,15 @@ class TranscriptionWorker(ABC, threading.Thread):
         # VFO-specific settings (immutable after creation)
         self.session_id = session_id
         self.vfo_number = vfo_number
+        # Status events from a replaced worker may arrive after its successor starts.
+        self.decoder_id = f"transcription_{session_id}_{vfo_number}_{uuid.uuid4().hex}"
+        self.worker_started_at = time.time()
         self.language = language
         self.translate_to = translate_to
         self.translation_backend = translation_backend
         self._last_translation_error = 0.0
+        self._source_language_sample = ""
+        self._last_detected_language: Optional[str] = None
 
         # Satellite and transmitter metadata
         self.satellite = satellite
@@ -632,7 +641,8 @@ class TranscriptionWorker(ABC, threading.Thread):
                     "session_id": self.session_id,
                     "vfo": self.vfo_number,
                     "decoder_type": "transcription",
-                    "decoder_id": f"transcription_{self.session_id}_{self.vfo_number}",
+                    "decoder_id": self.decoder_id,
+                    "worker_started_at": self.worker_started_at,
                     "status": status,
                     "timestamp": time.time(),
                     "progress": None,
@@ -770,8 +780,32 @@ class TranscriptionWorker(ABC, threading.Thread):
             room=self.session_id,
         )
 
+    def _detect_source_language(self, text: str) -> Optional[str]:
+        """Infer auto-selected source language from a short rolling transcript window."""
+        if self.language != "auto":
+            return None
+
+        # Radio speech often arrives in tiny fragments. Keep recent original
+        # text so callsigns or single words do not drive the subtitle label.
+        self._source_language_sample = f"{self._source_language_sample} {text}".strip()[-500:]
+        if sum(char.isalpha() for char in self._source_language_sample) < 20:
+            return self._last_detected_language
+
+        try:
+            candidates = detect_langs(self._source_language_sample)
+        except LangDetectException:
+            return self._last_detected_language
+        if candidates and candidates[0].prob >= 0.9:
+            self._last_detected_language = str(candidates[0].lang)
+        return self._last_detected_language
+
     async def _emit_transcription(
-        self, text: str, language: str, is_final: bool, confidence: Optional[float] = None
+        self,
+        text: str,
+        language: str,
+        is_final: bool,
+        confidence: Optional[float] = None,
+        detected_language: Optional[str] = None,
     ):
         """
         Emit transcription result to UI.
@@ -781,6 +815,7 @@ class TranscriptionWorker(ABC, threading.Thread):
             language: Detected/configured language code
             is_final: Whether this is a final or partial transcription
             confidence: Optional confidence score (0.0 to 1.0)
+            detected_language: Language inferred from original transcript text
         """
         transcription_data = {
             "text": text,
@@ -793,6 +828,8 @@ class TranscriptionWorker(ABC, threading.Thread):
 
         if confidence is not None:
             transcription_data["confidence"] = confidence
+        if detected_language:
+            transcription_data["detected_language"] = detected_language
 
         # Log based on completeness
         log_type = "final" if is_final else "partial"

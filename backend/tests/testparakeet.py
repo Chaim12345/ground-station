@@ -32,6 +32,26 @@ def make_worker(loop, service_url="http://127.0.0.1:1"):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_replacement_workers_emit_distinct_status_ids():
+    loop = asyncio.get_running_loop()
+    old_worker = make_worker(loop)
+    new_worker = make_worker(loop)
+    old_worker.sio = MagicMock(emit=AsyncMock())
+    new_worker.sio = MagicMock(emit=AsyncMock())
+
+    old_worker._send_status_to_ui("closed")
+    new_worker._send_status_to_ui("starting")
+    await asyncio.sleep(0.01)
+
+    old_status = old_worker.sio.emit.await_args.args[1]
+    new_status = new_worker.sio.emit.await_args.args[1]
+    assert old_status["decoder_id"] != new_status["decoder_id"]
+    assert old_status["worker_started_at"] <= new_status["worker_started_at"]
+    assert new_status["status"] == "starting"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_speech_windows_make_wav_clips_with_boundary_overlap():
     worker = make_worker(asyncio.get_running_loop())
     worker.provider_loop = asyncio.get_running_loop()
@@ -118,7 +138,7 @@ async def test_parakeet_http_contract_and_stop_discards_late_result(monkeypatch)
         release_response.set()
         await asyncio.wait_for(request, timeout=3)
         worker._emit_transcription.assert_awaited_once_with(
-            text="hello", language="auto", is_final=True
+            text="hello", language="auto", is_final=True, detected_language=None
         )
 
         worker._emit_transcription.reset_mock()
@@ -318,8 +338,34 @@ async def test_parakeet_no_translation_skips_translation_request(monkeypatch):
 
     translate.assert_not_awaited()
     worker._emit_transcription.assert_awaited_once_with(
-        text="hello", language="auto", is_final=True
+        text="hello", language="auto", is_final=True, detected_language=None
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_parakeet_detects_original_language_before_translation(monkeypatch):
+    original = "Это длинное русское предложение о погоде и работе радиостанции сегодня."
+    worker = make_worker(asyncio.get_running_loop())
+    worker.translate_to = "en"
+    worker._session = MagicMock()
+    response = worker._session.post.return_value.__aenter__.return_value
+    response.raise_for_status = MagicMock()
+    response.json.return_value = {"text": original, "language": "en"}
+    worker._emit_transcription = AsyncMock()
+    translate = AsyncMock(return_value="This is an English translation.")
+    monkeypatch.setattr("audio.parakeettranscriptionworker.translate_text", translate)
+
+    await worker._send_audio_to_provider((b"wav", 0, 44100))
+
+    assert translate.await_args.args[0] == original
+    worker._emit_transcription.assert_awaited_once_with(
+        text="This is an English translation.",
+        language="auto",
+        is_final=True,
+        detected_language="ru",
+    )
+    assert worker._detect_source_language("да") == "ru"
 
 
 @pytest.mark.unit

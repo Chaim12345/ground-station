@@ -213,6 +213,7 @@ class ParakeetTranscriptionWorker(TranscriptionWorker):
         text = self._extract_new_text(result, clip_start_sample, stable_end_sample)
         if not text:
             return
+        detected_language = self._detect_source_language(text)
         if self.translation_backend != "none" and self.translate_to and self.translate_to != "none":
             translated = await translate_text(
                 text,
@@ -228,9 +229,14 @@ class ParakeetTranscriptionWorker(TranscriptionWorker):
             else:
                 await self._report_translation_failure()
         if self.running:
-            # The service's reported language is a fixed placeholder, even for
-            # this multilingual model. Keep the UI from implying detection.
-            await self._emit_transcription(text=text, language="auto", is_final=True)
+            # The service reports a fixed language placeholder. Use the original
+            # transcript's detected language instead of that placeholder.
+            await self._emit_transcription(
+                text=text,
+                language="auto",
+                is_final=True,
+                detected_language=detected_language,
+            )
 
     def _extract_new_text(
         self, result: dict, clip_start_sample: int, stable_end_sample: int

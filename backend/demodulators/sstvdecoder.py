@@ -655,6 +655,7 @@ class SSTVDecoder(BaseDecoderProcess):
         progress = int((current_line / total_lines) * 100)
         msg = {
             "type": "decoder-progress",
+            "decoder_id": self.decoder_id,
             "progress": progress,
             "session_id": self.session_id,
             "vfo": self.vfo,

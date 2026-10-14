@@ -2,10 +2,12 @@
 
 import asyncio
 import queue
+from unittest.mock import AsyncMock
 
 import pytest
 
 from audio.deepgramtranscriptionworker import DeepgramTranscriptionWorker
+from audio.transcriptionworker import TranscriptionWorker
 
 
 class _BlockingSocket:
@@ -88,3 +90,29 @@ async def test_stop_closes_deepgram_socket_during_worker_cleanup():
         if worker.is_alive():
             worker.stop()
             await asyncio.to_thread(worker.join, 3)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_deepgram_detects_original_language_before_translation(monkeypatch):
+    original = "Это длинное русское предложение о погоде и работе радиостанции сегодня."
+    worker = DeepgramTranscriptionWorker(
+        transcription_queue=queue.Queue(),
+        sio=None,
+        loop=asyncio.get_running_loop(),
+        api_key="test-key",
+        session_id="test-session",
+        vfo_number=1,
+        translate_to="en",
+    )
+    translate = AsyncMock(return_value="This is an English translation.")
+    emit = AsyncMock()
+    monkeypatch.setattr(worker, "_translate_text", translate)
+    monkeypatch.setattr(TranscriptionWorker, "_emit_transcription", emit)
+
+    await worker._emit_transcription(original, "auto", True)
+
+    translate.assert_awaited_once_with(original, "auto", "en")
+    emit.assert_awaited_once_with(
+        "This is an English translation.", "auto", True, None, detected_language="ru"
+    )

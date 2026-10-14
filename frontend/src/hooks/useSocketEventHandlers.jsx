@@ -75,6 +75,7 @@ import {
 } from '../components/dashboard/dashboard-slice.jsx';
 import {
     decoderStatusChanged,
+    isStaleDecoderStatus,
     decoderProgressUpdated,
     decoderOutputReceived,
     clearGnssOutputsForDecoder,
@@ -612,6 +613,7 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
                 sessionId: data.session_id,
                 vfoNumber: data.vfo_number,
                 language: data.language,
+                detectedLanguage: data.detected_language,
                 is_final: data.is_final || false
             }));
         });
@@ -784,6 +786,14 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
 
             switch (data.type) {
                 case 'decoder-status':
+                    // Filter before GNSS lifecycle side effects as well as the
+                    // decoder label update, so old instances cannot reset a new run.
+                    if (isStaleDecoderStatus(
+                        store.getState().decoders.active[data.vfo ? `${data.session_id}_vfo${data.vfo}` : data.session_id],
+                        data
+                    )) {
+                        break;
+                    }
                     // GNSS decoder restart: clear GNSS table/fix timeline so UI reflects a fresh session.
                     if (data.decoder_type === 'gnss') {
                         dispatch(updateGnssFixLifecycleFromStatus(data));
@@ -800,6 +810,7 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
                         mode: data.mode,
                         decoder_type: data.decoder_type,
                         decoder_id: data.decoder_id,  // Track decoder instance ID for restart handling
+                        worker_started_at: data.worker_started_at,
                         vfo: data.vfo,
                         timestamp: data.timestamp,
                         progress: data.progress,
@@ -810,6 +821,7 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
                 case 'decoder-progress':
                     store.dispatch(decoderProgressUpdated({
                         session_id: data.session_id,
+                        decoder_id: data.decoder_id,
                         vfo: data.vfo,
                         progress: data.progress,
                         timestamp: data.timestamp,

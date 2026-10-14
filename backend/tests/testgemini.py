@@ -6,6 +6,7 @@ import queue
 import threading
 import time
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
@@ -62,6 +63,34 @@ async def test_gemini_only_accepts_final_source_transcription():
 
     noise = SimpleNamespace(server_content=SimpleNamespace(input_transcription={"text": "<noise>"}))
     assert source_worker._extract_transcription_from_response(noise) == ""
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_gemini_reports_detected_language_only_without_translation(monkeypatch):
+    original = "Это длинное русское предложение о погоде и работе радиостанции сегодня."
+    worker = _worker(language="auto")
+    worker.connected = True
+    worker.gemini_session = SimpleNamespace()
+    emitted = AsyncMock()
+    monkeypatch.setattr(worker, "_safe_sio_emit", emitted)
+    monkeypatch.setattr(worker, "_write_to_file", lambda *_args, **_kwargs: None)
+
+    async def responses():
+        yield SimpleNamespace(
+            server_content=SimpleNamespace(input_transcription=SimpleNamespace(text=original))
+        )
+        worker.running = False
+
+    monkeypatch.setattr(worker, "_iter_provider_responses", responses)
+    await worker._receive_loop()
+
+    assert emitted.await_args.args[1]["detected_language"] == "ru"
+    assert emitted.await_args.args[1]["language"] == "ru"
+
+    translated_worker = _worker(translate_to="en", language="auto")
+    assert translated_worker._determine_source_language(original) == "unknown"
+    assert translated_worker._source_language_sample == ""
 
 
 @pytest.mark.unit
