@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Alert, FormControl, InputLabel, MenuItem, Select, Stack } from '@mui/material';
 import { useTranslation } from 'react-i18next';
 
@@ -42,12 +42,13 @@ export const useLibreTranslateCapabilities = (socket, enabled) => {
 
 export const TranslationBackendField = ({ value, onChange, source, target, capabilities, disabled = false }) => {
     const { t } = useTranslation('common');
+    const labelId = useId();
     const isLocal = value === 'libretranslate';
     return (
         <Stack spacing={1}>
             <FormControl fullWidth size="small" disabled={disabled}>
-                <InputLabel>{t('translation.backend_label', { defaultValue: 'Translation Service' })}</InputLabel>
-                <Select value={value || 'google'} label={t('translation.backend_label', { defaultValue: 'Translation Service' })} onChange={(event) => onChange(event.target.value)}>
+                <InputLabel id={labelId}>{t('translation.backend_label', { defaultValue: 'Translation Service' })}</InputLabel>
+                <Select labelId={labelId} value={value || 'google'} label={t('translation.backend_label', { defaultValue: 'Translation Service' })} onChange={(event) => onChange(event.target.value)}>
                     <MenuItem value="google">Google Translate</MenuItem>
                     <MenuItem value="libretranslate" disabled={capabilities?.configured === false}>LibreTranslate</MenuItem>
                 </Select>

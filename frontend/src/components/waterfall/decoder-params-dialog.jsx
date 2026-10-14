@@ -23,6 +23,8 @@ import {
     Dialog,
     DialogTitle,
     DialogContent,
+    DialogActions,
+    Button,
     IconButton,
     Typography,
     FormControl,
@@ -54,6 +56,9 @@ const sameIdentifier = (left, right) => {
     return String(left) === String(right);
 };
 
+// A few decoder values are arrays (for example LoRa sync words).
+const sameParameterValue = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
 const DecoderParamsDialog = ({
     open,
     onClose,
@@ -67,12 +72,22 @@ const DecoderParamsDialog = ({
     const activeSatelliteDetails = useSelector(state => state.targetSatTrack.satelliteData?.details || null);
     const trackerViews = useSelector(state => state.targetSatTrack?.trackerViews || {});
     const transmitters = useSelector(selectRunningRigTransmitters);
+    const vfo = vfoMarkers?.[vfoIndex];
+    // The parent mounts this dialog only while open; keep edits out of Redux until Apply.
+    const [draft, setDraft] = React.useState(() => ({
+        parametersEnabled: vfo?.parametersEnabled ?? false,
+        parameters: { ...(vfo?.parameters || {}) },
+    }));
+    const [initialDraft] = React.useState(draft);
+    const changedParameters = Object.entries(draft.parameters).filter(
+        ([key, value]) => !sameParameterValue(value, initialDraft.parameters[key])
+    );
+    const hasChanges = draft.parametersEnabled !== initialDraft.parametersEnabled || changedParameters.length > 0;
 
-    if (!vfoIndex || !vfoMarkers[vfoIndex]) {
+    if (!vfoIndex || !vfo) {
         return null;
     }
 
-    const vfo = vfoMarkers[vfoIndex];
     const decoder = vfo.decoder;
 
     if (!decoder || decoder === 'none') {
@@ -81,7 +96,7 @@ const DecoderParamsDialog = ({
 
     // Pass the component translator so parameter labels/tooltips stay localized.
     const decoderParams = getDecoderParameters(decoder, t);
-    const parametersEnabled = vfo.parametersEnabled ?? false; // Default to disabled
+    const parametersEnabled = draft.parametersEnabled; // Default to disabled
 
     // Get locked transmitter if available
     const lockedTransmitterId = vfo.lockedTransmitterId;
@@ -104,46 +119,66 @@ const DecoderParamsDialog = ({
     const suggestionSatellite = lockTrackerSatelliteDetails || activeSatelliteDetails;
 
     const handleApplySuggestedConfig = (config) => {
-        const parameters = { ...vfo.parameters };
+        setDraft((current) => {
+            const parameters = { ...current.parameters };
 
-        // Keep this mapping aligned with scheduler tasks so a suggested
-        // configuration produces the same decoder settings in either workflow.
-        if (['gmsk', 'gfsk', 'fsk'].includes(decoder)) {
-            if (config.baudrate) parameters[`${decoder}_baudrate`] = config.baudrate;
-            if (config.framing) parameters[`${decoder}_framing`] = config.framing;
-            if (config.deviation !== null && config.deviation !== undefined) {
-                parameters[`${decoder}_deviation`] = config.deviation;
+            // Keep this mapping aligned with scheduler tasks so a suggested
+            // configuration produces the same decoder settings in either workflow.
+            if (['gmsk', 'gfsk', 'fsk'].includes(decoder)) {
+                if (config.baudrate) parameters[`${decoder}_baudrate`] = config.baudrate;
+                if (config.framing) parameters[`${decoder}_framing`] = config.framing;
+                if (config.deviation !== null && config.deviation !== undefined) {
+                    parameters[`${decoder}_deviation`] = config.deviation;
+                }
+                if (config.framing === 'geoscan' && config.framing_params?.frame_size) {
+                    parameters[`${decoder}_geoscan_frame_size`] = config.framing_params.frame_size;
+                }
+            } else if (decoder === 'bpsk') {
+                if (config.baudrate) parameters.bpsk_baudrate = config.baudrate;
+                if (config.framing) parameters.bpsk_framing = config.framing;
+                if (config.differential !== null && config.differential !== undefined) {
+                    parameters.bpsk_differential = config.differential;
+                }
+                if (config.framing === 'geoscan' && config.framing_params?.frame_size) {
+                    parameters.bpsk_geoscan_frame_size = config.framing_params.frame_size;
+                }
+            } else if (decoder === 'geoscanimage') {
+                if (config.baudrate) parameters.geoscanimage_baudrate = config.baudrate;
+                if (config.deviation !== null && config.deviation !== undefined) parameters.geoscanimage_deviation = config.deviation;
+                if (config.framing_params?.frame_size) parameters.geoscanimage_frame_size = config.framing_params.frame_size;
+                if (config.framing_params?.syncword_threshold !== undefined) parameters.geoscanimage_syncword_threshold = config.framing_params.syncword_threshold;
+                if (config.framing_params?.satellite_id !== undefined) parameters.geoscanimage_satellite_id = config.framing_params.satellite_id;
+            } else if (decoder === 'aprs') {
+                if (config.baudrate) parameters.aprs_baudrate = config.baudrate;
+                if (config.deviation !== null && config.deviation !== undefined) parameters.aprs_deviation = config.deviation;
+                if (config.af_carrier) parameters.aprs_af_carrier = config.af_carrier;
+            } else if (decoder === 'lora') {
+                if (config.sf) parameters.lora_sf = config.sf;
+                if (config.bw) parameters.lora_bw = config.bw;
+                if (config.cr) parameters.lora_cr = config.cr;
             }
-            if (config.framing === 'geoscan' && config.framing_params?.frame_size) {
-                parameters[`${decoder}_geoscan_frame_size`] = config.framing_params.frame_size;
-            }
-        } else if (decoder === 'bpsk') {
-            if (config.baudrate) parameters.bpsk_baudrate = config.baudrate;
-            if (config.framing) parameters.bpsk_framing = config.framing;
-            if (config.differential !== null && config.differential !== undefined) {
-                parameters.bpsk_differential = config.differential;
-            }
-            if (config.framing === 'geoscan' && config.framing_params?.frame_size) {
-                parameters.bpsk_geoscan_frame_size = config.framing_params.frame_size;
-            }
-        } else if (decoder === 'geoscanimage') {
-            if (config.baudrate) parameters.geoscanimage_baudrate = config.baudrate;
-            if (config.deviation !== null && config.deviation !== undefined) parameters.geoscanimage_deviation = config.deviation;
-            if (config.framing_params?.frame_size) parameters.geoscanimage_frame_size = config.framing_params.frame_size;
-            if (config.framing_params?.syncword_threshold !== undefined) parameters.geoscanimage_syncword_threshold = config.framing_params.syncword_threshold;
-            if (config.framing_params?.satellite_id !== undefined) parameters.geoscanimage_satellite_id = config.framing_params.satellite_id;
-        } else if (decoder === 'aprs') {
-            if (config.baudrate) parameters.aprs_baudrate = config.baudrate;
-            if (config.deviation !== null && config.deviation !== undefined) parameters.aprs_deviation = config.deviation;
-            if (config.af_carrier) parameters.aprs_af_carrier = config.af_carrier;
-        } else if (decoder === 'lora') {
-            if (config.sf) parameters.lora_sf = config.sf;
-            if (config.bw) parameters.lora_bw = config.bw;
-            if (config.cr) parameters.lora_cr = config.cr;
+
+            // Suggested values must be active for the decoder to consume them.
+            return { parameters, parametersEnabled: true };
+        });
+    };
+
+    const handleApply = () => {
+        const updates = {};
+        if (draft.parametersEnabled !== initialDraft.parametersEnabled) {
+            updates.parametersEnabled = draft.parametersEnabled;
         }
-
-        // Suggested values must be active for the decoder to consume them.
-        onVFOPropertyChange(vfoIndex, { parameters, parametersEnabled: true });
+        if (changedParameters.length > 0) {
+            // Preserve unrelated parameter changes that arrived while the dialog was open.
+            updates.parameters = {
+                ...(vfo.parameters || {}),
+                ...Object.fromEntries(changedParameters),
+            };
+        }
+        if (Object.keys(updates).length > 0) {
+            onVFOPropertyChange(vfoIndex, updates);
+        }
+        onClose();
     };
 
     return (
@@ -163,7 +198,7 @@ const DecoderParamsDialog = ({
                     <Typography variant="h6">
                         VFO {vfoIndex} - {decoder.toUpperCase()} {t('decoder_params_dialog.parameters', { defaultValue: 'Parameters' })}
                     </Typography>
-                    <IconButton onClick={onClose} size="small">
+                    <IconButton onClick={onClose} size="small" aria-label={t('common:close', { defaultValue: 'Close' })}>
                         <CloseIcon />
                     </IconButton>
                 </Box>
@@ -177,6 +212,7 @@ const DecoderParamsDialog = ({
                         transmitter={lockedTransmitter}
                         show={isLocked && !!lockedTransmitter}
                         onApply={handleApplySuggestedConfig}
+                        applyLabel={t('decoder_params_dialog.use_suggestion', { defaultValue: 'Use suggestion' })}
                     />
 
                     {/* Master Enable/Disable Checkbox */}
@@ -186,11 +222,7 @@ const DecoderParamsDialog = ({
                                 <Switch
                                     checked={parametersEnabled}
                                     disabled={!vfoActive[vfoIndex]}
-                                    onChange={(e) => {
-                                        onVFOPropertyChange(vfoIndex, {
-                                            parametersEnabled: e.target.checked
-                                        });
-                                    }}
+                                    onChange={(e) => setDraft((current) => ({ ...current, parametersEnabled: e.target.checked }))}
                                 />
                             }
                             label={
@@ -207,10 +239,10 @@ const DecoderParamsDialog = ({
                     </Box>
 
                     {Object.entries(decoderParams).map(([paramKey, paramDef]) => {
-                        const currentValue = vfo.parameters?.[paramKey] ?? paramDef.default;
+                        const currentValue = draft.parameters[paramKey] ?? paramDef.default;
 
                         // Handle conditional visibility
-                        if (paramDef.visibleWhen && !paramDef.visibleWhen(vfo.parameters || {})) {
+                        if (paramDef.visibleWhen && !paramDef.visibleWhen(draft.parameters)) {
                             return null;
                         }
 
@@ -218,8 +250,9 @@ const DecoderParamsDialog = ({
                             <Box key={paramKey} sx={{ mb: 2.5 }}>
                                 {paramDef.type === 'select' && (
                                     <FormControl fullWidth size="small" variant="outlined">
-                                        <InputLabel>{paramDef.label}</InputLabel>
+                                        <InputLabel id={`vfo-${vfoIndex}-${paramKey}-label`}>{paramDef.label}</InputLabel>
                                         <Select
+                                            labelId={`vfo-${vfoIndex}-${paramKey}-label`}
                                             value={JSON.stringify(currentValue)}
                                             label={paramDef.label}
                                             size="small"
@@ -227,12 +260,10 @@ const DecoderParamsDialog = ({
                                             onChange={(e) => {
                                                 // Parse the JSON string back to the original value
                                                 const selectedValue = JSON.parse(e.target.value);
-                                                onVFOPropertyChange(vfoIndex, {
-                                                    parameters: {
-                                                        ...vfo.parameters,
-                                                        [paramKey]: selectedValue
-                                                    }
-                                                });
+                                                setDraft((current) => ({
+                                                    ...current,
+                                                    parameters: { ...current.parameters, [paramKey]: selectedValue },
+                                                }));
                                             }}
                                             sx={{ fontSize: '0.875rem' }}
                                         >
@@ -262,12 +293,10 @@ const DecoderParamsDialog = ({
                                                     checked={currentValue}
                                                     disabled={!vfoActive[vfoIndex] || !parametersEnabled}
                                                     onChange={(e) => {
-                                                        onVFOPropertyChange(vfoIndex, {
-                                                            parameters: {
-                                                                ...vfo.parameters,
-                                                                [paramKey]: e.target.checked
-                                                            }
-                                                        });
+                                                        setDraft((current) => ({
+                                                            ...current,
+                                                            parameters: { ...current.parameters, [paramKey]: e.target.checked },
+                                                        }));
                                                     }}
                                                 />
                                             }
@@ -290,6 +319,12 @@ const DecoderParamsDialog = ({
                     })}
                 </Box>
             </DialogContent>
+            <DialogActions>
+                <Button onClick={onClose}>{t('common:cancel', { defaultValue: 'Cancel' })}</Button>
+                <Button variant="contained" onClick={handleApply} disabled={!hasChanges}>
+                    {t('common:apply', { defaultValue: 'Apply' })}
+                </Button>
+            </DialogActions>
         </Dialog>
     );
 };

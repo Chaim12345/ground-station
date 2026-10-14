@@ -10,6 +10,8 @@ import {
     Dialog,
     DialogTitle,
     DialogContent,
+    DialogActions,
+    Button,
     IconButton,
     Typography,
     FormControl,
@@ -63,12 +65,28 @@ export const TranscriptionParamsDialog = ({
     const { t } = useTranslation('waterfall');
     const { socket } = useSocket();
     const vfo = vfoMarkers?.[vfoIndex];
+    // Dialogs are mounted on open, so these values remain local until Apply.
+    const [draft, setDraft] = React.useState(() => ({
+        transcriptionLanguage: vfo?.transcriptionLanguage || 'auto',
+        transcriptionTranslationBackend: vfo?.transcriptionTranslationBackend || 'google',
+        transcriptionTranslateTo: vfo?.transcriptionTranslateTo || 'none',
+    }));
+    const [initialDraft] = React.useState(draft);
+    const changedFields = Object.keys(draft).filter((field) => draft[field] !== initialDraft[field]);
     const usesSeparateTranslation = ['deepgram', 'parakeet'].includes(vfo?.transcriptionProvider);
-    const translationBackend = vfo?.transcriptionTranslationBackend || 'google';
+    const translationBackend = draft.transcriptionTranslationBackend;
     const isLocal = usesSeparateTranslation && translationBackend === 'libretranslate';
     const capabilities = useLibreTranslateCapabilities(socket, open && usesSeparateTranslation);
 
     if (!vfoIndex || !vfo) return null;
+
+    const handleApply = () => {
+        if (changedFields.length > 0) {
+            const updates = Object.fromEntries(changedFields.map((field) => [field, draft[field]]));
+            onVFOPropertyChange(vfoIndex, updates);
+        }
+        onClose();
+    };
 
     const decoderInfo = getVFODecoderInfo ? getVFODecoderInfo(vfoIndex) : null;
     const isTranscribing = decoderInfo && decoderInfo.decoder_type === 'transcription';
@@ -92,7 +110,7 @@ export const TranscriptionParamsDialog = ({
                     <Typography variant="h6">
                         VFO {vfoIndex} {t('vfo_dialogs.transcription_parameters', { defaultValue: '- Transcription Parameters' })}
                     </Typography>
-                    <IconButton onClick={onClose} size="small">
+                    <IconButton onClick={onClose} size="small" aria-label={t('common:close', { defaultValue: 'Close' })}>
                         <CloseIcon />
                     </IconButton>
                 </Box>
@@ -108,11 +126,14 @@ export const TranscriptionParamsDialog = ({
                     {/* Source Language */}
                     <Box sx={{ mb: 2.5 }}>
                         <FormControl fullWidth size="small" variant="outlined">
-                            <InputLabel>{t('vfo.source_language', 'Source Language')}</InputLabel>
+                            <InputLabel id={`vfo-${vfoIndex}-transcription-language-label`}>
+                                {t('vfo.source_language', 'Source Language')}
+                            </InputLabel>
                             <Select
-                                value={vfo.transcriptionLanguage || 'auto'}
+                                labelId={`vfo-${vfoIndex}-transcription-language-label`}
+                                value={draft.transcriptionLanguage}
                                 label={t('vfo.source_language', 'Source Language')}
-                                onChange={(e) => onVFOPropertyChange(vfoIndex, { transcriptionLanguage: e.target.value })}
+                                onChange={(e) => setDraft((current) => ({ ...current, transcriptionLanguage: e.target.value }))}
                                 disabled={!vfo.transcriptionEnabled}
                                 size="small"
                                 sx={{ fontSize: '0.875rem' }}
@@ -130,7 +151,7 @@ export const TranscriptionParamsDialog = ({
                                 <MenuItem value="uk" sx={{ fontSize: '0.875rem' }}>🇺🇦 {t('vfo.languages.uk', 'Ukrainian')}</MenuItem>
                                 <MenuItem value="ja" sx={{ fontSize: '0.875rem' }}>🇯🇵 {t('vfo.languages.ja', 'Japanese')}</MenuItem>
                                 <MenuItem value="zh" sx={{ fontSize: '0.875rem' }}>🇨🇳 {t('vfo.languages.zh', 'Chinese')}</MenuItem>
-                                {(vfo.transcriptionLanguage === 'zh-Hant' || (isLocal && capabilities?.languages?.some((language) => language.code === 'zh-Hant'))) && (
+                                {(draft.transcriptionLanguage === 'zh-Hant' || (isLocal && capabilities?.languages?.some((language) => language.code === 'zh-Hant'))) && (
                                     <MenuItem value="zh-Hant" sx={{ fontSize: '0.875rem' }}>🇹🇼 {t('vfo.languages.zh-Hant', 'Chinese (Traditional)')}</MenuItem>
                                 )}
                                 <MenuItem value="ar" sx={{ fontSize: '0.875rem' }}>🇸🇦 {t('vfo.languages.ar', 'Arabic')}</MenuItem>
@@ -152,9 +173,9 @@ export const TranscriptionParamsDialog = ({
                         <Box sx={{ mb: 2.5 }}>
                             <TranslationBackendField
                                 value={translationBackend}
-                                onChange={(value) => onVFOPropertyChange(vfoIndex, { transcriptionTranslationBackend: value })}
-                                source={vfo.transcriptionLanguage || 'auto'}
-                                target={vfo.transcriptionTranslateTo || 'none'}
+                                onChange={(value) => setDraft((current) => ({ ...current, transcriptionTranslationBackend: value }))}
+                                source={draft.transcriptionLanguage}
+                                target={draft.transcriptionTranslateTo}
                                 capabilities={capabilities}
                                 disabled={!vfo.transcriptionEnabled}
                             />
@@ -164,20 +185,23 @@ export const TranscriptionParamsDialog = ({
                     {/* Translate To */}
                     <Box sx={{ mb: 2.5 }}>
                         <FormControl fullWidth size="small" variant="outlined">
-                            <InputLabel>{t('vfo.translate_to', 'Translate To')}</InputLabel>
+                            <InputLabel id={`vfo-${vfoIndex}-transcription-target-label`}>
+                                {t('vfo.translate_to', 'Translate To')}
+                            </InputLabel>
                             <Select
-                                value={vfo.transcriptionTranslateTo || 'none'}
+                                labelId={`vfo-${vfoIndex}-transcription-target-label`}
+                                value={draft.transcriptionTranslateTo}
                                 label={t('vfo.translate_to', 'Translate To')}
-                                onChange={(e) => onVFOPropertyChange(vfoIndex, { transcriptionTranslateTo: e.target.value })}
+                                onChange={(e) => setDraft((current) => ({ ...current, transcriptionTranslateTo: e.target.value }))}
                                 disabled={!vfo.transcriptionEnabled}
                                 size="small"
                                 sx={{ fontSize: '0.875rem' }}
                             >
                                 <MenuItem value="none" sx={{ fontSize: '0.875rem' }}>⭕ {t('vfo.languages.none', 'No Translation')}</MenuItem>
-                                {getLibreTargetOptions(TARGET_LANGUAGES.map(([value, icon, label]) => ({ value, icon, label })), isLocal ? capabilities : null, vfo.transcriptionTranslateTo)
+                                {getLibreTargetOptions(TARGET_LANGUAGES.map(([value, icon, label]) => ({ value, icon, label })), isLocal ? capabilities : null, draft.transcriptionTranslateTo)
                                     .map((option) => (
                                         <MenuItem key={option.value} value={option.value} sx={{ fontSize: '0.875rem' }}
-                                            disabled={isLocal && !isLibrePairSupported(capabilities, vfo.transcriptionLanguage || 'auto', option.value)}>
+                                            disabled={isLocal && !isLibrePairSupported(capabilities, draft.transcriptionLanguage, option.value)}>
                                             {option.icon} {t(`vfo.languages.${option.value}`, option.label)}
                                         </MenuItem>
                                     ))}
@@ -186,8 +210,7 @@ export const TranscriptionParamsDialog = ({
                     </Box>
 
                     {usesSeparateTranslation && !isLocal &&
-                     vfo.transcriptionTranslateTo &&
-                     vfo.transcriptionTranslateTo !== 'none' && (
+                     draft.transcriptionTranslateTo !== 'none' && (
                         <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
                             {t('vfo.external_translation_info', 'Translation uses Google Translate API (configured in Settings).')}
                         </Alert>
@@ -246,6 +269,12 @@ export const TranscriptionParamsDialog = ({
                     )}
                 </Box>
             </DialogContent>
+            <DialogActions>
+                <Button onClick={onClose}>{t('common:cancel', { defaultValue: 'Cancel' })}</Button>
+                <Button variant="contained" onClick={handleApply} disabled={changedFields.length === 0}>
+                    {t('common:apply', { defaultValue: 'Apply' })}
+                </Button>
+            </DialogActions>
         </Dialog>
     );
 };

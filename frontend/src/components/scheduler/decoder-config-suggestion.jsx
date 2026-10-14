@@ -36,8 +36,9 @@ import { useTranslation } from 'react-i18next';
  * @param {Object} props.transmitter - Transmitter object with baud, mode, description, etc.
  * @param {boolean} props.show - Whether to show the suggestion (when transmitter is selected)
  * @param {Function} props.onApply - Callback function to apply the configuration to the form
+ * @param {string} [props.applyLabel] - Optional label when the containing form has its own Apply button
  */
-export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, show, onApply }) => {
+export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, show, onApply, applyLabel }) => {
     const { t } = useTranslation('common');
     const { socket } = useSocket();
     const [loading, setLoading] = useState(false);
@@ -283,7 +284,7 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
                             },
                         }}
                     >
-                        {t('decoder_config_suggestion.apply', { defaultValue: 'Apply' })}
+                        {applyLabel || t('decoder_config_suggestion.apply', { defaultValue: 'Apply' })}
                     </Button>
                 )}
             </Box>

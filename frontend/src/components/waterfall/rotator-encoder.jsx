@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useDispatch, useSelector, useStore } from 'react-redux';
 import { Box, Typography, useTheme } from '@mui/material';
 import { setVFOProperty } from './vfo-marker/vfo-slice.jsx';
 import { selectRunningRigTransmitters } from '../target/transmitter-selectors.js';
@@ -96,6 +96,7 @@ const RotaryEncoder = ({
                            const { t } = useTranslation('waterfall');
     const theme = useTheme();
     const dispatch = useDispatch();
+    const store = useStore();
     const { currentVFO, isVFOActive } = useSelector((state) => ({
         currentVFO: state.vfo.vfoMarkers?.[vfoNumber] || null,
         isVFOActive: Boolean(state.vfo.vfoActive?.[vfoNumber]),
@@ -111,7 +112,6 @@ const RotaryEncoder = ({
 
     // Get current VFO data based on the provided vfoNumber
     const stepSize = currentVFO?.stepSize || 1000; // Default 1kHz step
-    const currentFrequency = currentVFO?.frequency || 0;
     const isLocked = currentVFO?.lockedTransmitterId && currentVFO?.lockedTransmitterId !== 'none';
     const currentOffset = currentVFO?.frequencyOffset || 0;
 
@@ -179,8 +179,10 @@ const RotaryEncoder = ({
                     updates: { frequencyOffset: newOffset }
                 }));
             } else {
-                // When unlocked, adjust absolute frequency as before
-                const newFrequency = Math.round(currentFrequency + frequencyChange);
+                // Frequency updates do not rerender this control, so read the
+                // current marker value for every dial step.
+                const latestFrequency = store.getState().vfo.vfoMarkers?.[vfoNumber]?.frequency ?? 0;
+                const newFrequency = Math.round(latestFrequency + frequencyChange);
 
                 dispatch(setVFOProperty({
                     vfoNumber: vfoNumber,
@@ -191,7 +193,7 @@ const RotaryEncoder = ({
             // Reset accumulator after applying change
             rotationAccumulator.current = 0;
         }
-    }, [currentVFO, vfoNumber, isVFOActive, stepSize, sensitivity, currentFrequency, currentOffset, isLocked, dispatch]);
+    }, [currentVFO, vfoNumber, isVFOActive, stepSize, sensitivity, currentOffset, isLocked, dispatch, store]);
 
     // Mouse event handlers
     const handleMouseDown = useCallback((e) => {
