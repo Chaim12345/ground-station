@@ -17,7 +17,7 @@
  *
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Box, IconButton, Tooltip, Fade, ToggleButtonGroup, ToggleButton, Grid } from '@mui/material';
 import { darken } from '@mui/material/styles';
@@ -187,6 +187,7 @@ const VFOSubtitle = ({
     const maxWidthRef = useRef(0);
     const contentRef = useRef(null);
     const scrollContainerRef = useRef(null);
+    const isAtBottomRef = useRef(true);
 
     useEffect(() => {
         if (!transcription || !transcription.segments || transcription.segments.length === 0) {
@@ -270,17 +271,20 @@ const VFOSubtitle = ({
         return () => clearInterval(interval);
     }, [lines.length]);
 
-    const latestLineId = lines.length > 0 ? lines[lines.length - 1].id : null;
-
-    // Keep the newest subtitle lines in view while preserving manual scroll position when reading history.
-    useEffect(() => {
-        const container = scrollContainerRef.current;
-        if (!container) return;
+    // Record the user's position before incoming text changes the scroll height.
+    const handleScroll = (event) => {
+        const container = event.currentTarget;
         const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-        if (distanceFromBottom <= 48) {
+        isAtBottomRef.current = distanceFromBottom <= 2;
+    };
+
+    // Follow new text only while the user is at the bottom. Scrolling back down restores the lock.
+    useLayoutEffect(() => {
+        const container = scrollContainerRef.current;
+        if (container && isAtBottomRef.current) {
             container.scrollTop = container.scrollHeight;
         }
-    }, [latestLineId]);
+    }, [lines, maxLines, fontSizeMultiplier]);
 
     useEffect(() => {
         positionRef.current = position;
@@ -659,6 +663,8 @@ const VFOSubtitle = ({
                     >
                         <Box
                             ref={scrollContainerRef}
+                            onScroll={handleScroll}
+                            data-testid={`transcription-scroll-vfo${vfoNumber}`}
                             sx={{
                                 maxHeight: `calc(${maxLines} * 1.5em)`,
                                 overflowY: 'auto',
