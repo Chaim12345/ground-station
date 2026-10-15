@@ -10,33 +10,53 @@ from pydantic import BaseModel, ConfigDict, Field
 
 PUBLIC_API_DESCRIPTION = """Read-only API for third-party ground-station applications.
 
-Create a personal API token in the signed-in browser app under **API Tokens**.
-Click **Authorize** here and enter the token as a Bearer credential, or send
-`Authorization: Bearer YOUR_TOKEN` with each `/api/v1` request. Browser session
-cookies do not authenticate these routes. `GET /api/v1/me` shows the token's
-owner and scopes. A missing/invalid token returns 401; a missing scope returns
-403. Scopes are fixed when a token is created.
+### Get started
 
-Start with `GET /api/v1/station` for identity and `GET /api/v1/status` for
-scheduled-observation activity. Use `GET /api/v1/satellites`,
-`GET /api/v1/observations`, `GET /api/v1/sdrs`, `GET /api/v1/rotators`, and
-`GET /api/v1/artifacts` to discover IDs before calling their detail routes.
-List routes document their paging parameters and response examples below.
-`GET /api/v1/events` streams live changes using Server-Sent Events; its
-response has literal frame examples and a per-event payload reference. The
-stream does not replay missed events, so refresh REST state after reconnecting.
-Artifact download routes return files or ZIPs and accept HTTP byte ranges for
-direct files. Follow `api_download_url` from artifact metadata when your token
-also has `artifacts:download`.
+1. Create a personal API token in the signed-in browser app under **API Tokens**.
+   Select the scopes your application needs when creating it.
+2. Click **Authorize** on this page and enter the token as a Bearer credential.
+3. Call `GET /api/v1/me` to check the token owner and granted scopes.
 
-Grant only the scopes needed by your client: `station:read` for status and most
-events; `observations:read` for schedules and observation events;
-`artifacts:read` for library metadata and readiness events;
-`artifacts:download` for file bytes; `satellites:read`, `sdrs:read`, and
-`rotators:read` for their respective catalog/detail routes. To consume an SDR
-or rotator event and resolve its device ID, combine `station:read` with the
-device's read scope. Token management and control commands remain in the
-browser app rather than this read-only API.
+For direct HTTP requests, send the token with every call:
+
+```http
+Authorization: Bearer YOUR_TOKEN
+```
+
+Browser session cookies do not authenticate `/api/v1` routes. A missing, expired,
+or revoked token returns `401`; a token without the required scope returns `403`.
+Scopes are fixed when the token is created.
+
+### Find data
+
+- `GET /api/v1/station` identifies the station; `GET /api/v1/status` reports
+  observation activity.
+- List satellites, observations, SDRs, rotators, and artifacts to discover IDs
+  before calling their detail routes. Each route below documents its parameters,
+  response schema, and example.
+
+### Follow changes and download files
+
+- `GET /api/v1/events` streams Server-Sent Events. Its response documents the
+  frame syntax and each event payload. The stream does not replay missed events;
+  refresh the relevant REST resources after reconnecting.
+- Artifact metadata includes `api_download_url`. Download routes return files
+  or ZIPs and accept HTTP byte ranges for direct files. Downloading requires
+  `artifacts:download`.
+
+### Choose scopes
+
+- `station:read` — station identity, status, and target, tracker, SDR, and
+  rotator events.
+- `observations:read` — schedules and observation events.
+- `artifacts:read` — library metadata and artifact readiness events.
+- `artifacts:download` — artifact file bytes.
+- `satellites:read`, `sdrs:read`, `rotators:read` — the corresponding list and
+  detail routes.
+
+To resolve a device ID from an SDR or rotator event, combine `station:read`
+with the device's read scope. Token management and control commands are in
+the browser app.
 """
 
 

@@ -360,6 +360,7 @@ async def lifespan(fastapiapp: FastAPI):
             task.cancel()
         background_tasks.clear()
         await shutdown.cleanup_sessions()
+        await shutdown.cleanup_sdr_processes()
         stop_scheduler()
         shutdown.cleanup_everything()
         process_manager.shutdown()

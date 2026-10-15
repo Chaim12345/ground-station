@@ -12,6 +12,7 @@ from session.service import active_sdr_clients, session_service
 audio_consumer: Optional[WebAudioStreamer] = None
 audio_broadcaster: Optional[AudioBroadcaster] = None
 SESSION_CLEANUP_TIMEOUT_SECONDS = 10
+SDR_PROCESS_CLEANUP_TIMEOUT_SECONDS = 15
 
 
 def cleanup_everything():
@@ -78,6 +79,31 @@ async def cleanup_sessions() -> None:
         except Exception as error:  # pragma: no cover - best effort cleanup
             logger.warning("Error cleaning up SDR session %s: %s", session_id, error)
     logger.info("All SDR sessions cleaned up")
+
+
+async def cleanup_sdr_processes() -> None:
+    """Stop SDR workers that remain after session cleanup."""
+    process_manager = runtimestate.process_manager
+    if not process_manager:
+        return
+
+    # Joiners do not have entries in active_sdr_clients. A failed or timed-out
+    # session cleanup can also leave a worker in the process map.
+    for sdr_id in list(process_manager.processes.keys()):
+        try:
+            await asyncio.wait_for(
+                process_manager.stop_sdr_process(sdr_id),
+                timeout=SDR_PROCESS_CLEANUP_TIMEOUT_SECONDS,
+            )
+            logger.info("Stopped remaining SDR process: %s", sdr_id)
+        except asyncio.TimeoutError:
+            logger.error(
+                "Timed out after %ss stopping remaining SDR process %s",
+                SDR_PROCESS_CLEANUP_TIMEOUT_SECONDS,
+                sdr_id,
+            )
+        except Exception as error:  # pragma: no cover - best effort cleanup
+            logger.warning("Error stopping remaining SDR process %s: %s", sdr_id, error)
 
 
 def stop_tracker():
