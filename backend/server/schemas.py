@@ -31,6 +31,8 @@ Scopes are fixed when the token is created.
 
 - `GET /api/v1/station` identifies the station; `GET /api/v1/status` reports
   observation activity.
+- `GET /api/v1/trackers/rotators` returns current assigned rotator states for
+  reconnecting event clients.
 - List satellites, observations, SDRs, rotators, and artifacts to discover IDs
   before calling their detail routes. Each route below documents its parameters,
   response schema, and example.
@@ -46,8 +48,8 @@ Scopes are fixed when the token is created.
 
 ### Choose scopes
 
-- `station:read` — station identity, status, and target, tracker, SDR, and
-  rotator events.
+- `station:read` — station identity, status, tracker rotator states, and target,
+  tracker, SDR, and rotator events.
 - `observations:read` — schedules and observation events.
 - `artifacts:read` — library metadata and artifact readiness events.
 - `artifacts:download` — artifact file bytes.
@@ -130,6 +132,37 @@ class RotatorList(BaseModel):
 
 class RotatorDetail(BaseModel):
     data: RotatorMetadata
+
+
+RotatorRuntimeState = Literal[
+    "unavailable",
+    "disconnected",
+    "connected",
+    "motion_unconfirmed",
+    "error",
+    "out_of_bounds",
+    "slewing",
+    "tracking",
+    "park_requested",
+    "parked",
+    "stopped",
+]
+
+
+class TrackerRotatorStatus(BaseModel):
+    tracker_id: str
+    device_id: str
+    state: RotatorRuntimeState
+    tracking_enabled: bool = Field(
+        description="True while tracking mode is active, including a slew."
+    )
+    observed_at: float | None = Field(
+        description="Unix seconds of the worker observation, or null when unavailable."
+    )
+
+
+class TrackerRotatorList(BaseModel):
+    data: list[TrackerRotatorStatus]
 
 
 class SatelliteSummary(BaseModel):
@@ -295,6 +328,17 @@ class TrackerHardwareChangedEvent(BaseModel):
     previous_connected: bool | None
 
 
+class TrackerRotatorStateChangedEvent(BaseModel):
+    tracker_id: str
+    device_id: str | None
+    previous_device_id: str | None
+    previous: RotatorRuntimeState | None
+    current: RotatorRuntimeState
+    previous_tracking_enabled: bool | None
+    tracking_enabled: bool
+    observed_at: float | None = Field(description="Unix seconds of the observation or worker loss.")
+
+
 class ArtifactReadyEvent(BaseModel):
     id: str
     type: str
@@ -432,6 +476,17 @@ JSON_EXAMPLES: dict[str, dict[str, Any]] = {
         "pagination": {"limit": 50, "offset": 0, "total": 1},
     },
     "rotator": {"data": ROTATOR_EXAMPLE},
+    "tracker_rotators": {
+        "data": [
+            {
+                "tracker_id": "target-1",
+                "device_id": ROTATOR_EXAMPLE["id"],
+                "state": "slewing",
+                "tracking_enabled": True,
+                "observed_at": 1792068000.0,
+            }
+        ]
+    },
     "satellites": {
         "data": [SATELLITE_EXAMPLE],
         "pagination": {"limit": 50, "offset": 0, "total": 1},
@@ -456,6 +511,7 @@ JSON_MODELS: dict[str, type[BaseModel]] = {
     "sdr": SdrDetail,
     "rotators": RotatorList,
     "rotator": RotatorDetail,
+    "tracker_rotators": TrackerRotatorList,
     "satellites": SatelliteList,
     "monitored_satellites": MonitoredSatelliteList,
     "satellite": SatelliteDetail,
@@ -474,6 +530,7 @@ JSON_ROUTE_EXAMPLES = {
     "/api/v1/sdrs/{sdr_id}": "sdr",
     "/api/v1/rotators": "rotators",
     "/api/v1/rotators/{rotator_id}": "rotator",
+    "/api/v1/trackers/rotators": "tracker_rotators",
     "/api/v1/observations": "observations",
     "/api/v1/observations/upcoming": "upcoming_observations",
     "/api/v1/observations/{observation_id}": "observation",
@@ -491,6 +548,7 @@ JSON_SCOPES = {
     "sdr": "sdrs:read",
     "rotators": "rotators:read",
     "rotator": "rotators:read",
+    "tracker_rotators": "station:read",
     "satellites": "satellites:read",
     "monitored_satellites": "satellites:read",
     "satellite": "satellites:read",
@@ -626,6 +684,22 @@ _SSE_EVENTS: list[tuple[str, str | None, type[BaseModel], dict[str, Any], str]] 
             "previous_connected": False,
         },
         "An observed rig or rotator connection changes.",
+    ),
+    (
+        "tracker.rotator.state.changed",
+        "station:read",
+        TrackerRotatorStateChangedEvent,
+        {
+            "tracker_id": "target-1",
+            "device_id": ROTATOR_EXAMPLE["id"],
+            "previous_device_id": ROTATOR_EXAMPLE["id"],
+            "previous": "slewing",
+            "current": "tracking",
+            "previous_tracking_enabled": True,
+            "tracking_enabled": True,
+            "observed_at": 1792068000.0,
+        },
+        "An observed rotator status or tracking-mode flag changes, or worker telemetry is lost.",
     ),
     (
         "artifact.ready",

@@ -1,12 +1,54 @@
 """Process-local fan-out for the public read-only API event stream."""
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
 MAX_STREAMS = 100
 MAX_STREAMS_PER_TOKEN = 5
 MAX_QUEUED_EVENTS = 32
+
+
+def rotator_status(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    """Reduce worker telemetry to the public rotator state without connection details."""
+    data = snapshot.get("rotator_data") or {}
+    if "connected" not in data:
+        return None
+    tracking_state = snapshot.get("tracking_state") or {}
+    device_id = tracking_state.get("rotator_id")
+    device_id = str(device_id) if device_id not in (None, "", "none") else None
+    connected = bool(data["connected"])
+    if not connected:
+        state = "disconnected"
+    elif data.get("motion_unconfirmed"):
+        state = "motion_unconfirmed"
+    elif data.get("error"):
+        state = "error"
+    elif any(
+        data.get(key)
+        for key in ("outofbounds", "minelevation", "maxelevation", "minazimuth", "maxazimuth")
+    ):
+        state = "out_of_bounds"
+    elif data.get("slewing"):
+        state = "slewing"
+    elif data.get("tracking"):
+        state = "tracking"
+    elif data.get("park_requested"):
+        state = "park_requested"
+    elif data.get("parked"):
+        state = "parked"
+    elif data.get("stopped") and tracking_state.get("rotator_state") == "stopped":
+        state = "stopped"
+    else:
+        state = "connected"
+    return {
+        "device_id": device_id,
+        "state": state,
+        # Tracking mode can remain active while the rotator is slewing.
+        "tracking_enabled": connected and bool(data.get("tracking")),
+        "observed_at": snapshot.get("observed_at"),
+    }
 
 
 @dataclass(eq=False)
@@ -19,6 +61,7 @@ class Subscription:
 class EventBroker:
     def __init__(self) -> None:
         self._subscribers: set[Subscription] = set()
+        self._rotator_states: dict[str, dict[str, Any]] = {}
         self._closing = False
 
     def subscribe(self, token_id: str, scopes: list[str]) -> Subscription:
@@ -124,6 +167,74 @@ class EventBroker:
             },
             "station:read",
         )
+
+    def observe_rotator(self, tracker_id: str, snapshot: dict[str, Any]) -> None:
+        """Emit one transition per observed state, including worker replacement."""
+        current = rotator_status(snapshot)
+        if current is None:
+            return
+        previous = self._rotator_states.get(tracker_id)
+        if current["device_id"] is None and (previous is None or previous["device_id"] is None):
+            return
+        generation = snapshot.get("worker_generation")
+        if previous and previous["generation"] != generation:
+            # A new worker cannot confirm what happened to the old connection.
+            self.rotator_unavailable(tracker_id)
+            previous = self._rotator_states.get(tracker_id)
+        if previous and all(
+            previous[key] == current[key] for key in ("device_id", "state", "tracking_enabled")
+        ):
+            self._rotator_states[tracker_id] = {**current, "generation": generation}
+            return
+        self.publish(
+            "tracker.rotator.state.changed",
+            {
+                "tracker_id": tracker_id,
+                "device_id": current["device_id"],
+                "previous_device_id": previous["device_id"] if previous else None,
+                "previous": previous["state"] if previous else None,
+                "current": current["state"],
+                "previous_tracking_enabled": previous["tracking_enabled"] if previous else None,
+                "tracking_enabled": current["tracking_enabled"],
+                "observed_at": current["observed_at"],
+            },
+            "station:read",
+        )
+        self._rotator_states[tracker_id] = {**current, "generation": generation}
+
+    def rotator_unavailable(self, tracker_id: str) -> None:
+        """Report lost worker telemetry without claiming the motor disconnected."""
+        previous = self._rotator_states.get(tracker_id)
+        if previous is None or previous["state"] == "unavailable":
+            return
+        current = {**previous, "state": "unavailable", "tracking_enabled": False}
+        current["observed_at"] = time.time()
+        self.publish(
+            "tracker.rotator.state.changed",
+            {
+                "tracker_id": tracker_id,
+                "device_id": previous["device_id"],
+                "previous_device_id": previous["device_id"],
+                "previous": previous["state"],
+                "current": "unavailable",
+                "previous_tracking_enabled": previous["tracking_enabled"],
+                "tracking_enabled": False,
+                "observed_at": current["observed_at"],
+            },
+            "station:read",
+        )
+        self._rotator_states[tracker_id] = current
+
+    def reconcile_rotator_workers(self, is_alive) -> None:
+        """Detect workers that exited without a final hardware snapshot."""
+        for tracker_id in tuple(self._rotator_states):
+            if not is_alive(tracker_id):
+                self.rotator_unavailable(tracker_id)
+                # Keep a brief unavailable state for a quick restart, then
+                # release removed observation slots from this process cache.
+                unavailable_at = self._rotator_states[tracker_id]["observed_at"]
+                if unavailable_at is not None and time.time() - unavailable_at > 60:
+                    self._rotator_states.pop(tracker_id, None)
 
     def artifact_ready(self, item_id: str, item_type: str, name: str) -> None:
         self.publish(

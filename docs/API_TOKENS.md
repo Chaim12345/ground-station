@@ -8,7 +8,7 @@ Select only the scopes an application needs. The currently available scopes are:
 
 | Scope | Endpoints |
 | --- | --- |
-| `station:read` | `GET /api/v1/station`, `GET /api/v1/status`, `GET /api/v1/events` (station, target, tracker hardware, and SDR events) |
+| `station:read` | `GET /api/v1/station`, `GET /api/v1/status`, `GET /api/v1/trackers/rotators`, `GET /api/v1/events` (station, target, tracker hardware, and SDR events) |
 | `sdrs:read` | `GET /api/v1/sdrs`, `GET /api/v1/sdrs/{sdr_id}` |
 | `rotators:read` | `GET /api/v1/rotators`, `GET /api/v1/rotators/{rotator_id}` |
 | `satellites:read` | `GET /api/v1/satellites`, `GET /api/v1/satellites/monitored`, `GET /api/v1/satellites/{norad_id}` |
@@ -47,6 +47,17 @@ are omitted. The built-in `sigmf-playback` SDR is included in the SDR list and
 has a detail endpoint, even though it has no database record. For both event
 delivery and device lookup, grant `station:read` alongside `sdrs:read` or
 `rotators:read`. Existing tokens need replacing to gain a new scope.
+
+`GET /api/v1/trackers/rotators` returns one current-state row per assigned
+rotator tracker with `tracker_id`, `device_id`, `state`, `tracking_enabled`, and
+`observed_at` (Unix seconds). It requires `station:read`. A row is `unavailable`
+with a null observation time until its current worker supplies telemetry, or
+when that worker is gone. This does not assert that the rotator itself has
+disconnected. The response omits trackers without an assigned rotator.
+
+```sh
+curl -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:5000/api/v1/trackers/rotators
+```
 
 `GET /api/v1/observations/upcoming` returns compact scheduled pass summaries
 without hardware configuration or execution logs. The optional `hours` window
@@ -88,6 +99,20 @@ and `target.below_horizon` on a downward crossing. Both include `tracker_id`,
 horizon event until it rises. `tracker.hardware.changed` reports observed rig
 and rotator connection changes with `tracker_id`, `device`, `device_id`,
 `connected`, and `previous_connected` (null when first observed).
+`tracker.rotator.state.changed` reports an assigned rotator's observed status
+transition with `tracker_id`, `device_id`, `previous_device_id`, `previous`,
+`current`, `previous_tracking_enabled`, `tracking_enabled`, and `observed_at`
+(Unix seconds). The first observation has null `previous`; a worker that exits
+or is replaced sends `unavailable` rather than assuming a hardware disconnect.
+Statuses are `disconnected`, `connected`, `motion_unconfirmed`, `error`,
+`out_of_bounds`, `slewing`, `tracking`, `park_requested`, `parked`, `stopped`, and
+`unavailable`. A rotator can be in tracking mode while slewing, so
+`tracking_enabled` remains true during
+that status. Connection and status events are independent; clients can consume
+this status event alone for rotator state. On every SSE connection or
+reconnection, fetch `/api/v1/trackers/rotators` to establish the current state.
+When a tracker switches rotators, `previous_device_id` identifies the former
+device even if `device_id` is null during release.
 `artifact.ready` provides `id`, `type`, and `name` when a library item first
 appears complete or finishes recording/processing. Fetch its current metadata
 with `GET /api/v1/artifacts/{id}`; startup indexing does not replay old items.
@@ -99,7 +124,8 @@ comments keep idle connections open.
 The stream has no durable replay or event IDs: on every connection or
 reconnection, refresh any observation lists your client needs from REST.
 Target, hardware, and SDR events describe live transitions; the current target and SDR
-state are not included in `/api/v1/status`.
+state are not included in `/api/v1/status`. Current rotator state is available
+from `/api/v1/trackers/rotators`.
 Clients that fall behind are disconnected so they can reconnect and refresh.
 Revoked tokens and disabled accounts are rechecked at least every 15 seconds.
 

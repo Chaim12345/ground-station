@@ -2,6 +2,7 @@
 """Worker-owned operation execution and causally related completion events."""
 
 import copy
+import os
 import time
 import uuid
 
@@ -24,6 +25,7 @@ class WorkerOperations:
             "tracker_id": self.tracker.tracker_id,
             "worker_epoch": self.epoch,
             "worker_generation": self.generation,
+            "worker_pid": os.getpid(),
             "worker_started_at": self.started_at,
             "sequence": self.sequence,
             "observed_at": time.time(),

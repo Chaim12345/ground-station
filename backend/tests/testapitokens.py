@@ -4,6 +4,7 @@ import io
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -30,6 +31,7 @@ from db.models import (
 from handlers import socket as sockethandlers
 from library.inventory import LibraryInventory
 from server import startup
+from tracker.operations import OperationRegistry
 
 
 class FakeSio:
@@ -550,6 +552,7 @@ async def test_every_public_route_requires_a_pat_and_its_scope(token_store, monk
     routes = (
         ("/api/v1/station", "station:read", 200),
         ("/api/v1/status", "station:read", 200),
+        ("/api/v1/trackers/rotators", "station:read", 200),
         ("/api/v1/observations", "observations:read", 200),
         ("/api/v1/observations/upcoming", "observations:read", 200),
         ("/api/v1/observations/missing", "observations:read", 404),
@@ -585,6 +588,88 @@ async def test_every_public_route_requires_a_pat_and_its_scope(token_store, monk
         )
         assert artifact_page.json()["page"] == 2
         assert artifact_page.json()["page_size"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tracker_rotator_snapshot_uses_current_live_worker(token_store, monkeypatch):
+    owner_id, _ = await _make_user(token_store, "rotator-snapshot")
+    station = await apitokens.create_token(
+        owner_id, "password123", "Station reader", ["station:read"]
+    )
+    other = await apitokens.create_token(
+        owner_id, "password123", "Catalog reader", ["satellites:read"]
+    )
+    registry = OperationRegistry()
+    registry.observe(
+        {
+            "tracker_id": "target-1",
+            "worker_started_at": 1,
+            "worker_generation": "worker-1",
+            "worker_pid": 42,
+            "sequence": 1,
+            "observed_at": 1792068000.0,
+            "tracking_state": {"rotator_id": "mount"},
+            "rotator_data": {
+                "connected": True,
+                "tracking": True,
+                "slewing": True,
+                "host": "secret",
+            },
+        }
+    )
+    process = SimpleNamespace(pid=42, is_alive=lambda: True)
+    instances = [
+        {"tracker_id": "target-1", "rotator_id": "mount", "tracking_state": {}},
+        {"tracker_id": "target-2", "rotator_id": None, "tracking_state": {}},
+    ]
+    supervisor = SimpleNamespace(
+        get_instances_payload=lambda: {"instances": instances},
+        get_runtime=lambda _tracker_id: SimpleNamespace(process=process),
+    )
+    monkeypatch.setattr(startup, "operations", registry)
+    monkeypatch.setattr(startup, "get_tracker_supervisor", lambda: supervisor)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
+        path = "/api/v1/trackers/rotators"
+        assert (await client.get(path)).status_code == 401
+        assert (
+            await client.get(path, headers={"Authorization": f"Bearer {other['token']}"})
+        ).status_code == 403
+        headers = {"Authorization": f"Bearer {station['token']}"}
+        response = await client.get(path, headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {
+            "data": [
+                {
+                    "tracker_id": "target-1",
+                    "device_id": "mount",
+                    "state": "slewing",
+                    "tracking_enabled": True,
+                    "observed_at": 1792068000.0,
+                }
+            ]
+        }
+        assert "secret" not in response.text
+
+        process.pid = 43
+        assert (await client.get(path, headers=headers)).json()["data"][0] == {
+            "tracker_id": "target-1",
+            "device_id": "mount",
+            "state": "unavailable",
+            "tracking_enabled": False,
+            "observed_at": None,
+        }
+        process.pid = 42
+        instances[0]["rotator_id"] = "other-mount"
+        assert (await client.get(path, headers=headers)).json()["data"][0]["state"] == (
+            "unavailable"
+        )
+        instances[0]["rotator_id"] = "mount"
+        process.is_alive = lambda: False
+        assert (await client.get(path, headers=headers)).json()["data"][0]["state"] == (
+            "unavailable"
+        )
 
 
 @pytest.mark.asyncio
@@ -751,6 +836,9 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
     spec = startup.app.openapi()["paths"]["/api/v1/events"]["get"]
     assert spec["security"]
     assert "text/event-stream" in spec["responses"]["200"]["content"]
+    assert "tracker.rotator.state.changed" in {
+        event["event"] for event in spec["responses"]["200"]["x-sse-events"]
+    }
 
     owner_id, browser_secret = await _make_user(token_store, "events-owner")
     full = await apitokens.create_token(
@@ -835,13 +923,23 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
         public_events.target_visibility_changed("target-2", "25544", "ISS", 0.5, True)
         public_events.target_visibility_changed("target-2", "25544", "ISS", 0.0, False)
         public_events.tracker_hardware_changed("target-2", "rig", "radio", True, False)
+        public_events.observe_rotator(
+            "target-2",
+            {
+                "worker_generation": "worker-1",
+                "observed_at": 1792068000.0,
+                "tracking_state": {"rotator_id": "mount"},
+                "rotator_data": {"connected": True, "tracking": True, "slewing": True},
+            },
+        )
         public_events.target_slot_deleted("target-2")
         public_events.artifact_ready("snapshot:new.png", "snapshot", "new.png")
-        assert [(await anext(chunks)).split("\n", 1)[0] for _ in range(6)] == [
+        assert [(await anext(chunks)).split("\n", 1)[0] for _ in range(7)] == [
             "event: target.slot.created",
             "event: target.visible",
             "event: target.below_horizon",
             "event: tracker.hardware.changed",
+            "event: tracker.rotator.state.changed",
             "event: target.slot.deleted",
             "event: artifact.ready",
         ]
@@ -888,6 +986,14 @@ async def test_artifact_only_event_stream_receives_ready_events(token_store):
             if subscriber.token_id == token["data"]["id"]
         )
         public_events.target_slot_created("target-1")
+        public_events.observe_rotator(
+            "target-1",
+            {
+                "worker_generation": "worker-1",
+                "tracking_state": {"rotator_id": "mount"},
+                "rotator_data": {"connected": True},
+            },
+        )
         public_events.observations_changed()
         assert subscription.queue.empty()
         public_events.artifact_ready("snapshot:new.png", "snapshot", "new.png")

@@ -28,7 +28,7 @@ from common import apitokens
 from common import auth as authsvc
 from common.arguments import arguments
 from common.audio_queue_config import get_audio_queue_config
-from common.events import Subscription, public_events
+from common.events import Subscription, public_events, rotator_status
 from common.logger import logger
 from crud.scheduledobservations import fetch_scheduled_observations
 from db import AsyncSessionLocal, engine
@@ -87,6 +87,7 @@ from tlesync.state import sync_state_manager
 from tracker.instances import emit_tracker_instances, restore_tracker_instances_from_db
 from tracker.messages import handle_command_updates, handle_tracker_messages
 from tracker.operations import OperationRegistry, operations
+from tracker.runner import get_tracker_supervisor
 
 # Increase payload limits to handle large waterfall PNG images and maintenance uploads.
 Payload.max_decode_packets = 50
@@ -751,6 +752,50 @@ async def api_status(request: Request):
     return await _load_public_status()
 
 
+@app.get(
+    "/api/v1/trackers/rotators",
+    dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("tracker_rotators"),
+    summary="Get current tracker rotator states",
+)
+async def api_tracker_rotators(request: Request):
+    """Return observed states for assigned rotators. Requires `station:read`."""
+    await _require_api_token(request, "station:read")
+    supervisor = get_tracker_supervisor()
+    rows = []
+    for instance in supervisor.get_instances_payload()["instances"]:
+        tracker_id = instance["tracker_id"]
+        device_id = instance.get("rotator_id") or instance.get("tracking_state", {}).get(
+            "rotator_id"
+        )
+        if device_id in (None, "", "none"):
+            continue
+        snapshot = operations.observed.get(tracker_id)
+        runtime = supervisor.get_runtime(tracker_id)
+        # The worker PID fences out a previous process's last cached snapshot.
+        current = (
+            rotator_status(snapshot)
+            if snapshot
+            and runtime
+            and runtime.process.is_alive()
+            and snapshot.get("worker_pid") == runtime.process.pid
+            else None
+        )
+        if current and current["device_id"] != str(device_id):
+            # An assignment can change before its new worker telemetry arrives.
+            current = None
+        rows.append(
+            {
+                "tracker_id": tracker_id,
+                "device_id": str(device_id),
+                "state": current["state"] if current else "unavailable",
+                "tracking_enabled": current["tracking_enabled"] if current else False,
+                "observed_at": current["observed_at"] if current else None,
+            }
+        )
+    return {"data": rows}
+
+
 def _sse_event(name: str, data: Dict[str, Any]) -> str:
     return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
@@ -815,6 +860,7 @@ async def _stream_api_events(
                 "target.visible",
                 "target.below_horizon",
                 "tracker.hardware.changed",
+                "tracker.rotator.state.changed",
                 "artifact.ready",
                 "sdr.streaming.started",
                 "sdr.streaming.stopped",

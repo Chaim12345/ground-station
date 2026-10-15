@@ -108,6 +108,16 @@ def _publish_hardware_changes(
         )
 
 
+def _snapshot_from_current_worker(tracker_id: str, snapshot: Dict[str, Any]) -> bool:
+    """Reject queued telemetry from a worker replaced before its message was read."""
+    worker_pid = snapshot.get("worker_pid")
+    if worker_pid is None:
+        # Older/test snapshots lack a PID; sequence and generation checks still apply.
+        return True
+    runtime = get_tracker_supervisor().get_runtime(tracker_id)
+    return bool(runtime and runtime.process.is_alive() and runtime.process.pid == worker_pid)
+
+
 async def _get_live_observer_bodies() -> list[Dict[str, Any]]:
     """Cache the Sun briefly so every tracker event carries useful sky context."""
     global _observer_bodies_cache, _observer_bodies_cache_updated_at
@@ -140,8 +150,12 @@ async def handle_tracker_messages(sockio):
     Args:
         sockio: Socket.IO server instance for emitting events
     """
+    last_rotator_reconcile = time.monotonic()
     while True:
         try:
+            if time.monotonic() - last_rotator_reconcile >= 0.5:
+                public_events.reconcile_rotator_workers(get_tracker_supervisor().is_alive)
+                last_rotator_reconcile = time.monotonic()
             processed = False
             if queue_from_tracker is not None and not queue_from_tracker.empty():
                 message = queue_from_tracker.get_nowait()
@@ -186,6 +200,8 @@ async def handle_tracker_messages(sockio):
                                 ]
                             snapshot = data.get("snapshot")
                             if snapshot:
+                                if not _snapshot_from_current_worker(tracker_id, snapshot):
+                                    continue
                                 # A result from a replaced worker cannot rewrite
                                 # desired state before observation ordering runs.
                                 if not operations.can_observe(snapshot):
@@ -201,6 +217,7 @@ async def handle_tracker_messages(sockio):
                                 operations.observe(snapshot)
                                 if manager is not None:
                                     _publish_hardware_changes(tracker_id, previous, snapshot)
+                                    public_events.observe_rotator(tracker_id, snapshot)
                             operations.update(
                                 data["command_id"],
                                 data["status"],
@@ -219,11 +236,14 @@ async def handle_tracker_messages(sockio):
                                 continue
                             if not operations.can_observe(data):
                                 continue
+                            if not _snapshot_from_current_worker(tracker_id, data):
+                                continue
                             if manager.current_tracking_state:
                                 data["desired_state"] = dict(manager.current_tracking_state)
                             previous = operations.observed.get(tracker_id, {})
                             operations.observe(data)
                             _publish_hardware_changes(tracker_id, previous, data)
+                            public_events.observe_rotator(tracker_id, data)
                     if event == SocketEvents.SATELLITE_TRACKING and not data.get("observer_bodies"):
                         # Satellites do not carry heliocentric Earth vectors in
                         # their worker payload, so attach the shared live Sun here.
