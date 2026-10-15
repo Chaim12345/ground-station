@@ -28,10 +28,11 @@ from typing import Any, Dict, Optional, cast
 import crud
 import crud.celestialvectors as crud_celestial_vectors
 from celestial.bodycatalog import get_celestial_body
+from common.events import public_events
 from common.targetkey import normalize_target_key
 from db import AsyncSessionLocal
 from orbits import CentralBody, OrbitServiceError, build_satellite_ephemeris_payload
-from tracker.contracts import get_tracking_state_name, require_tracker_id
+from tracker.contracts import get_tracking_state_name, is_target_slot_id, require_tracker_id
 from tracker.ipc import (
     TRACKER_MSG_COMMAND,
     TRACKER_MSG_SET_HARDWARE,
@@ -81,6 +82,29 @@ class TrackerManager:
         if str(tracking_state.get("body_id") or "").strip():
             return "body"
         return "satellite"
+
+    @staticmethod
+    def _target_identity(tracking_state: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Keep the public event focused on target identity, not hardware settings."""
+        target_type = TrackerManager._normalize_target_type(tracking_state)
+        if target_type == "satellite":
+            identifier = tracking_state.get("norad_id")
+        elif target_type == "mission":
+            identifier = (
+                tracking_state.get("target_key")
+                or tracking_state.get("mission_id")
+                or tracking_state.get("command")
+            )
+        else:
+            identifier = tracking_state.get("target_key") or tracking_state.get("body_id")
+        if identifier in (None, "", 0):
+            return None
+        target_id = str(identifier)
+        return {
+            "type": target_type,
+            "id": target_id,
+            "name": str(tracking_state.get("target_name") or target_id),
+        }
 
     @staticmethod
     def _build_non_satellite_transmitter_target_key(tracking_state: Dict[str, Any]) -> str:
@@ -374,6 +398,18 @@ class TrackerManager:
                         "error": str(exc),
                         "command": operations.existing(command["command_id"], self.tracker_id),
                     }
+                if not current_value and is_target_slot_id(self.tracker_id):
+                    public_events.target_slot_created(self.tracker_id)
+                previous_target = self._target_identity(current_value)
+                current_target = self._target_identity(updated_value)
+                previous_id = (
+                    (previous_target["type"], previous_target["id"]) if previous_target else None
+                )
+                current_id = (
+                    (current_target["type"], current_target["id"]) if current_target else None
+                )
+                if previous_id != current_id:
+                    public_events.target_changed(self.tracker_id, previous_target, current_target)
             else:
                 operations.update(command["command_id"], "failed", result.get("error"))
             response = dict(result)

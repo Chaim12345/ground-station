@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from common.constants import RigStates
+from common.events import EventBroker
 from handlers.entities import tracking as tracking_handler
 from handlers.entities.tracking import (
     _build_non_satellite_transmitter_target_key,
@@ -25,6 +26,9 @@ class _SessionContext:
 @pytest.mark.asyncio
 async def test_delete_tracker_keeps_operations_lock_free_during_process_stop(monkeypatch):
     lock_states = []
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(tracking_handler, "public_events", broker)
 
     def _remove_tracker(_tracker_id):
         lock_states.append(tracking_handler.operations.lock.locked())
@@ -59,6 +63,10 @@ async def test_delete_tracker_keeps_operations_lock_free_during_process_stop(mon
 
     assert result["success"] is True
     assert lock_states == [False]
+    assert subscription.queue.get_nowait() == (
+        "target.slot.deleted",
+        {"tracker_id": "target-1"},
+    )
 
 
 def test_mission_target_normalization_preserves_rig_control_fields():

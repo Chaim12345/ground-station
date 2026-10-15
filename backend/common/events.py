@@ -62,5 +62,68 @@ class EventBroker:
         self.publish("observations.changed", data, "observations:read")
         self.status_changed()
 
+    def target_changed(
+        self, tracker_id: str, previous: dict[str, Any] | None, current: dict[str, Any] | None
+    ) -> None:
+        self.publish(
+            "target.changed",
+            {"tracker_id": tracker_id, "previous": previous, "current": current},
+            "station:read",
+        )
+
+    def target_slot_created(self, tracker_id: str) -> None:
+        self.publish("target.slot.created", {"tracker_id": tracker_id}, "station:read")
+
+    def target_slot_deleted(self, tracker_id: str) -> None:
+        self.publish("target.slot.deleted", {"tracker_id": tracker_id}, "station:read")
+
+    def target_visibility_changed(
+        self, tracker_id: str, norad_id: str, name: str, elevation_deg: float, visible: bool
+    ) -> None:
+        event_name = "target.visible" if visible else "target.below_horizon"
+        self.publish(
+            event_name,
+            {
+                "tracker_id": tracker_id,
+                "norad_id": norad_id,
+                "name": name,
+                "elevation_deg": elevation_deg,
+            },
+            "station:read",
+        )
+
+    def tracker_hardware_changed(
+        self,
+        tracker_id: str,
+        device: str,
+        device_id: str | None,
+        connected: bool,
+        previous_connected: bool | None,
+    ) -> None:
+        self.publish(
+            "tracker.hardware.changed",
+            {
+                "tracker_id": tracker_id,
+                "device": device,
+                "device_id": device_id,
+                "connected": connected,
+                "previous_connected": previous_connected,
+            },
+            "station:read",
+        )
+
+    def artifact_ready(self, item_id: str, item_type: str, name: str) -> None:
+        self.publish(
+            "artifact.ready",
+            {"id": item_id, "type": item_type, "name": name},
+            "artifacts:read",
+        )
+
+    def sdr_stream_started(self, sdr_id: str) -> None:
+        self.publish("sdr.streaming.started", {"sdr_id": sdr_id}, "station:read")
+
+    def sdr_stream_stopped(self, sdr_id: str) -> None:
+        self.publish("sdr.streaming.stopped", {"sdr_id": sdr_id}, "station:read")
+
 
 public_events = EventBroker()

@@ -8,10 +8,10 @@ Select only the scopes an application needs. The currently available scopes are:
 
 | Scope | Endpoints |
 | --- | --- |
-| `station:read` | `GET /api/v1/station`, `GET /api/v1/status`, `GET /api/v1/events` (status events) |
+| `station:read` | `GET /api/v1/station`, `GET /api/v1/status`, `GET /api/v1/events` (station, target, tracker hardware, and SDR events) |
 | `satellites:read` | `GET /api/v1/satellites`, `GET /api/v1/satellites/monitored`, `GET /api/v1/satellites/{norad_id}` |
 | `observations:read` | `GET /api/v1/observations`, `GET /api/v1/observations/upcoming`, `GET /api/v1/observations/{id}`, `GET /api/v1/events` (observation events) |
-| `artifacts:read` | `GET /api/v1/artifacts`, `GET /api/v1/artifacts/{id}` |
+| `artifacts:read` | `GET /api/v1/artifacts`, `GET /api/v1/artifacts/{id}`, `GET /api/v1/events` (`artifact.ready`) |
 | `artifacts:download` | `GET /api/v1/artifacts/{id}/download`, `GET /api/v1/artifacts/{id}/files/{path}` |
 
 `GET /api/v1/me` checks a token and returns its owner and granted scopes. For
@@ -45,8 +45,9 @@ against expensive repeated propagation.
 
 `GET /api/v1/events` is a read-only Server-Sent Events (SSE) stream for custom
 applications and Home Assistant custom integrations. Use an API token with
-`station:read` for `station.status` events, `observations:read` for
-`observations.changed` events, or both scopes for both event types:
+`station:read` for station, target, tracker hardware, and SDR events,
+`observations:read` for `observations.changed`, and `artifacts:read` for
+`artifact.ready`. Combine scopes to receive their respective events:
 
 ```sh
 curl -N -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:5000/api/v1/events
@@ -57,9 +58,30 @@ The stream starts with `connected` (`{"replay":false}`) and, for tokens with
 It then sends `station.status` when meaningful status fields change and
 `observations.changed` after schedule edits or observation status transitions.
 An observation event may include `id` and `status`; fetch the REST observation
-endpoints for current details. Heartbeat comments keep idle connections open.
+endpoints for current details. Changing a tracker's assigned target sends
+`target.changed` with `tracker_id`, `previous`, and `current`; each target has
+`type`, `id`, and `name`, and `previous` is null on first assignment. Selecting
+a different target tab in one browser does not change a tracker assignment.
+Creating or deleting a persistent target process sends `target.slot.created` or
+`target.slot.deleted` with its `tracker_id`. A running satellite target slot
+sends `target.visible` on its first above-horizon reading or an upward crossing,
+and `target.below_horizon` on a downward crossing. Both include `tracker_id`,
+`norad_id`, `name`, and `elevation_deg`. An initially hidden target sends no
+horizon event until it rises. `tracker.hardware.changed` reports observed rig
+and rotator connection changes with `tracker_id`, `device`, `device_id`,
+`connected`, and `previous_connected` (null when first observed).
+`artifact.ready` provides `id`, `type`, and `name` when a library item first
+appears complete or finishes recording/processing. Fetch its current metadata
+with `GET /api/v1/artifacts/{id}`; startup indexing does not replay old items.
+When an SDR worker delivers its first IQ samples, the stream sends
+`sdr.streaming.started` with `sdr_id`. It sends `sdr.streaming.stopped` when that
+worker stops, including after a failure. Joining or leaving a shared SDR stream
+does not generate these events while the worker remains active. Heartbeat
+comments keep idle connections open.
 The stream has no durable replay or event IDs: on every connection or
 reconnection, refresh any observation lists your client needs from REST.
+Target, hardware, and SDR events describe live transitions; the current target and SDR
+state are not included in `/api/v1/status`.
 Clients that fall behind are disconnected so they can reconnect and refresh.
 Revoked tokens and disabled accounts are rechecked at least every 15 seconds.
 

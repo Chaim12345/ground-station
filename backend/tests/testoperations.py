@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from common.events import EventBroker
 from db.models import TrackingState
 from tracker import logic
 from tracker import manager as managermodule
@@ -627,6 +628,238 @@ async def test_failed_connect_reconciles_saved_state_and_allows_reassignment(
         rotator_id="replacement", operation={"command_id": "replace"}
     )
     assert reply["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_target_change_event_follows_persisted_identity_change(monkeypatch, db_session):
+    registry = OperationRegistry()
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(managermodule, "operations", registry)
+    monkeypatch.setattr(managermodule, "public_events", broker)
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(managermodule, "AsyncSessionLocal", session)
+    manager = TrackerManager(tracker_id="target-1")
+    manager._sync_tracker_context = AsyncMock()
+    db_session.add(
+        TrackingState(
+            name=manager.tracking_state_name,
+            value={**STATE, "norad_id": 20580, "target_name": "NOAA 15"},
+        )
+    )
+    await db_session.commit()
+
+    changed = await manager.update_tracking_state(norad_id=25544, target_name="ISS")
+    assert changed["success"] is True
+    assert subscription.queue.get_nowait() == (
+        "target.changed",
+        {
+            "tracker_id": "target-1",
+            "previous": {"type": "satellite", "id": "20580", "name": "NOAA 15"},
+            "current": {"type": "satellite", "id": "25544", "name": "ISS"},
+        },
+    )
+
+    registry.update(changed["command_id"], "succeeded")
+    changed_to_body = await manager.update_tracking_state(
+        target_type="body",
+        target_key="body:mars",
+        body_id="mars",
+        norad_id=None,
+        target_name="Mars",
+    )
+    assert changed_to_body["success"] is True
+    assert subscription.queue.get_nowait() == (
+        "target.changed",
+        {
+            "tracker_id": "target-1",
+            "previous": {"type": "satellite", "id": "25544", "name": "ISS"},
+            "current": {"type": "body", "id": "body:mars", "name": "Mars"},
+        },
+    )
+
+    registry.update(changed_to_body["command_id"], "succeeded")
+    renamed = await manager.update_tracking_state(target_name="Red Planet")
+    assert renamed["success"] is True
+    assert subscription.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_new_target_slot_emits_creation_before_initial_target(monkeypatch, db_session):
+    registry = OperationRegistry()
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(managermodule, "operations", registry)
+    monkeypatch.setattr(managermodule, "public_events", broker)
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(managermodule, "AsyncSessionLocal", session)
+    manager = TrackerManager(tracker_id="target-2")
+    manager._sync_tracker_context = AsyncMock()
+
+    created = await manager.update_tracking_state(
+        norad_id=25544,
+        target_name="ISS",
+        rotator_state="disconnected",
+        rig_state="disconnected",
+        rotator_id="none",
+        rig_id="none",
+    )
+    assert created["success"] is True
+    assert subscription.queue.get_nowait() == (
+        "target.slot.created",
+        {"tracker_id": "target-2"},
+    )
+    assert subscription.queue.get_nowait() == (
+        "target.changed",
+        {
+            "tracker_id": "target-2",
+            "previous": None,
+            "current": {"type": "satellite", "id": "25544", "name": "ISS"},
+        },
+    )
+    registry.update(created["command_id"], "succeeded")
+    updated = await manager.update_tracking_state(target_name="Space Station")
+    assert updated["success"] is True
+    assert subscription.queue.empty()
+
+
+def test_target_visibility_only_emits_running_slot_horizon_transitions(monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(messagemodule, "public_events", broker)
+    monkeypatch.setattr(messagemodule, "_target_visibility", {})
+    process = SimpleNamespace(pid=12345, is_alive=lambda: True)
+    runtime = SimpleNamespace(process=process)
+    monkeypatch.setattr(
+        messagemodule,
+        "get_tracker_supervisor",
+        lambda: SimpleNamespace(get_runtime=lambda _id: runtime),
+    )
+
+    def telemetry(elevation, norad_id=25544):
+        return {
+            "tracking_state": {"target_type": "satellite", "norad_id": norad_id},
+            "satellite_data": {"position": {"el": elevation}, "details": {"name": "ISS"}},
+        }
+
+    messagemodule._publish_target_visibility("obs-pass", telemetry(10))
+    messagemodule._publish_target_visibility("target-1", telemetry(-3))
+    assert subscription.queue.empty()
+    messagemodule._publish_target_visibility("target-1", telemetry(0.1))
+    assert subscription.queue.get_nowait() == (
+        "target.visible",
+        {"tracker_id": "target-1", "norad_id": "25544", "name": "ISS", "elevation_deg": 0.1},
+    )
+    messagemodule._publish_target_visibility("target-1", telemetry(5))
+    assert subscription.queue.empty()
+    messagemodule._publish_target_visibility("target-1", telemetry(0))
+    assert subscription.queue.get_nowait()[0] == "target.below_horizon"
+    messagemodule._publish_target_visibility("target-1", telemetry(4, 20580))
+    assert subscription.queue.get_nowait()[0] == "target.visible"
+    runtime.process = SimpleNamespace(pid=12346, is_alive=lambda: False)
+    messagemodule._publish_target_visibility("target-1", telemetry(-4))
+    assert subscription.queue.empty()
+
+
+def test_tracker_hardware_events_report_only_connection_changes(monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(messagemodule, "public_events", broker)
+    disconnected = {
+        "tracking_state": {"rotator_id": "mount", "rig_id": "radio"},
+        "rotator_data": {"connected": False},
+        "rig_data": {"connected": False},
+    }
+    connected = {
+        **disconnected,
+        "rotator_data": {"connected": True},
+        "rig_data": {"connected": True},
+    }
+    messagemodule._publish_hardware_changes("target-1", {}, disconnected)
+    assert subscription.queue.empty()
+    messagemodule._publish_hardware_changes("target-1", disconnected, connected)
+    assert subscription.queue.get_nowait() == (
+        "tracker.hardware.changed",
+        {
+            "tracker_id": "target-1",
+            "device": "rotator",
+            "device_id": "mount",
+            "connected": True,
+            "previous_connected": False,
+        },
+    )
+    assert subscription.queue.get_nowait()[1]["device"] == "rig"
+    messagemodule._publish_hardware_changes("target-1", connected, connected)
+    assert subscription.queue.empty()
+    messagemodule._publish_hardware_changes("target-1", connected, disconnected)
+    assert [subscription.queue.get_nowait()[1]["connected"] for _ in range(2)] == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_command_snapshot_hardware_change_precedes_regular_snapshot(monkeypatch):
+    registry = OperationRegistry()
+    command = registry.accept("target-1", {"rig_state": "connected"}, STATE)
+    snapshot = {
+        "tracker_id": "target-1",
+        "worker_started_at": 1,
+        "worker_generation": "worker-1",
+        "sequence": 1,
+        "tracking_state": {"rig_id": "radio"},
+        "rig_data": {"connected": True},
+    }
+    incoming = queue.Queue()
+    incoming.put(
+        {
+            "event": "tracker-command-status",
+            "data": {
+                "tracker_id": "target-1",
+                "command_id": command["command_id"],
+                "epoch": registry.epoch,
+                "status": "succeeded",
+                "snapshot": snapshot,
+            },
+        }
+    )
+    incoming.put({"event": "tracker-hardware-state", "data": {**snapshot, "sequence": 2}})
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    manager = SimpleNamespace(current_tracking_state={}, reconcile_operation=AsyncMock())
+    monkeypatch.setattr(messagemodule, "operations", registry)
+    monkeypatch.setattr(messagemodule, "queue_from_tracker", incoming)
+    monkeypatch.setattr(messagemodule, "get_existing_tracker_manager", lambda _id: manager)
+    monkeypatch.setattr(messagemodule, "public_events", broker)
+
+    calls = 0
+
+    async def stop_after_messages(_delay):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(messagemodule.asyncio, "sleep", stop_after_messages)
+    with pytest.raises(asyncio.CancelledError):
+        await messagemodule.handle_tracker_messages(AsyncMock())
+
+    assert subscription.queue.get_nowait() == (
+        "tracker.hardware.changed",
+        {
+            "tracker_id": "target-1",
+            "device": "rig",
+            "device_id": "radio",
+            "connected": True,
+            "previous_connected": None,
+        },
+    )
+    assert subscription.queue.empty()
 
 
 @pytest.mark.asyncio

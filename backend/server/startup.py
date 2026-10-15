@@ -40,7 +40,7 @@ from db.models import (
     ScheduledObservations,
 )
 from handlers.entities.control import restore_full_backup_file
-from library.inventory import get_inventory
+from library.inventory import get_inventory, publish_ready_artifacts
 from observations import events as obs_events
 from observations.bundle import prune_finalized_empty_observation_bundles
 from observations.events import emit_scheduled_observations_changed as _emit
@@ -116,6 +116,7 @@ async def _reconcile_library_periodically() -> None:
             await asyncio.sleep(_LIBRARY_RECONCILIATION_SECONDS)
             previous_revision = inventory.revision
             revision = await asyncio.to_thread(inventory.rebuild)
+            publish_ready_artifacts(inventory)
             if revision != previous_revision:
                 await sio.emit(
                     "library.changed",
@@ -780,7 +781,18 @@ async def _stream_api_events(
                 if current != last_status:
                     last_status = current
                     yield _sse_event("station.status", status)
-            elif name == "observations.changed":
+            elif name in {
+                "observations.changed",
+                "target.changed",
+                "target.slot.created",
+                "target.slot.deleted",
+                "target.visible",
+                "target.below_horizon",
+                "tracker.hardware.changed",
+                "artifact.ready",
+                "sdr.streaming.started",
+                "sdr.streaming.stopped",
+            }:
                 yield _sse_event(name, data)
     finally:
         public_events.unsubscribe(subscription)
@@ -791,13 +803,15 @@ async def _stream_api_events(
     dependencies=[Depends(api_bearer_scheme)],
     response_class=StreamingResponse,
     responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-    summary="Stream station status and observation changes",
+    summary="Stream station, target, SDR, artifact, and observation events",
 )
 async def api_events(request: Request):
-    """Stream `station.status` snapshots (`station:read`) and `observations.changed` notices (`observations:read`). An initial `connected` event means clients should refresh REST lists; missed events are not replayed. Requires a Bearer API token with at least one of those scopes."""
+    """Stream station, target, SDR, and tracker hardware events (`station:read`), observation changes (`observations:read`), and artifact readiness (`artifacts:read`). An initial `connected` event advises clients to refresh available REST state; missed events are not replayed. Requires a Bearer API token with at least one of those scopes."""
     context = await _require_api_token(request)
-    if not {"station:read", "observations:read"}.intersection(context["scopes"]):
-        raise HTTPException(status_code=403, detail="Station or observations read scope required.")
+    if not {"station:read", "observations:read", "artifacts:read"}.intersection(context["scopes"]):
+        raise HTTPException(
+            status_code=403, detail="Station, observations, or artifacts read scope required."
+        )
     try:
         subscription = public_events.subscribe(context["token_id"], context["scopes"])
     except ValueError as exc:

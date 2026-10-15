@@ -10,8 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from common.events import EventBroker
 from handlers.entities import filebrowser, library
+from library import inventory as inventorymodule
 from library.inventory import LibraryInventory
+from server import startup
 
 
 def _write(path: Path, content: bytes | str = b"") -> Path:
@@ -203,6 +206,71 @@ def test_rebuild_only_advances_revision_when_filesystem_changes(inventory):
     assert inventory.query()["total"] == 7
 
 
+def test_artifact_ready_is_emitted_once_after_new_or_completed_item(inventory, monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("artifact-token", ["artifacts:read"])
+    monkeypatch.setattr(inventorymodule, "public_events", broker)
+    inventorymodule.publish_ready_artifacts(inventory)
+    assert subscription.queue.empty()  # Startup inventory is a baseline, not new work.
+
+    _write(inventory.roots.snapshots / "new.png", b"png")
+    inventory.rebuild()
+    inventorymodule.publish_ready_artifacts(inventory)
+    assert subscription.queue.get_nowait() == (
+        "artifact.ready",
+        {"id": "snapshot:new.png", "type": "snapshot", "name": "new"},
+    )
+    inventory.rebuild()
+    inventorymodule.publish_ready_artifacts(inventory)
+    assert subscription.queue.empty()
+
+    metadata = inventory.roots.recordings / "capture.sigmf-meta"
+    capture = json.loads(metadata.read_text())
+    capture["global"]["gs:recording_in_progress"] = True
+    metadata.write_text(json.dumps(capture))
+    inventory.rebuild()
+    inventorymodule.publish_ready_artifacts(inventory)
+    assert subscription.queue.empty()
+    capture["global"]["gs:recording_in_progress"] = False
+    metadata.write_text(json.dumps(capture))
+    inventory.rebuild()
+    inventorymodule.publish_ready_artifacts(inventory)
+    assert subscription.queue.get_nowait()[1]["id"] == "recording:capture"
+
+
+@pytest.mark.asyncio
+async def test_periodic_reconcile_publishes_external_artifact(inventory, monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("artifact-token", ["artifacts:read"])
+    monkeypatch.setattr(inventorymodule, "public_events", broker)
+    monkeypatch.setattr(startup, "get_inventory", lambda: inventory)
+    _write(inventory.roots.snapshots / "external.png", b"png")
+
+    class FakeSio:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, event, payload, room=None):
+            self.events.append((event, payload, room))
+
+    sio = FakeSio()
+    monkeypatch.setattr(startup, "sio", sio)
+    calls = 0
+
+    async def one_scan(_delay):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(startup.asyncio, "sleep", one_scan)
+    with pytest.raises(asyncio.CancelledError):
+        await startup._reconcile_library_periodically()
+
+    assert subscription.queue.get_nowait()[1]["id"] == "snapshot:external.png"
+    assert sio.events[0][0] == "library.changed"
+
+
 def test_inventory_deletes_recording_companions_and_rebuilds(inventory):
     result = inventory.delete(["recording:capture"])
 
@@ -245,6 +313,9 @@ async def test_transcription_file_creation_rebuilds_and_notifies_library(monkeyp
         def rebuild(self):
             calls.append("rebuild")
             return 7
+
+        def take_ready(self):
+            return []
 
     class FakeSio:
         def __init__(self):

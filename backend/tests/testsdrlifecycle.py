@@ -6,6 +6,8 @@ import queue
 
 import pytest
 
+from common.events import EventBroker
+from pipeline.orchestration import processlifecycle
 from pipeline.orchestration.processlifecycle import ProcessLifecycleManager
 
 
@@ -55,7 +57,10 @@ def _new_manager(processes=None):
 
 
 @pytest.mark.asyncio
-async def test_sdr_readiness_requires_stream_activation_and_samples():
+async def test_sdr_readiness_requires_stream_activation_and_samples(monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(processlifecycle, "public_events", broker)
     manager = _new_manager()
     process_info = {
         "streaming_started": False,
@@ -65,14 +70,41 @@ async def test_sdr_readiness_requires_stream_activation_and_samples():
 
     ready = manager._create_ready_waiter(process_info)
     process_info["streaming_started"] = True
-    manager._resolve_ready_waiters(process_info)
+    manager._resolve_ready_waiters("sdr-1", process_info)
     assert ready.done() is False
+    assert subscription.queue.empty()
 
     process_info["worker_stats"] = {"samples_read": 1024}
-    manager._resolve_ready_waiters(process_info)
+    manager._resolve_ready_waiters("sdr-1", process_info)
 
     assert await ready == {"success": True}
     assert process_info["startup_ready"] is True
+    assert subscription.queue.get_nowait() == ("sdr.streaming.started", {"sdr_id": "sdr-1"})
+    manager._resolve_ready_waiters("sdr-1", process_info)
+    assert subscription.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_sdr_stop_event_waits_for_last_client(monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(processlifecycle, "public_events", broker)
+    process_info = {
+        "clients": {"first", "second"},
+        "process": _StoppedProcess(),
+        "stop_event": asyncio.Event(),
+        "iq_broadcaster": _Broadcaster(),
+        "event_streaming_started": True,
+    }
+    manager = _new_manager({"sdr-1": process_info})
+
+    await manager.stop_sdr_process("sdr-1", "first")
+    assert subscription.queue.empty()
+    assert "sdr-1" in manager.processes
+
+    await manager.stop_sdr_process("sdr-1", "second")
+    assert subscription.queue.get_nowait() == ("sdr.streaming.stopped", {"sdr_id": "sdr-1"})
+    assert "sdr-1" not in manager.processes
 
 
 @pytest.mark.asyncio
@@ -138,7 +170,10 @@ def test_exited_decoder_process_is_logged_once(caplog):
 
 
 @pytest.mark.asyncio
-async def test_active_internal_session_receives_worker_failure():
+async def test_active_internal_session_receives_worker_failure(monkeypatch):
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+    monkeypatch.setattr(processlifecycle, "public_events", broker)
     messages = queue.Queue()
     messages.put({"type": "error", "message": "USB transfer failed"})
     messages.put({"type": "terminated"})
@@ -152,6 +187,7 @@ async def test_active_internal_session_receives_worker_failure():
         "iq_broadcaster": _Broadcaster(),
         "streaming_started": True,
         "startup_ready": True,
+        "event_streaming_started": True,
         "ready_waiters": [],
         "worker_stats": {"samples_read": 1024},
         "failure_reported": False,
@@ -169,3 +205,4 @@ async def test_active_internal_session_receives_worker_failure():
 
     assert failures == [("sdr-1", {"internal:obs-1:sdr-1"}, "USB transfer failed")]
     assert "sdr-1" not in processes
+    assert subscription.queue.get_nowait() == ("sdr.streaming.stopped", {"sdr_id": "sdr-1"})

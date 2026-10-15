@@ -17,14 +17,16 @@
 
 import asyncio
 import logging
+import math
 import time
 from typing import Any, Dict
 
 from celestial.scene import build_observer_sky_bodies
 from common.constants import SocketEvents
-from tracker.contracts import InvalidTrackerIdError, require_tracker_id
+from common.events import public_events
+from tracker.contracts import InvalidTrackerIdError, is_target_slot_id, require_tracker_id
 from tracker.operations import operations
-from tracker.runner import get_existing_tracker_manager, queue_from_tracker
+from tracker.runner import get_existing_tracker_manager, get_tracker_supervisor, queue_from_tracker
 from vfos.updates import handle_vfo_updates_for_tracking
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,76 @@ tracker_stats: Dict[str, Any] = {}
 _observer_bodies_cache: list[Dict[str, Any]] = []
 _observer_bodies_cache_updated_at = 0.0
 OBSERVER_BODIES_CACHE_SECONDS = 15.0
+_target_visibility: dict[str, tuple[int, str, bool]] = {}
+
+
+def _publish_target_visibility(tracker_id: str, data: Dict[str, Any]) -> None:
+    """Emit horizon crossings from live target-slot telemetry only."""
+    if not is_target_slot_id(tracker_id):
+        return
+    runtime = get_tracker_supervisor().get_runtime(tracker_id)
+    pid = runtime.process.pid if runtime is not None else None
+    if runtime is None or not runtime.process.is_alive() or pid is None:
+        _target_visibility.pop(tracker_id, None)
+        return
+    state = data.get("tracking_state") or {}
+    if state.get("target_type", "satellite") != "satellite":
+        _target_visibility.pop(tracker_id, None)
+        return
+    norad_id = state.get("norad_id")
+    if norad_id in (None, "", 0):
+        _target_visibility.pop(tracker_id, None)
+        return
+    satellite_data = data.get("satellite_data") or {}
+    try:
+        elevation = float((satellite_data.get("position") or {})["el"])
+    except (KeyError, TypeError, ValueError):
+        return
+    if not math.isfinite(elevation):
+        return
+
+    target_id = str(norad_id)
+    current = (pid, target_id, elevation > 0.0)
+    previous = _target_visibility.get(tracker_id)
+    _target_visibility[tracker_id] = current
+    # A slot first observed below the horizon has not crossed it yet.
+    if previous is None or previous[:2] != current[:2]:
+        if not current[2]:
+            return
+    elif previous[2] == current[2]:
+        return
+    name = str(
+        (satellite_data.get("details") or {}).get("name") or state.get("target_name") or target_id
+    )
+    public_events.target_visibility_changed(tracker_id, target_id, name, elevation, current[2])
+
+
+def _publish_hardware_changes(
+    tracker_id: str, previous: Dict[str, Any], current: Dict[str, Any]
+) -> None:
+    """Report observed connections, ignoring repeated tracker snapshots."""
+    previous_state = previous.get("tracking_state") or {}
+    current_state = current.get("tracking_state") or {}
+    for device in ("rotator", "rig"):
+        current_data = current.get(f"{device}_data") or {}
+        if "connected" not in current_data:
+            continue
+        previous_data = previous.get(f"{device}_data") or {}
+        connected = bool(current_data["connected"])
+        was_connected = bool(previous_data["connected"]) if "connected" in previous_data else None
+        device_id = current_state.get(f"{device}_id")
+        previous_device_id = previous_state.get(f"{device}_id")
+        if was_connected is None and not connected:
+            continue
+        if was_connected == connected and (not connected or previous_device_id == device_id):
+            continue
+        public_events.tracker_hardware_changed(
+            tracker_id,
+            device,
+            str(device_id) if device_id not in (None, "", "none") else None,
+            connected,
+            was_connected,
+        )
 
 
 async def _get_live_observer_bodies() -> list[Dict[str, Any]]:
@@ -125,7 +197,10 @@ async def handle_tracker_messages(sockio):
                                     "cancelled",
                                 }:
                                     await manager.reconcile_operation(record, snapshot)
+                                previous = operations.observed.get(tracker_id, {})
                                 operations.observe(snapshot)
+                                if manager is not None:
+                                    _publish_hardware_changes(tracker_id, previous, snapshot)
                             operations.update(
                                 data["command_id"],
                                 data["status"],
@@ -142,13 +217,19 @@ async def handle_tracker_messages(sockio):
                                 # Do not let that late snapshot reserve its former hardware.
                                 operations.forget_tracker(tracker_id)
                                 continue
+                            if not operations.can_observe(data):
+                                continue
                             if manager.current_tracking_state:
                                 data["desired_state"] = dict(manager.current_tracking_state)
+                            previous = operations.observed.get(tracker_id, {})
                             operations.observe(data)
+                            _publish_hardware_changes(tracker_id, previous, data)
                     if event == SocketEvents.SATELLITE_TRACKING and not data.get("observer_bodies"):
                         # Satellites do not carry heliocentric Earth vectors in
                         # their worker payload, so attach the shared live Sun here.
                         data["observer_bodies"] = await _get_live_observer_bodies()
+                    if event == SocketEvents.SATELLITE_TRACKING:
+                        _publish_target_visibility(tracker_id, data)
                     await sockio.emit(event, data)
                     if event == SocketEvents.SATELLITE_TRACKING:
                         await sockio.emit(SocketEvents.SATELLITE_TRACKING_V2, data)

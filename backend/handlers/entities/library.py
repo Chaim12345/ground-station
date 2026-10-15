@@ -13,7 +13,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from common import auth as authsvc
-from library.inventory import _parse_cutoff, get_inventory
+from library.inventory import _parse_cutoff, get_inventory, publish_ready_artifacts
 
 # A purge executes in a worker thread inside this server process (the
 # inventory is a process-local singleton, so child processes cannot use it).
@@ -64,7 +64,9 @@ async def reconcile_library(
     sio: Any, _data: Optional[Dict], _logger: Any, _sid: str
 ) -> Dict[str, Any]:
     """Rebuild the process-local inventory after an external storage change."""
-    revision = await asyncio.to_thread(get_inventory().rebuild)
+    inventory = get_inventory()
+    revision = await asyncio.to_thread(inventory.rebuild)
+    publish_ready_artifacts(inventory)
     await _emit_changed(sio, revision, [{"operation": "reconciled", "id": "*"}])
     return {"success": True, "data": {"revision": revision}}
 
@@ -82,7 +84,9 @@ async def delete_library_items(
     ):
         return {"success": False, "error": "ids must be a non-empty list of item IDs"}
 
-    result = await asyncio.to_thread(get_inventory().delete, item_ids)
+    inventory = get_inventory()
+    result = await asyncio.to_thread(inventory.delete, item_ids)
+    publish_ready_artifacts(inventory)
     changes = [
         {"operation": "deleted", "id": entry["id"]}
         for entry in result["results"]

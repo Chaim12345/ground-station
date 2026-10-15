@@ -26,10 +26,16 @@ from celestial.bodycatalog import get_celestial_body
 from celestial.scene import build_observer_sky_bodies
 from common.arguments import arguments
 from common.constants import RigStates, RotatorStates, SocketEvents, TrackerCommandScopes
+from common.events import public_events
 from common.targetkey import build_target_key, normalize_target_key
 from db import AsyncSessionLocal
 from session.tracker import session_tracker
-from tracker.contracts import InvalidTrackerIdError, get_tracking_state_name, require_tracker_id
+from tracker.contracts import (
+    InvalidTrackerIdError,
+    get_tracking_state_name,
+    is_target_slot_id,
+    require_tracker_id,
+)
 from tracker.data import compiled_satellite_data, get_ui_tracker_state
 from tracker.instances import emit_tracker_instances
 from tracker.operations import operations
@@ -814,6 +820,8 @@ async def delete_tracker_instance(
             }
 
     await emit_tracker_instances(sio)
+    if is_target_slot_id(tracker_id):
+        public_events.target_slot_deleted(tracker_id)
     return {
         "success": True,
         "data": {

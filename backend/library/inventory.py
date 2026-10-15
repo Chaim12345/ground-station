@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote
 
+from common.events import public_events
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 DECODED_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.txt", "*.bin")
 
@@ -170,6 +172,7 @@ class LibraryInventory:
     def __init__(self, backend_dir: Path):
         self.roots = LibraryRoots(Path(backend_dir).resolve())
         self._items: Dict[str, Dict[str, Any]] = {}
+        self._pending_ready: set[str] = set()
         self._revision = 0
         self._ready = False
         self._lock = threading.RLock()
@@ -189,11 +192,35 @@ class LibraryInventory:
         self._scan_transcriptions(items)
         self._scan_observations(items)
         with self._lock:
+            if self._ready:
+                for item_id, item in items.items():
+                    previous = self._items.get(item_id)
+                    if not _is_in_progress(item) and (
+                        previous is None or _is_in_progress(previous)
+                    ):
+                        self._pending_ready.add(item_id)
             if not self._ready or items != self._items:
                 self._items = items
                 self._revision += 1
             self._ready = True
             return self._revision
+
+    def take_ready(self) -> list[Dict[str, str]]:
+        """Drain items that became complete since the initial inventory build."""
+        with self._lock:
+            ready = []
+            for item_id in sorted(self._pending_ready):
+                item = self._items.get(item_id)
+                if item and not _is_in_progress(item):
+                    ready.append(
+                        {
+                            "id": item_id,
+                            "type": str(item.get("type") or ""),
+                            "name": str(item.get("display_name") or item.get("name") or item_id),
+                        }
+                    )
+            self._pending_ready.clear()
+            return ready
 
     def query(
         self,
@@ -1140,3 +1167,9 @@ def get_inventory(backend_dir: Optional[Path] = None) -> LibraryInventory:
             inventory = LibraryInventory(root)
             _inventories[root] = inventory
         return inventory
+
+
+def publish_ready_artifacts(inventory: LibraryInventory) -> None:
+    """Publish after a worker-thread rebuild returns to the server event loop."""
+    for item in inventory.take_ready():
+        public_events.artifact_ready(item["id"], item["type"], item["name"])

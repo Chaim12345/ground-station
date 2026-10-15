@@ -22,9 +22,16 @@ contracts are tracker-instance scoped.
 
 from __future__ import annotations
 
+import re
 from typing import Any, TypedDict
 
 TRACKING_STATE_NAME_PREFIX = "satellite-tracking"
+
+
+def is_target_slot_id(tracker_id: str) -> bool:
+    """Identify persistent user target slots, excluding observation workers."""
+    match = re.fullmatch(r"target-([0-9]+)", tracker_id)
+    return match is not None and int(match.group(1)) > 0
 
 
 def requests_rotator_motion(action: str, changes: dict) -> bool:

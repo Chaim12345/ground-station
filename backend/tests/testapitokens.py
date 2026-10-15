@@ -622,10 +622,13 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
 
     owner_id, browser_secret = await _make_user(token_store, "events-owner")
     full = await apitokens.create_token(
-        owner_id, "password123", "Event consumer", ["station:read", "observations:read"]
+        owner_id,
+        "password123",
+        "Event consumer",
+        ["station:read", "observations:read", "artifacts:read"],
     )
     unrelated = await apitokens.create_token(
-        owner_id, "password123", "Artifacts only", ["artifacts:read"]
+        owner_id, "password123", "Satellite catalog only", ["satellites:read"]
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
@@ -682,6 +685,35 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
         assert 'event: connected\ndata: {"replay":false}' in await anext(chunks)
         assert '"observation_state":"idle"' in await anext(chunks)
 
+        public_events.target_changed(
+            "target-1",
+            {"type": "satellite", "id": "25544", "name": "ISS"},
+            {"type": "body", "id": "body:mars", "name": "Mars"},
+        )
+        assert await anext(chunks) == (
+            'event: target.changed\ndata: {"tracker_id":"target-1",'
+            '"previous":{"type":"satellite","id":"25544","name":"ISS"},'
+            '"current":{"type":"body","id":"body:mars","name":"Mars"}}\n\n'
+        )
+        public_events.sdr_stream_started("sdr-1")
+        public_events.sdr_stream_stopped("sdr-1")
+        assert await anext(chunks) == ('event: sdr.streaming.started\ndata: {"sdr_id":"sdr-1"}\n\n')
+        assert await anext(chunks) == ('event: sdr.streaming.stopped\ndata: {"sdr_id":"sdr-1"}\n\n')
+        public_events.target_slot_created("target-2")
+        public_events.target_visibility_changed("target-2", "25544", "ISS", 0.5, True)
+        public_events.target_visibility_changed("target-2", "25544", "ISS", 0.0, False)
+        public_events.tracker_hardware_changed("target-2", "rig", "radio", True, False)
+        public_events.target_slot_deleted("target-2")
+        public_events.artifact_ready("snapshot:new.png", "snapshot", "new.png")
+        assert [(await anext(chunks)).split("\n", 1)[0] for _ in range(6)] == [
+            "event: target.slot.created",
+            "event: target.visible",
+            "event: target.below_horizon",
+            "event: tracker.hardware.changed",
+            "event: target.slot.deleted",
+            "event: artifact.ready",
+        ]
+
         async with token_store() as session:
             result = await observation_crud.update_scheduled_observation_status(
                 session, "sse-test", "running"
@@ -708,6 +740,34 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
 
 
 @pytest.mark.asyncio
+async def test_artifact_only_event_stream_receives_ready_events(token_store):
+    owner_id, _ = await _make_user(token_store, "artifact-events")
+    token = await apitokens.create_token(
+        owner_id, "password123", "Artifact listener", ["artifacts:read"]
+    )
+    response = await startup.api_events(_event_request(token["token"]))
+    chunks = response.body_iterator
+    try:
+        assert await anext(chunks) == "retry: 3000\n\n"
+        assert "event: connected" in await anext(chunks)
+        subscription = next(
+            subscriber
+            for subscriber in public_events._subscribers
+            if subscriber.token_id == token["data"]["id"]
+        )
+        public_events.target_slot_created("target-1")
+        public_events.observations_changed()
+        assert subscription.queue.empty()
+        public_events.artifact_ready("snapshot:new.png", "snapshot", "new.png")
+        assert await anext(chunks) == (
+            'event: artifact.ready\ndata: {"id":"snapshot:new.png",'
+            '"type":"snapshot","name":"new.png"}\n\n'
+        )
+    finally:
+        await chunks.aclose()
+
+
+@pytest.mark.asyncio
 async def test_observation_only_stream_and_bounded_subscribers(token_store):
     owner_id, _ = await _make_user(token_store, "observation-events")
     token = await apitokens.create_token(
@@ -724,6 +784,10 @@ async def test_observation_only_stream_and_bounded_subscribers(token_store):
             if subscriber.token_id == token["data"]["id"]
         )
         public_events.status_changed()
+        assert subscription.queue.empty()
+        public_events.target_changed("target-1", None, {"type": "satellite", "id": "25544"})
+        public_events.sdr_stream_started("sdr-1")
+        public_events.sdr_stream_stopped("sdr-1")
         assert subscription.queue.empty()
         public_events.observations_changed()
         assert await anext(chunks) == "event: observations.changed\ndata: {}\n\n"

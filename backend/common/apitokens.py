@@ -18,7 +18,7 @@ TOKEN_PREFIX = "gs_pat_"
 MAX_ACTIVE_TOKENS = 50
 EXPIRY_DAYS = {30, 90, 365}
 SCOPES = {
-    "station:read": "Read station identity and status",
+    "station:read": "Read station identity, status, target changes, and SDR streaming events",
     "satellites:read": "Read monitored satellites and satellite metadata",
     "observations:read": "Read scheduled observations and their status",
     "artifacts:read": "Read file library metadata",

@@ -23,6 +23,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 import numpy as np
 
 from common.constants import DictKeys, QueueMessageTypes, SocketEvents
+from common.events import public_events
 from common.sdrconfig import SDRConfig
 from db import AsyncSessionLocal
 from fft.processor import fft_processor_process
@@ -172,7 +173,7 @@ class ProcessLifecycleManager:
         )
         return future
 
-    def _resolve_ready_waiters(self, process_info: Dict[str, Any]) -> None:
+    def _resolve_ready_waiters(self, sdr_id: str, process_info: Dict[str, Any]) -> None:
         """Resolve startup waiters only after activation and real IQ delivery."""
         if not process_info.get("streaming_started"):
             return
@@ -188,8 +189,15 @@ class ProcessLifecycleManager:
             else:
                 remaining.append(waiter)
         process_info["ready_waiters"] = remaining
-        if sample_count > 0:
+        if (
+            sample_count > 0
+            and not process_info.get("startup_ready")
+            and not process_info.get("stopping")
+        ):
             process_info["startup_ready"] = True
+            # Report the physical stream once, after the worker delivers IQ samples.
+            process_info["event_streaming_started"] = True
+            public_events.sdr_stream_started(sdr_id)
 
     def _log_decoder_error_status(self, data: Dict[str, Any]) -> None:
         """Make decoder status failures visible in the backend log."""
@@ -723,6 +731,7 @@ class ProcessLifecycleManager:
                 # update proving that at least one IQ sample was read.
                 "streaming_started": False,
                 "startup_ready": False,
+                "event_streaming_started": False,
                 "ready_waiters": [],
                 "worker_stats": {},
                 "last_worker_error": None,
@@ -922,6 +931,10 @@ class ProcessLifecycleManager:
                     )
         if sdr_id in self.processes:
             del self.processes[sdr_id]
+
+        if process_info.get("event_streaming_started"):
+            process_info["event_streaming_started"] = False
+            public_events.sdr_stream_stopped(sdr_id)
 
         self.logger.info(f"SDR process for device {sdr_id} stopped")
 
@@ -1259,14 +1272,14 @@ class ProcessLifecycleManager:
                             if "sdr_id" in data:
                                 # Worker process stats
                                 process_info["worker_stats"] = data.get("stats", {})
-                                self._resolve_ready_waiters(process_info)
+                                self._resolve_ready_waiters(sdr_id, process_info)
                             else:
                                 # FFT processor stats
                                 process_info["fft_stats"] = data.get("stats", {})
 
                         elif data_type == QueueMessageTypes.STREAMING_START:
                             process_info["streaming_started"] = True
-                            self._resolve_ready_waiters(process_info)
+                            self._resolve_ready_waiters(sdr_id, process_info)
                             # Send streaming status to all clients connected to this SDR
                             await self.sio.emit(
                                 SocketEvents.SDR_STATUS, {"streaming": True}, room=sdr_id

@@ -38,7 +38,7 @@ from common.thumbnails import (
     get_image_thumbnail_path,
     get_image_thumbnail_url,
 )
-from library.inventory import get_inventory
+from library.inventory import get_inventory, publish_ready_artifacts
 
 # Existing producers still use ``file_browser_state`` to announce storage
 # lifecycle changes.  Keep that compatibility event, but update the single
@@ -289,7 +289,9 @@ async def emit_file_browser_state(sio, state_data, logger, room=None):
     try:
         action = state_data.get("action")
         if action in _LIBRARY_MUTATION_ACTIONS:
-            revision = await asyncio.to_thread(get_inventory().rebuild)
+            inventory = get_inventory()
+            revision = await asyncio.to_thread(inventory.rebuild)
+            publish_ready_artifacts(inventory)
             # This event carries only a revision.  Clients request their
             # current page through the acknowledged query command.
             await sio.emit(
