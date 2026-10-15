@@ -897,14 +897,66 @@ def test_rotator_worker_replacement_reports_unavailable_before_new_status():
     ]
 
 
+def test_rig_events_follow_observed_modes_and_worker_loss():
+    broker = EventBroker()
+    subscription = broker.subscribe("station-token", ["station:read"])
+
+    def observe(sequence, data, generation="worker-1", rig_id="radio", requested_state="connected"):
+        broker.observe_rig(
+            "target-1",
+            {
+                "worker_generation": generation,
+                "observed_at": float(sequence),
+                "tracking_state": {"rig_id": rig_id, "rig_state": requested_state},
+                "rig_data": data,
+            },
+        )
+
+    observe(1, {"connected": False})
+    first = subscription.queue.get_nowait()
+    assert first[0] == "tracker.rig.state.changed"
+    assert (first[1]["previous"], first[1]["current"]) == (None, "disconnected")
+    observe(2, {"connected": True})
+    assert subscription.queue.get_nowait()[1]["current"] == "connected"
+    observe(3, {"connected": True, "tracking": True, "frequency": 145800000})
+    assert subscription.queue.get_nowait()[1]["current"] == "tracking"
+    observe(4, {"connected": True, "tracking": True, "frequency": 145800010})
+    assert subscription.queue.empty()
+    observe(5, {"connected": True, "tracking": True, "tuning": True})
+    tuning = subscription.queue.get_nowait()[1]
+    assert (tuning["current"], tuning["tracking_enabled"]) == ("tuning", True)
+    observe(6, {"connected": True, "tracking": True})
+    assert subscription.queue.get_nowait()[1]["current"] == "tracking"
+    observe(7, {"connected": True, "stopped": True}, requested_state="stopped")
+    assert subscription.queue.get_nowait()[1]["current"] == "stopped"
+    observe(8, {"connected": False, "error": True})
+    assert subscription.queue.get_nowait()[1]["current"] == "error"
+    observe(9, {"connected": False})
+    assert subscription.queue.get_nowait()[1]["current"] == "disconnected"
+    broker.reconcile_rig_workers(lambda _tracker_id: False)
+    assert subscription.queue.get_nowait()[1]["current"] == "unavailable"
+    broker.reconcile_rig_workers(lambda _tracker_id: False)
+    assert subscription.queue.empty()
+    observe(10, {"connected": True}, generation="worker-2")
+    assert subscription.queue.get_nowait()[1]["current"] == "connected"
+    observe(11, {"connected": True}, generation="worker-3")
+    assert [subscription.queue.get_nowait()[1]["current"] for _ in range(2)] == [
+        "unavailable",
+        "connected",
+    ]
+    observe(12, {"connected": False}, generation="worker-3", rig_id="other-radio")
+    changed = subscription.queue.get_nowait()[1]
+    assert (changed["previous_device_id"], changed["device_id"]) == ("radio", "other-radio")
+
+
 @pytest.mark.asyncio
-async def test_rotator_state_event_uses_ordered_current_worker_snapshots(monkeypatch):
+async def test_hardware_state_events_use_ordered_current_worker_snapshots(monkeypatch):
     registry = OperationRegistry()
     incoming = queue.Queue()
-    for sequence, state, pid in (
-        (1, {"connected": True, "tracking": True, "slewing": True}, 42),
-        (2, {"connected": True, "tracking": True}, 42),
-        (3, {"connected": False}, 41),
+    for sequence, state, rig_state, pid in (
+        (1, {"connected": True, "tracking": True, "slewing": True}, {"connected": True}, 42),
+        (2, {"connected": True, "tracking": True}, {"connected": True, "tracking": True}, 42),
+        (3, {"connected": False}, {"connected": False}, 41),
     ):
         incoming.put(
             {
@@ -916,8 +968,9 @@ async def test_rotator_state_event_uses_ordered_current_worker_snapshots(monkeyp
                     "worker_pid": pid,
                     "sequence": sequence,
                     "observed_at": float(sequence),
-                    "tracking_state": {"rotator_id": "mount"},
+                    "tracking_state": {"rotator_id": "mount", "rig_id": "radio"},
                     "rotator_data": state,
+                    "rig_data": rig_state,
                 },
             }
         )
@@ -947,13 +1000,18 @@ async def test_rotator_state_event_uses_ordered_current_worker_snapshots(monkeyp
     with pytest.raises(asyncio.CancelledError):
         await messagemodule.handle_tracker_messages(AsyncMock())
 
-    events = [subscription.queue.get_nowait() for _ in range(3)]
+    events = [subscription.queue.get_nowait() for _ in range(6)]
     assert [name for name, _ in events] == [
         "tracker.hardware.changed",
+        "tracker.hardware.changed",
         "tracker.rotator.state.changed",
+        "tracker.rig.state.changed",
         "tracker.rotator.state.changed",
+        "tracker.rig.state.changed",
     ]
-    assert [events[1][1]["current"], events[2][1]["current"]] == ["slewing", "tracking"]
+    assert [events[2][1]["current"], events[4][1]["current"]] == ["slewing", "tracking"]
+    assert [events[3][1]["current"], events[5][1]["current"]] == ["connected", "tracking"]
+    assert subscription.queue.empty()
     assert registry.observed["target-1"]["sequence"] == 2
 
 
@@ -1013,6 +1071,9 @@ async def test_command_snapshot_hardware_change_precedes_regular_snapshot(monkey
             "previous_connected": None,
         },
     )
+    rig_event = subscription.queue.get_nowait()
+    assert rig_event[0] == "tracker.rig.state.changed"
+    assert (rig_event[1]["previous"], rig_event[1]["current"]) == (None, "connected")
     assert subscription.queue.empty()
 
 

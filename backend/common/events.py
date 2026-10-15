@@ -51,6 +51,35 @@ def rotator_status(snapshot: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def rig_status(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    """Reduce worker telemetry to a rig state without frequencies or connection settings."""
+    data = snapshot.get("rig_data") or {}
+    if "connected" not in data:
+        return None
+    tracking_state = snapshot.get("tracking_state") or {}
+    device_id = tracking_state.get("rig_id")
+    device_id = str(device_id) if device_id not in (None, "", "none") else None
+    connected = bool(data["connected"])
+    if data.get("error"):
+        state = "error"
+    elif not connected:
+        state = "disconnected"
+    elif data.get("tuning"):
+        state = "tuning"
+    elif data.get("tracking"):
+        state = "tracking"
+    elif data.get("stopped") and tracking_state.get("rig_state") == "stopped":
+        state = "stopped"
+    else:
+        state = "connected"
+    return {
+        "device_id": device_id,
+        "state": state,
+        "tracking_enabled": connected and bool(data.get("tracking")),
+        "observed_at": snapshot.get("observed_at"),
+    }
+
+
 @dataclass(eq=False)
 class Subscription:
     token_id: str
@@ -62,6 +91,7 @@ class EventBroker:
     def __init__(self) -> None:
         self._subscribers: set[Subscription] = set()
         self._rotator_states: dict[str, dict[str, Any]] = {}
+        self._rig_states: dict[str, dict[str, Any]] = {}
         self._closing = False
 
     def subscribe(self, token_id: str, scopes: list[str]) -> Subscription:
@@ -235,6 +265,71 @@ class EventBroker:
                 unavailable_at = self._rotator_states[tracker_id]["observed_at"]
                 if unavailable_at is not None and time.time() - unavailable_at > 60:
                     self._rotator_states.pop(tracker_id, None)
+
+    def observe_rig(self, tracker_id: str, snapshot: dict[str, Any]) -> None:
+        """Emit rig mode transitions, including a new worker's first observation."""
+        current = rig_status(snapshot)
+        if current is None:
+            return
+        previous = self._rig_states.get(tracker_id)
+        if current["device_id"] is None and (previous is None or previous["device_id"] is None):
+            return
+        generation = snapshot.get("worker_generation")
+        if previous and previous["generation"] != generation:
+            self.rig_unavailable(tracker_id)
+            previous = self._rig_states.get(tracker_id)
+        if previous and all(
+            previous[key] == current[key] for key in ("device_id", "state", "tracking_enabled")
+        ):
+            self._rig_states[tracker_id] = {**current, "generation": generation}
+            return
+        self.publish(
+            "tracker.rig.state.changed",
+            {
+                "tracker_id": tracker_id,
+                "device_id": current["device_id"],
+                "previous_device_id": previous["device_id"] if previous else None,
+                "previous": previous["state"] if previous else None,
+                "current": current["state"],
+                "previous_tracking_enabled": previous["tracking_enabled"] if previous else None,
+                "tracking_enabled": current["tracking_enabled"],
+                "observed_at": current["observed_at"],
+            },
+            "station:read",
+        )
+        self._rig_states[tracker_id] = {**current, "generation": generation}
+
+    def rig_unavailable(self, tracker_id: str) -> None:
+        """A stopped worker cannot confirm whether its radio disconnected."""
+        previous = self._rig_states.get(tracker_id)
+        if previous is None or previous["state"] == "unavailable":
+            return
+        current = {**previous, "state": "unavailable", "tracking_enabled": False}
+        current["observed_at"] = time.time()
+        self.publish(
+            "tracker.rig.state.changed",
+            {
+                "tracker_id": tracker_id,
+                "device_id": previous["device_id"],
+                "previous_device_id": previous["device_id"],
+                "previous": previous["state"],
+                "current": "unavailable",
+                "previous_tracking_enabled": previous["tracking_enabled"],
+                "tracking_enabled": False,
+                "observed_at": current["observed_at"],
+            },
+            "station:read",
+        )
+        self._rig_states[tracker_id] = current
+
+    def reconcile_rig_workers(self, is_alive) -> None:
+        """Detect workers that exited without a final rig snapshot."""
+        for tracker_id in tuple(self._rig_states):
+            if not is_alive(tracker_id):
+                self.rig_unavailable(tracker_id)
+                unavailable_at = self._rig_states[tracker_id]["observed_at"]
+                if unavailable_at is not None and time.time() - unavailable_at > 60:
+                    self._rig_states.pop(tracker_id, None)
 
     def artifact_ready(self, item_id: str, item_type: str, name: str) -> None:
         self.publish(

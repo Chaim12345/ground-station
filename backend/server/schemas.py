@@ -33,7 +33,9 @@ Scopes are fixed when the token is created.
   observation activity.
 - `GET /api/v1/trackers/rotators` returns current assigned rotator states for
   reconnecting event clients.
-- List satellites, observations, SDRs, rotators, and artifacts to discover IDs
+- `GET /api/v1/trackers/rigs` returns current assigned rig states for reconnecting
+  event clients.
+- List satellites, observations, SDRs, rotators, rigs, and artifacts to discover IDs
   before calling their detail routes. Each route below documents its parameters,
   response schema, and example.
 
@@ -48,15 +50,15 @@ Scopes are fixed when the token is created.
 
 ### Choose scopes
 
-- `station:read` — station identity, status, tracker rotator states, and target,
-  tracker, SDR, and rotator events.
+- `station:read` — station identity, status, tracker hardware states, and target,
+  tracker, SDR, rotator, and rig events.
 - `observations:read` — schedules and observation events.
 - `artifacts:read` — library metadata and artifact readiness events.
 - `artifacts:download` — artifact file bytes.
-- `satellites:read`, `sdrs:read`, `rotators:read` — the corresponding list and
+- `satellites:read`, `sdrs:read`, `rotators:read`, `rigs:read` — the corresponding list and
   detail routes.
 
-To resolve a device ID from an SDR or rotator event, combine `station:read`
+To resolve a device ID from an SDR, rotator, or rig event, combine `station:read`
 with the device's read scope. Token management and control commands are in
 the browser app.
 """
@@ -134,6 +136,26 @@ class RotatorDetail(BaseModel):
     data: RotatorMetadata
 
 
+class RigMetadata(BaseModel):
+    id: str
+    name: str
+    radiotype: str
+    radio_mode: str
+    vfotype: int
+    tx_control_mode: str
+    retune_interval_ms: int
+    follow_downlink_tuning: bool
+
+
+class RigList(BaseModel):
+    data: list[RigMetadata]
+    pagination: Pagination
+
+
+class RigDetail(BaseModel):
+    data: RigMetadata
+
+
 RotatorRuntimeState = Literal[
     "unavailable",
     "disconnected",
@@ -163,6 +185,27 @@ class TrackerRotatorStatus(BaseModel):
 
 class TrackerRotatorList(BaseModel):
     data: list[TrackerRotatorStatus]
+
+
+RigRuntimeState = Literal[
+    "unavailable", "disconnected", "connected", "error", "tuning", "tracking", "stopped"
+]
+
+
+class TrackerRigStatus(BaseModel):
+    tracker_id: str
+    device_id: str
+    state: RigRuntimeState
+    tracking_enabled: bool = Field(
+        description="True while tracking mode is active, including tuning."
+    )
+    observed_at: float | None = Field(
+        description="Unix seconds of the worker observation, or null when unavailable."
+    )
+
+
+class TrackerRigList(BaseModel):
+    data: list[TrackerRigStatus]
 
 
 class SatelliteSummary(BaseModel):
@@ -339,6 +382,17 @@ class TrackerRotatorStateChangedEvent(BaseModel):
     observed_at: float | None = Field(description="Unix seconds of the observation or worker loss.")
 
 
+class TrackerRigStateChangedEvent(BaseModel):
+    tracker_id: str
+    device_id: str | None
+    previous_device_id: str | None
+    previous: RigRuntimeState | None
+    current: RigRuntimeState
+    previous_tracking_enabled: bool | None
+    tracking_enabled: bool
+    observed_at: float | None = Field(description="Unix seconds of the observation or worker loss.")
+
+
 class ArtifactReadyEvent(BaseModel):
     id: str
     type: str
@@ -386,6 +440,16 @@ ROTATOR_EXAMPLE = {
     "maxel": 90,
     "parkaz": 180,
     "parkel": 0,
+}
+RIG_EXAMPLE = {
+    "id": "3b620a17-5ee4-4667-bdd8-2a222e785785",
+    "name": "VHF/UHF radio",
+    "radiotype": "rx",
+    "radio_mode": "duplex",
+    "vfotype": 2,
+    "tx_control_mode": "auto",
+    "retune_interval_ms": 2000,
+    "follow_downlink_tuning": False,
 }
 SATELLITE_EXAMPLE = {"norad_id": 25544, "name": "ISS", "status": "active"}
 MONITORED_EXAMPLE = {
@@ -476,12 +540,28 @@ JSON_EXAMPLES: dict[str, dict[str, Any]] = {
         "pagination": {"limit": 50, "offset": 0, "total": 1},
     },
     "rotator": {"data": ROTATOR_EXAMPLE},
+    "rigs": {
+        "data": [RIG_EXAMPLE],
+        "pagination": {"limit": 50, "offset": 0, "total": 1},
+    },
+    "rig": {"data": RIG_EXAMPLE},
     "tracker_rotators": {
         "data": [
             {
                 "tracker_id": "target-1",
                 "device_id": ROTATOR_EXAMPLE["id"],
                 "state": "slewing",
+                "tracking_enabled": True,
+                "observed_at": 1792068000.0,
+            }
+        ]
+    },
+    "tracker_rigs": {
+        "data": [
+            {
+                "tracker_id": "target-1",
+                "device_id": RIG_EXAMPLE["id"],
+                "state": "tracking",
                 "tracking_enabled": True,
                 "observed_at": 1792068000.0,
             }
@@ -511,7 +591,10 @@ JSON_MODELS: dict[str, type[BaseModel]] = {
     "sdr": SdrDetail,
     "rotators": RotatorList,
     "rotator": RotatorDetail,
+    "rigs": RigList,
+    "rig": RigDetail,
     "tracker_rotators": TrackerRotatorList,
+    "tracker_rigs": TrackerRigList,
     "satellites": SatelliteList,
     "monitored_satellites": MonitoredSatelliteList,
     "satellite": SatelliteDetail,
@@ -530,7 +613,10 @@ JSON_ROUTE_EXAMPLES = {
     "/api/v1/sdrs/{sdr_id}": "sdr",
     "/api/v1/rotators": "rotators",
     "/api/v1/rotators/{rotator_id}": "rotator",
+    "/api/v1/rigs": "rigs",
+    "/api/v1/rigs/{rig_id}": "rig",
     "/api/v1/trackers/rotators": "tracker_rotators",
+    "/api/v1/trackers/rigs": "tracker_rigs",
     "/api/v1/observations": "observations",
     "/api/v1/observations/upcoming": "upcoming_observations",
     "/api/v1/observations/{observation_id}": "observation",
@@ -548,7 +634,10 @@ JSON_SCOPES = {
     "sdr": "sdrs:read",
     "rotators": "rotators:read",
     "rotator": "rotators:read",
+    "rigs": "rigs:read",
+    "rig": "rigs:read",
     "tracker_rotators": "station:read",
+    "tracker_rigs": "station:read",
     "satellites": "satellites:read",
     "monitored_satellites": "satellites:read",
     "satellite": "satellites:read",
@@ -562,6 +651,7 @@ JSON_SCOPES = {
 NOT_FOUND_DETAILS = {
     "sdr": "SDR not found.",
     "rotator": "Rotator not found.",
+    "rig": "Rig not found.",
     "satellite": "Satellite not found.",
     "observation": "Observation not found.",
     "artifact": "Artifact not found.",
@@ -700,6 +790,22 @@ _SSE_EVENTS: list[tuple[str, str | None, type[BaseModel], dict[str, Any], str]] 
             "observed_at": 1792068000.0,
         },
         "An observed rotator status or tracking-mode flag changes, or worker telemetry is lost.",
+    ),
+    (
+        "tracker.rig.state.changed",
+        "station:read",
+        TrackerRigStateChangedEvent,
+        {
+            "tracker_id": "target-1",
+            "device_id": RIG_EXAMPLE["id"],
+            "previous_device_id": RIG_EXAMPLE["id"],
+            "previous": "connected",
+            "current": "tracking",
+            "previous_tracking_enabled": False,
+            "tracking_enabled": True,
+            "observed_at": 1792068000.0,
+        },
+        "An observed rig status or tracking-mode flag changes, or worker telemetry is lost.",
     ),
     (
         "artifact.ready",

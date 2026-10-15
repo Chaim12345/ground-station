@@ -28,7 +28,7 @@ from common import apitokens
 from common import auth as authsvc
 from common.arguments import arguments
 from common.audio_queue_config import get_audio_queue_config
-from common.events import Subscription, public_events, rotator_status
+from common.events import Subscription, public_events, rig_status, rotator_status
 from common.logger import logger
 from crud.scheduledobservations import fetch_scheduled_observations
 from db import AsyncSessionLocal, engine
@@ -37,6 +37,7 @@ from db.models import (
     Locations,
     MonitoredSatellites,
     ObservationStatus,
+    Rigs,
     Rotators,
     Satellites,
     ScheduledObservations,
@@ -796,6 +797,47 @@ async def api_tracker_rotators(request: Request):
     return {"data": rows}
 
 
+@app.get(
+    "/api/v1/trackers/rigs",
+    dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("tracker_rigs"),
+    summary="Get current tracker rig states",
+)
+async def api_tracker_rigs(request: Request):
+    """Return observed states for assigned rigs. Requires `station:read`."""
+    await _require_api_token(request, "station:read")
+    supervisor = get_tracker_supervisor()
+    rows = []
+    for instance in supervisor.get_instances_payload()["instances"]:
+        tracker_id = instance["tracker_id"]
+        device_id = instance.get("rig_id") or instance.get("tracking_state", {}).get("rig_id")
+        if device_id in (None, "", "none"):
+            continue
+        snapshot = operations.observed.get(tracker_id)
+        runtime = supervisor.get_runtime(tracker_id)
+        # An old worker's last snapshot must not describe the current assignment.
+        current = (
+            rig_status(snapshot)
+            if snapshot
+            and runtime
+            and runtime.process.is_alive()
+            and snapshot.get("worker_pid") == runtime.process.pid
+            else None
+        )
+        if current and current["device_id"] != str(device_id):
+            current = None
+        rows.append(
+            {
+                "tracker_id": tracker_id,
+                "device_id": str(device_id),
+                "state": current["state"] if current else "unavailable",
+                "tracking_enabled": current["tracking_enabled"] if current else False,
+                "observed_at": current["observed_at"] if current else None,
+            }
+        )
+    return {"data": rows}
+
+
 def _sse_event(name: str, data: Dict[str, Any]) -> str:
     return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
@@ -861,6 +903,7 @@ async def _stream_api_events(
                 "target.below_horizon",
                 "tracker.hardware.changed",
                 "tracker.rotator.state.changed",
+                "tracker.rig.state.changed",
                 "artifact.ready",
                 "sdr.streaming.started",
                 "sdr.streaming.stopped",
@@ -1023,6 +1066,20 @@ def _rotator_api_metadata(row: Rotators) -> Dict[str, Any]:
     }
 
 
+def _rig_api_metadata(row: Rigs) -> Dict[str, Any]:
+    """Expose radio configuration without network connection details."""
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "radiotype": row.radiotype,
+        "radio_mode": row.radio_mode,
+        "vfotype": row.vfotype,
+        "tx_control_mode": row.tx_control_mode,
+        "retune_interval_ms": row.retune_interval_ms,
+        "follow_downlink_tuning": row.follow_downlink_tuning,
+    }
+
+
 def _device_uuid(value: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(value)
@@ -1141,6 +1198,55 @@ async def api_rotator(rotator_id: str, request: Request):
     if row is None:
         raise HTTPException(status_code=404, detail="Rotator not found.")
     return {"data": _rotator_api_metadata(row)}
+
+
+@app.get(
+    "/api/v1/rigs",
+    dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("rigs"),
+    summary="List rig device metadata",
+)
+async def api_rigs(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """List configured radios and operating modes. Requires `rigs:read`."""
+    await _require_api_token(request, "rigs:read")
+    async with AsyncSessionLocal() as session:
+        total = await session.scalar(select(func.count()).select_from(Rigs))
+        rows = (
+            (
+                await session.execute(
+                    select(Rigs).order_by(Rigs.name, Rigs.id).offset(offset).limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "data": [_rig_api_metadata(row) for row in rows],
+        "pagination": {"limit": limit, "offset": offset, "total": total or 0},
+    }
+
+
+@app.get(
+    "/api/v1/rigs/{rig_id}",
+    dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("rig", not_found=True),
+    summary="Get rig device metadata",
+)
+async def api_rig(rig_id: str, request: Request):
+    """Resolve a tracker rig event's device ID. Requires `rigs:read`."""
+    await _require_api_token(request, "rigs:read")
+    device_id = _device_uuid(rig_id)
+    if device_id is None:
+        raise HTTPException(status_code=404, detail="Rig not found.")
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Rigs, device_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rig not found.")
+    return {"data": _rig_api_metadata(row)}
 
 
 @app.get(

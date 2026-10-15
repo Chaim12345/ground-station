@@ -8,9 +8,10 @@ Select only the scopes an application needs. The currently available scopes are:
 
 | Scope | Endpoints |
 | --- | --- |
-| `station:read` | `GET /api/v1/station`, `GET /api/v1/status`, `GET /api/v1/trackers/rotators`, `GET /api/v1/events` (station, target, tracker hardware, and SDR events) |
+| `station:read` | `GET /api/v1/station`, `GET /api/v1/status`, `GET /api/v1/trackers/rotators`, `GET /api/v1/trackers/rigs`, `GET /api/v1/events` (station, target, tracker hardware, and SDR events) |
 | `sdrs:read` | `GET /api/v1/sdrs`, `GET /api/v1/sdrs/{sdr_id}` |
 | `rotators:read` | `GET /api/v1/rotators`, `GET /api/v1/rotators/{rotator_id}` |
+| `rigs:read` | `GET /api/v1/rigs`, `GET /api/v1/rigs/{rig_id}` |
 | `satellites:read` | `GET /api/v1/satellites`, `GET /api/v1/satellites/monitored`, `GET /api/v1/satellites/{norad_id}` |
 | `observations:read` | `GET /api/v1/observations`, `GET /api/v1/observations/upcoming`, `GET /api/v1/observations/{id}`, `GET /api/v1/events` (observation events) |
 | `artifacts:read` | `GET /api/v1/artifacts`, `GET /api/v1/artifacts/{id}`, `GET /api/v1/events` (`artifact.ready`) |
@@ -36,17 +37,19 @@ scheduled observation time, and enabled monitored-satellite count. This state
 describes scheduled observations; manual radio activity may not change it.
 Poll it with a token that has `station:read`; it does not require a browser session.
 
-`GET /api/v1/sdrs` and `GET /api/v1/rotators` return paginated device metadata.
-Both support `limit` (1–100, default 50) and `offset` (default 0), and return
+`GET /api/v1/sdrs`, `GET /api/v1/rotators`, and `GET /api/v1/rigs` return paginated device metadata.
+All support `limit` (1–100, default 50) and `offset` (default 0), and return
 `data` plus `pagination`. Their detail endpoints resolve the `sdr_id` in SDR
 streaming events and a rotator `device_id` in `tracker.hardware.changed` events.
 SDR metadata includes name, type, antenna labels, and configured frequency
 range. Rotator metadata includes name, azimuth/elevation limits, azimuth mode,
-and park position. Connection hosts and ports, SDR serials, and driver settings
+and park position. Rig metadata includes radio type and mode, VFO type, transmit
+control mode, retune interval, and whether downlink tuning is followed.
+Connection hosts and ports, SDR serials, and driver settings
 are omitted. The built-in `sigmf-playback` SDR is included in the SDR list and
 has a detail endpoint, even though it has no database record. For both event
 delivery and device lookup, grant `station:read` alongside `sdrs:read` or
-`rotators:read`. Existing tokens need replacing to gain a new scope.
+`rotators:read` or `rigs:read`. Existing tokens need replacing to gain a new scope.
 
 `GET /api/v1/trackers/rotators` returns one current-state row per assigned
 rotator tracker with `tracker_id`, `device_id`, `state`, `tracking_enabled`, and
@@ -57,6 +60,17 @@ disconnected. The response omits trackers without an assigned rotator.
 
 ```sh
 curl -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:5000/api/v1/trackers/rotators
+```
+
+`GET /api/v1/trackers/rigs` returns the same snapshot shape for assigned rigs.
+States are `disconnected`, `connected`, `error`, `tuning`, `tracking`, `stopped`,
+and `unavailable`. `tracking_enabled` remains true while a rig is tuning in
+tracking mode. A missing current-worker observation yields `unavailable` and a
+null `observed_at`; it does not claim the radio disconnected. Both rig snapshot
+and rig events require `station:read`.
+
+```sh
+curl -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:5000/api/v1/trackers/rigs
 ```
 
 `GET /api/v1/observations/upcoming` returns compact scheduled pass summaries
@@ -113,6 +127,11 @@ this status event alone for rotator state. On every SSE connection or
 reconnection, fetch `/api/v1/trackers/rotators` to establish the current state.
 When a tracker switches rotators, `previous_device_id` identifies the former
 device even if `device_id` is null during release.
+`tracker.rig.state.changed` uses the same fields for rig transitions. Its
+states are `disconnected`, `connected`, `error`, `tuning`, `tracking`, `stopped`,
+and `unavailable`. Frequency and Doppler adjustments do not emit state-change
+events. Fetch `/api/v1/trackers/rigs` on each SSE connection or reconnection,
+and resolve a rig `device_id` with `/api/v1/rigs/{rig_id}` using `rigs:read`.
 `artifact.ready` provides `id`, `type`, and `name` when a library item first
 appears complete or finishes recording/processing. Fetch its current metadata
 with `GET /api/v1/artifacts/{id}`; startup indexing does not replay old items.

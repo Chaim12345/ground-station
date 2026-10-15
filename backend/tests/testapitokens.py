@@ -20,6 +20,7 @@ from db.models import (
     AuthSessions,
     MonitoredSatellites,
     ObservationStatus,
+    Rigs,
     Rotators,
     Satellites,
     ScheduledObservations,
@@ -104,7 +105,7 @@ async def test_token_is_shown_once_scoped_and_revoked(token_store):
 
     scopes = await _socket_call(sio, "owner", "tokens.scopes")
     assert scopes["success"] is True
-    assert {"station:read", "sdrs:read", "rotators:read"} <= {
+    assert {"station:read", "sdrs:read", "rotators:read", "rigs:read"} <= {
         scope["id"] for scope in scopes["data"]
     }
     assert (await _socket_call(sio, "owner", "tokens.list"))["data"] == []
@@ -344,6 +345,68 @@ async def test_public_sdr_and_rotator_metadata_is_scoped_and_sanitized(token_sto
 
 
 @pytest.mark.asyncio
+async def test_public_rig_metadata_is_scoped_paginated_and_sanitized(token_store):
+    spec = startup.app.openapi()["paths"]
+    assert spec["/api/v1/rigs"]["get"]["security"]
+    assert spec["/api/v1/rigs/{rig_id}"]["get"]["security"]
+    owner_id, _ = await _make_user(token_store, "rig-reader")
+    first_id, second_id = uuid.uuid4(), uuid.uuid4()
+    async with token_store() as session:
+        session.add_all(
+            [
+                Rigs(
+                    id=first_id,
+                    name="Alpha rig",
+                    host="private-host",
+                    port=4532,
+                    radiotype="hamlib",
+                    radio_mode="duplex",
+                    vfotype=2,
+                    tx_control_mode="auto",
+                    retune_interval_ms=1500,
+                    follow_downlink_tuning=True,
+                ),
+                Rigs(
+                    id=second_id,
+                    name="Zulu rig",
+                    host="other-host",
+                    port=4533,
+                    radiotype="hamlib",
+                    radio_mode="simplex",
+                    vfotype=1,
+                ),
+            ]
+        )
+        await session.commit()
+    rig_token = await apitokens.create_token(owner_id, "password123", "Rig reader", ["rigs:read"])
+    station_token = await apitokens.create_token(
+        owner_id, "password123", "Station reader", ["station:read"]
+    )
+    rig_headers = {"Authorization": f"Bearer {rig_token['token']}"}
+    station_headers = {"Authorization": f"Bearer {station_token['token']}"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
+        assert (await client.get("/api/v1/rigs")).status_code == 401
+        assert (await client.get("/api/v1/rigs", headers=station_headers)).status_code == 403
+        first = await client.get("/api/v1/rigs?limit=1", headers=rig_headers)
+        assert first.status_code == 200
+        assert first.json()["pagination"] == {"limit": 1, "offset": 0, "total": 2}
+        assert [item["id"] for item in first.json()["data"]] == [str(first_id)]
+        second = await client.get("/api/v1/rigs?limit=1&offset=1", headers=rig_headers)
+        assert [item["id"] for item in second.json()["data"]] == [str(second_id)]
+        detail = await client.get(f"/api/v1/rigs/{first_id}", headers=rig_headers)
+        assert detail.json()["data"] == first.json()["data"][0]
+        assert detail.json()["data"]["follow_downlink_tuning"] is True
+        assert detail.json()["data"]["retune_interval_ms"] == 1500
+        assert all(field not in detail.json()["data"] for field in ("host", "port"))
+        assert (await client.get("/api/v1/rigs/not-an-id", headers=rig_headers)).status_code == 404
+        assert (
+            await client.get(f"/api/v1/rigs/{uuid.uuid4()}", headers=rig_headers)
+        ).status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_public_status_upcoming_observations_and_satellites(token_store):
     public_spec = startup.app.openapi()
     for path in (
@@ -553,6 +616,7 @@ async def test_every_public_route_requires_a_pat_and_its_scope(token_store, monk
         ("/api/v1/station", "station:read", 200),
         ("/api/v1/status", "station:read", 200),
         ("/api/v1/trackers/rotators", "station:read", 200),
+        ("/api/v1/trackers/rigs", "station:read", 200),
         ("/api/v1/observations", "observations:read", 200),
         ("/api/v1/observations/upcoming", "observations:read", 200),
         ("/api/v1/observations/missing", "observations:read", 404),
@@ -670,6 +734,75 @@ async def test_tracker_rotator_snapshot_uses_current_live_worker(token_store, mo
         assert (await client.get(path, headers=headers)).json()["data"][0]["state"] == (
             "unavailable"
         )
+
+
+@pytest.mark.asyncio
+async def test_tracker_rig_snapshot_uses_current_live_worker(token_store, monkeypatch):
+    owner_id, _ = await _make_user(token_store, "rig-snapshot-reader")
+    station = await apitokens.create_token(
+        owner_id, "password123", "Station reader", ["station:read"]
+    )
+    other = await apitokens.create_token(owner_id, "password123", "Rig reader", ["rigs:read"])
+    registry = OperationRegistry()
+    registry.observe(
+        {
+            "tracker_id": "target-1",
+            "worker_started_at": 1,
+            "worker_generation": "worker-1",
+            "worker_pid": 42,
+            "sequence": 1,
+            "observed_at": 1792068000.0,
+            "tracking_state": {"rig_id": "radio"},
+            "rig_data": {
+                "connected": True,
+                "tracking": True,
+                "host": "secret",
+                "frequency": 145800000,
+            },
+        }
+    )
+    process = SimpleNamespace(pid=42, is_alive=lambda: True)
+    instances = [
+        {"tracker_id": "target-1", "rig_id": "radio", "tracking_state": {}},
+        {"tracker_id": "target-2", "rig_id": None, "tracking_state": {}},
+    ]
+    supervisor = SimpleNamespace(
+        get_instances_payload=lambda: {"instances": instances},
+        get_runtime=lambda _tracker_id: SimpleNamespace(process=process),
+    )
+    monkeypatch.setattr(startup, "operations", registry)
+    monkeypatch.setattr(startup, "get_tracker_supervisor", lambda: supervisor)
+    headers = {"Authorization": f"Bearer {station['token']}"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
+        path = "/api/v1/trackers/rigs"
+        assert (await client.get(path)).status_code == 401
+        assert (
+            await client.get(path, headers={"Authorization": f"Bearer {other['token']}"})
+        ).status_code == 403
+        response = await client.get(path, headers=headers)
+        assert response.json() == {
+            "data": [
+                {
+                    "tracker_id": "target-1",
+                    "device_id": "radio",
+                    "state": "tracking",
+                    "tracking_enabled": True,
+                    "observed_at": 1792068000.0,
+                }
+            ]
+        }
+        assert "secret" not in response.text
+        assert "145800000" not in response.text
+        process.pid = 43
+        assert (await client.get(path, headers=headers)).json()["data"][0]["state"] == "unavailable"
+        process.pid = 42
+        instances[0]["rig_id"] = "other-radio"
+        assert (await client.get(path, headers=headers)).json()["data"][0]["state"] == "unavailable"
+        instances[0]["rig_id"] = "radio"
+        process.is_alive = lambda: False
+        assert (await client.get(path, headers=headers)).json()["data"][0]["state"] == "unavailable"
 
 
 @pytest.mark.asyncio
@@ -839,6 +972,9 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
     assert "tracker.rotator.state.changed" in {
         event["event"] for event in spec["responses"]["200"]["x-sse-events"]
     }
+    assert "tracker.rig.state.changed" in {
+        event["event"] for event in spec["responses"]["200"]["x-sse-events"]
+    }
 
     owner_id, browser_secret = await _make_user(token_store, "events-owner")
     full = await apitokens.create_token(
@@ -932,14 +1068,24 @@ async def test_public_event_stream_scopes_changes_and_revocation(token_store, mo
                 "rotator_data": {"connected": True, "tracking": True, "slewing": True},
             },
         )
+        public_events.observe_rig(
+            "target-2",
+            {
+                "worker_generation": "worker-1",
+                "observed_at": 1792068000.0,
+                "tracking_state": {"rig_id": "radio"},
+                "rig_data": {"connected": True, "tracking": True, "frequency": 145800000},
+            },
+        )
         public_events.target_slot_deleted("target-2")
         public_events.artifact_ready("snapshot:new.png", "snapshot", "new.png")
-        assert [(await anext(chunks)).split("\n", 1)[0] for _ in range(7)] == [
+        assert [(await anext(chunks)).split("\n", 1)[0] for _ in range(8)] == [
             "event: target.slot.created",
             "event: target.visible",
             "event: target.below_horizon",
             "event: tracker.hardware.changed",
             "event: tracker.rotator.state.changed",
+            "event: tracker.rig.state.changed",
             "event: target.slot.deleted",
             "event: artifact.ready",
         ]

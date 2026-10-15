@@ -150,12 +150,14 @@ async def handle_tracker_messages(sockio):
     Args:
         sockio: Socket.IO server instance for emitting events
     """
-    last_rotator_reconcile = time.monotonic()
+    last_hardware_reconcile = time.monotonic()
     while True:
         try:
-            if time.monotonic() - last_rotator_reconcile >= 0.5:
-                public_events.reconcile_rotator_workers(get_tracker_supervisor().is_alive)
-                last_rotator_reconcile = time.monotonic()
+            if time.monotonic() - last_hardware_reconcile >= 0.5:
+                is_alive = get_tracker_supervisor().is_alive
+                public_events.reconcile_rotator_workers(is_alive)
+                public_events.reconcile_rig_workers(is_alive)
+                last_hardware_reconcile = time.monotonic()
             processed = False
             if queue_from_tracker is not None and not queue_from_tracker.empty():
                 message = queue_from_tracker.get_nowait()
@@ -218,6 +220,7 @@ async def handle_tracker_messages(sockio):
                                 if manager is not None:
                                     _publish_hardware_changes(tracker_id, previous, snapshot)
                                     public_events.observe_rotator(tracker_id, snapshot)
+                                    public_events.observe_rig(tracker_id, snapshot)
                             operations.update(
                                 data["command_id"],
                                 data["status"],
@@ -244,6 +247,7 @@ async def handle_tracker_messages(sockio):
                             operations.observe(data)
                             _publish_hardware_changes(tracker_id, previous, data)
                             public_events.observe_rotator(tracker_id, data)
+                            public_events.observe_rig(tracker_id, data)
                     if event == SocketEvents.SATELLITE_TRACKING and not data.get("observer_bodies"):
                         # Satellites do not carry heliocentric Earth vectors in
                         # their worker payload, so attach the shared live Sun here.
