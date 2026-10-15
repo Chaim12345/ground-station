@@ -25,6 +25,10 @@ curl -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:5000/api/v1/me
 
 Interactive OpenAPI documentation is available at `/api/docs`; use its Bearer
 authorization control to try `/api/v1` requests with a personal API token.
+Each JSON route shows a response schema and example. The event route shows
+literal SSE frames and a table of event scopes and triggers; its OpenAPI
+`x-sse-events` extension contains machine-readable payload schemas. File
+download routes show binary responses, range syntax, and `curl` examples.
 
 For a Home Assistant REST sensor, `GET /api/v1/status` returns server time,
 `observation_state` (`idle` or `observing`), the active observation count, next

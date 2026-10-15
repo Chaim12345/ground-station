@@ -64,6 +64,18 @@ from server.scheduler import (
     start_scheduler,
     stop_scheduler,
 )
+from server.schemas import (
+    ARTIFACT_DOWNLOAD_DESCRIPTION,
+    ARTIFACT_MEMBER_DESCRIPTION,
+    JSON_EXAMPLES,
+    JSON_ROUTE_EXAMPLES,
+    PUBLIC_API_DESCRIPTION,
+    RANGE_HEADER,
+    SSE_DESCRIPTION,
+    SSE_RESPONSE,
+    binary_responses,
+    json_example,
+)
 from server.sessionsnapshot import start_session_runtime_emitter
 from server.spapaths import is_static_asset_request, resolve_static_asset_path
 from server.systeminfo import start_system_info_emitter
@@ -374,7 +386,7 @@ async def emit_scheduled_observations_changed():
 app = FastAPI(
     lifespan=lifespan,
     title="Ground Station API",
-    description="API for satellite tracking, SDR control, and radio communication",
+    description=PUBLIC_API_DESCRIPTION,
     version="1.0.0",
     docs_url=None,
     redoc_url="/api/redoc",
@@ -662,6 +674,7 @@ async def auth_me(request: Request):
 @app.get(
     "/api/v1/me",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("me"),
     summary="Check an API token and its scopes",
 )
 async def api_me(request: Request):
@@ -672,6 +685,7 @@ async def api_me(request: Request):
 @app.get(
     "/api/v1/station",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("station"),
     summary="Get station identity and software version",
 )
 async def api_station(request: Request):
@@ -720,6 +734,7 @@ async def _load_public_status() -> Dict[str, Any]:
 @app.get(
     "/api/v1/status",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("status"),
     summary="Get current station activity",
 )
 async def api_status(request: Request):
@@ -805,8 +820,9 @@ async def _stream_api_events(
     "/api/v1/events",
     dependencies=[Depends(api_bearer_scheme)],
     response_class=StreamingResponse,
-    responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    responses=SSE_RESPONSE,
     summary="Stream station, target, SDR, artifact, and observation events",
+    description=SSE_DESCRIPTION,
 )
 async def api_events(request: Request):
     """Stream station, target, SDR, and tracker hardware events (`station:read`), observation changes (`observations:read`), and artifact readiness (`artifacts:read`). An initial `connected` event advises clients to refresh available REST state; missed events are not replayed. Requires a Bearer API token with at least one of those scopes."""
@@ -830,6 +846,7 @@ async def api_events(request: Request):
 @app.get(
     "/api/v1/observations",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("observations"),
     summary="List scheduled observations",
 )
 async def api_observations(request: Request):
@@ -845,6 +862,7 @@ async def api_observations(request: Request):
 @app.get(
     "/api/v1/observations/upcoming",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("upcoming_observations"),
     summary="List upcoming scheduled observations",
 )
 async def api_upcoming_observations(
@@ -897,6 +915,7 @@ async def api_upcoming_observations(
 @app.get(
     "/api/v1/observations/{observation_id}",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("observation", not_found=True),
     summary="Get a scheduled observation",
 )
 async def api_observation(observation_id: str, request: Request):
@@ -958,6 +977,7 @@ def _device_uuid(value: str) -> Optional[uuid.UUID]:
 @app.get(
     "/api/v1/sdrs",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("sdrs"),
     summary="List SDR device metadata",
 )
 async def api_sdrs(
@@ -997,6 +1017,7 @@ async def api_sdrs(
 @app.get(
     "/api/v1/sdrs/{sdr_id}",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("sdr", not_found=True),
     summary="Get SDR device metadata",
 )
 async def api_sdr(sdr_id: str, request: Request):
@@ -1017,6 +1038,7 @@ async def api_sdr(sdr_id: str, request: Request):
 @app.get(
     "/api/v1/rotators",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("rotators"),
     summary="List rotator device metadata",
 )
 async def api_rotators(
@@ -1049,6 +1071,7 @@ async def api_rotators(
 @app.get(
     "/api/v1/rotators/{rotator_id}",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("rotator", not_found=True),
     summary="Get rotator device metadata",
 )
 async def api_rotator(rotator_id: str, request: Request):
@@ -1067,6 +1090,7 @@ async def api_rotator(rotator_id: str, request: Request):
 @app.get(
     "/api/v1/satellites",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("satellites"),
     summary="Search the satellite catalog",
 )
 async def api_satellites(
@@ -1110,6 +1134,7 @@ async def api_satellites(
 @app.get(
     "/api/v1/satellites/monitored",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("monitored_satellites"),
     summary="List monitored satellites",
 )
 async def api_monitored_satellites(
@@ -1156,6 +1181,7 @@ async def api_monitored_satellites(
 @app.get(
     "/api/v1/satellites/{norad_id}",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("satellite", not_found=True),
     summary="Get a satellite's catalog details",
 )
 async def api_satellite(norad_id: int, request: Request):
@@ -1180,9 +1206,14 @@ async def api_satellite(norad_id: int, request: Request):
 @app.get(
     "/api/v1/artifacts",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("artifacts"),
     summary="Browse artifact metadata",
 )
-async def api_artifacts(request: Request, page: int = 1, page_size: int = 25):
+async def api_artifacts(
+    request: Request,
+    page: int = Query(default=1, description="1-based page number; values below 1 use page 1."),
+    page_size: int = Query(default=25, description="Items per page, clamped to 1–100."),
+):
     """Page through captured-artifact metadata. Download links require `artifacts:download`. Requires `artifacts:read`."""
     await _require_api_token(request, "artifacts:read")
     result = await asyncio.to_thread(get_inventory().query, page=page, page_size=page_size)
@@ -1192,6 +1223,7 @@ async def api_artifacts(request: Request, page: int = 1, page_size: int = 25):
 @app.get(
     "/api/v1/artifacts/{artifact_id}",
     dependencies=[Depends(api_bearer_scheme)],
+    responses=json_example("artifact", not_found=True),
     summary="Get artifact metadata",
 )
 async def api_artifact(artifact_id: str, request: Request):
@@ -1280,16 +1312,10 @@ def _zip_api_artifact(folder: Path) -> str:
     "/api/v1/artifacts/{artifact_id}/download",
     dependencies=[Depends(api_bearer_scheme)],
     response_class=FileResponse,
-    responses={
-        200: {
-            "content": {
-                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
-                "application/zip": {"schema": {"type": "string", "format": "binary"}},
-            }
-        },
-        206: {"description": "Partial file content"},
-    },
+    responses=binary_responses(allow_zip=True),
+    openapi_extra=RANGE_HEADER,
     summary="Download a library artifact",
+    description=ARTIFACT_DOWNLOAD_DESCRIPTION,
 )
 async def api_artifact_download(
     artifact_id: str,
@@ -1318,15 +1344,10 @@ async def api_artifact_download(
     "/api/v1/artifacts/{artifact_id}/files/{file_path:path}",
     dependencies=[Depends(api_bearer_scheme)],
     response_class=FileResponse,
-    responses={
-        200: {
-            "content": {
-                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
-            }
-        },
-        206: {"description": "Partial file content"},
-    },
+    responses=binary_responses(allow_zip=False),
+    openapi_extra=RANGE_HEADER,
     summary="Download one file from a library folder",
+    description=ARTIFACT_MEMBER_DESCRIPTION,
 )
 async def api_artifact_file(artifact_id: str, file_path: str, request: Request):
     """Download one member of an indexed decoded folder or observation bundle. Supports byte ranges. Requires `artifacts:download`."""
@@ -1612,3 +1633,19 @@ async def init_db():
         _needs_initial_sync = True
     else:
         logger.info("Database initialized (existing, migrations applied)")
+
+
+_default_openapi = app.openapi
+
+
+def _public_openapi():
+    """Keep explicit nulls in examples; FastAPI otherwise drops them from OpenAPI."""
+    schema = _default_openapi()
+    for path, example_name in JSON_ROUTE_EXAMPLES.items():
+        schema["paths"][path]["get"]["responses"]["200"]["content"]["application/json"][
+            "example"
+        ] = JSON_EXAMPLES[example_name]
+    return schema
+
+
+app.openapi = _public_openapi
