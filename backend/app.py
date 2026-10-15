@@ -97,6 +97,9 @@ def main() -> None:
             # for long-running restore operations.
             ws_ping_interval=SOCKET_IO_PING_INTERVAL_SECONDS,
             ws_ping_timeout=SOCKET_IO_PING_TIMEOUT_SECONDS,
+            # Long-lived HTTP streams can otherwise keep Uvicorn waiting forever
+            # before it reaches the FastAPI lifespan cleanup.
+            timeout_graceful_shutdown=10,
             log_config=get_logger_config(arguments),
         )
     except KeyboardInterrupt:
