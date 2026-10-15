@@ -479,7 +479,7 @@ RUN /app/venv/bin/python3 -c "from satellites.satyaml.satyaml import SatYAML; pr
 # Pinning the source revision keeps decoding behavior reproducible.
 WORKDIR /src
 ARG SSDV_COMMIT=d1ceda81b69f88741396f3e052b50c8ae40efb76
-RUN git clone --depth=1 https://github.com/fsphil/ssdv.git && \
+RUN git clone --depth=1 https://codeberg.org/fsphil/ssdv.git && \
     cd ssdv && \
     git fetch --depth=1 origin ${SSDV_COMMIT} && \
     git checkout ${SSDV_COMMIT} && \

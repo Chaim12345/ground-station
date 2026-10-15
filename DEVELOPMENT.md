@@ -205,7 +205,7 @@ build the same pinned utility and point the backend at it:
 
 ```bash
 sudo apt-get install build-essential git
-git clone https://github.com/fsphil/ssdv.git /tmp/ground-station-ssdv
+git clone https://codeberg.org/fsphil/ssdv.git /tmp/ground-station-ssdv
 cd /tmp/ground-station-ssdv
 git checkout d1ceda81b69f88741396f3e052b50c8ae40efb76
 make -j"$(nproc)"
