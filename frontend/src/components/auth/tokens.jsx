@@ -349,7 +349,7 @@ export default function ApiTokensPage() {
 
             <Dialog open={Boolean(revokeTarget)} onClose={() => setRevokeTarget(null)}>
                 <DialogTitle>{t('api_tokens.revoke', { defaultValue: 'Revoke token' })}</DialogTitle>
-                <DialogContent>
+                <DialogContent sx={{ pt: '16px !important' }}>
                     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
                     <DialogContentText>
                         {t('api_tokens.revoke_confirm', { defaultValue: 'Revoke "{{name}}"? Applications using it will lose access immediately.', name: revokeTarget?.name })}
