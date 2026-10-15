@@ -110,6 +110,7 @@ backend/de421.bsp
 
 # Images
 *.png
+!frontend/public/gs-logo-green-blue.png
 *.jpg
 *.jpeg
 *.gif

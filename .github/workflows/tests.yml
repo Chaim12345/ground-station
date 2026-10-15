@@ -138,15 +138,13 @@ jobs:
             --name ground-station-backend \
             -p 7000:7000 \
             -v $(pwd)/data:/app/backend/data \
-            -e GS_BACKEND_HOST=0.0.0.0 \
-            -e GS_BACKEND_PORT=7000 \
             ground-station-backend:test
 
       - name: Wait for backend to be ready
         run: |
           echo "Waiting for backend to start..."
           for i in {1..90}; do
-            if curl -f http://localhost:7000/api/health 2>/dev/null || curl -f http://localhost:7000/ 2>/dev/null; then
+            if curl -fsS http://localhost:7000/api/ready >/dev/null 2>&1; then
               echo "✓ Backend is ready!"
               exit 0
             fi

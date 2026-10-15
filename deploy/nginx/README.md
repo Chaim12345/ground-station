@@ -1,5 +1,9 @@
 # Nginx Reverse Proxy
 
+The container already runs a small Nginx proxy on port 7000 to serve its startup lobby.
+This example adds TLS in front of that public port. The Python backend listens only on
+`127.0.0.1:7001` inside the container.
+
 Sample production config:
 
 - `deploy/nginx/ground-station.conf.example`

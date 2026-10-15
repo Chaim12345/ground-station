@@ -396,6 +396,13 @@ app = FastAPI(
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 
+@app.get("/api/ready", include_in_schema=False)
+async def api_ready(response: Response):
+    """Report readiness after database and ASGI lifespan startup have completed."""
+    response.headers["Cache-Control"] = "no-store"
+    return {"ready": True}
+
+
 @app.get("/api/docs", include_in_schema=False)
 async def api_docs(request: Request):
     root_path = request.scope.get("root_path", "").rstrip("/")

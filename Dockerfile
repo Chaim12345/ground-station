@@ -78,6 +78,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0-dev \
     protobuf-compiler \
     pkg-config \
+    nginx \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
@@ -569,6 +570,12 @@ COPY backend/ ./backend/
 COPY backend/startup.sh /app/startup.sh
 RUN chmod +x /app/startup.sh
 
+# The public port stays available while UHD images and the backend initialize.
+COPY deploy/nginx/container.conf /etc/nginx/conf.d/ground-station.conf
+RUN rm -f /etc/nginx/sites-enabled/default
+COPY deploy/nginx/lobby.html /app/lobby/lobby.html
+COPY frontend/public/gs-logo-green-blue.png /app/lobby/logo.png
+
 # Copy the built frontend from the previous stage
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
@@ -590,7 +597,6 @@ ENV GS_ENVIRONMENT=${GS_ENVIRONMENT}
 # Capture the version metadata after build args have been applied.
 RUN cd /app/backend && python -c "from server.version import write_version_info_during_build; write_version_info_during_build()"
 
-# Configure backend to serve static files
 # Create a volume for persistent data (database, recordings, snapshots, UHD images)
 VOLUME /app/backend/data
 

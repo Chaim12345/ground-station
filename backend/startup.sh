@@ -1,6 +1,12 @@
 #!/bin/bash
 # Startup script for Ground Station with conditional UHD device support
 
+# Serve the lobby before the blocking UHD download and backend initialization.
+if ! nginx; then
+    echo "ERROR: Nginx failed to start"
+    exit 1
+fi
+
 # Run once here to make sure all new libraries are loaded
 ldconfig
 
@@ -97,4 +103,4 @@ ls -lh "$UHD_IMAGES_DIR"/*.bin 2>/dev/null || echo "No UHD images found yet in $
 # Start the application
 echo "Starting Ground Station application..."
 cd /app/backend
-exec /app/venv/bin/python app.py --log-level=INFO --host=0.0.0.0 --port=7000
+exec /app/venv/bin/python app.py --log-level=INFO --host=127.0.0.1 --port=7001
