@@ -77,9 +77,21 @@ test('API docs show public calls, authorize a token, and remember dark mode', as
   await page.route('**/favicon.png', (route) => route.fulfill({ status: 204 }));
 
   await page.goto('/api/docs');
-  await expect(page.locator('.swagger-ui .opblock')).toHaveCount(19);
+  const operationCount = await page.evaluate(async () => {
+    const response = await fetch('/api/openapi.json');
+    const { paths } = await response.json();
+    const methods = new Set(['get', 'post', 'put', 'patch', 'delete']);
+    return Object.values(paths).reduce(
+      (count, path) => count + Object.keys(path).filter((method) => methods.has(method)).length,
+      0,
+    );
+  });
+  await expect(page.locator('.swagger-ui .opblock')).toHaveCount(operationCount);
   await expect(page.getByText('/api/v1/me', { exact: true })).toBeVisible();
   await expect(page.getByText('/api/v1/trackers/rotators', { exact: true })).toBeVisible();
+  await expect(page.getByText('/api/v1/trackers/rigs', { exact: true })).toBeVisible();
+  await expect(page.getByText('/api/v1/rigs', { exact: true })).toBeVisible();
+  await expect(page.getByText('/api/v1/rigs/{rig_id}', { exact: true })).toBeVisible();
   await expect(page.getByText('/api/v1/events', { exact: true })).toBeVisible();
   await expect(page.getByText('/api/v1/artifacts/{artifact_id}/download', { exact: true })).toBeVisible();
   await expect(page.getByText('/api/v1/artifacts/{artifact_id}/files/{file_path}', { exact: true })).toBeVisible();
