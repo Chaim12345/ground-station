@@ -5,7 +5,9 @@ from uuid import uuid4
 
 import pytest
 
+from common.events import EventBroker
 from handlers.entities import control
+from server import startup
 
 
 class _Sio:
@@ -16,6 +18,40 @@ class _Sio:
 class _Logger:
     def info(self, *args, **kwargs):
         del args, kwargs
+
+
+@pytest.mark.asyncio
+async def test_restart_closes_public_event_stream_before_shutdown(monkeypatch):
+    broker = EventBroker()
+    subscriber = broker.subscribe("token-id", ["artifacts:read"])
+    monkeypatch.setattr(control, "public_events", broker)
+    monkeypatch.setattr(startup, "public_events", broker)
+
+    class DeferredThread:
+        def __init__(self, target, daemon):
+            del target, daemon
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(control.threading, "Thread", DeferredThread)
+
+    stream = startup._stream_api_events("unused-token", "token-id", subscriber)
+    try:
+        assert await anext(stream) == "retry: 3000\n\n"
+        assert "event: connected" in await anext(stream)
+        for index in range(32):
+            broker.artifact_ready(f"artifact-{index}", "snapshot", f"snapshot-{index}.png")
+
+        reply = await control.restart_service(_Sio(), None, _Logger(), "admin-sid")
+
+        assert reply["success"] is True
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(anext(stream), timeout=1)
+        with pytest.raises(RuntimeError, match="service restart"):
+            broker.subscribe("new-token", ["artifacts:read"])
+    finally:
+        await stream.aclose()
 
 
 @pytest.mark.asyncio

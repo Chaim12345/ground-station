@@ -834,6 +834,8 @@ async def api_events(request: Request):
         )
     try:
         subscription = public_events.subscribe(context["token_id"], context["scopes"])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     raw_token = authsvc.extract_bearer_token(request.headers.get("authorization"))

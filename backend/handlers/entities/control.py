@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, cast
 from uuid import UUID
 
+from common.events import public_events
 from db import AsyncSessionLocal
 from handlers.entities.databasebackup import (
     backup_table,
@@ -150,6 +151,9 @@ def _typed_reply(reply: Any) -> Dict[str, Any]:
 async def restart_service(sio: Any, data: Optional[Dict], logger: Any, sid: str) -> Dict[str, Any]:
     """Schedule a process restart after acknowledging the request."""
     logger.info(f"Service restart requested by client {sid}")
+
+    # Drain public event streams before Uvicorn waits for HTTP requests to end.
+    public_events.close_for_shutdown()
 
     def delayed_shutdown():
         # Delay allows Socket.IO to flush the success ack to the caller first.

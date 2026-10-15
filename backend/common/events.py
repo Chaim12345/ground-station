@@ -19,8 +19,11 @@ class Subscription:
 class EventBroker:
     def __init__(self) -> None:
         self._subscribers: set[Subscription] = set()
+        self._closing = False
 
     def subscribe(self, token_id: str, scopes: list[str]) -> Subscription:
+        if self._closing:
+            raise RuntimeError("Event streams are closing for service restart.")
         if (
             len(self._subscribers) >= MAX_STREAMS
             or sum(subscriber.token_id == token_id for subscriber in self._subscribers)
@@ -33,6 +36,16 @@ class EventBroker:
 
     def unsubscribe(self, subscriber: Subscription) -> None:
         self._subscribers.discard(subscriber)
+
+    def close_for_shutdown(self) -> None:
+        """End open streams and reject reconnects while the process exits."""
+        self._closing = True
+        for subscriber in tuple(self._subscribers):
+            self.unsubscribe(subscriber)
+            # Discard queued updates so the termination marker is consumed next.
+            while not subscriber.queue.empty():
+                subscriber.queue.get_nowait()
+            subscriber.queue.put_nowait(None)
 
     def publish(self, name: str, data: dict[str, Any], scope: str) -> None:
         for subscriber in tuple(self._subscribers):
