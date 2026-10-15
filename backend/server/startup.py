@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import tempfile
+import uuid
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -36,8 +37,10 @@ from db.models import (
     Locations,
     MonitoredSatellites,
     ObservationStatus,
+    Rotators,
     Satellites,
     ScheduledObservations,
+    SDRs,
 )
 from handlers.entities.control import restore_full_backup_file
 from library.inventory import get_inventory, publish_ready_artifacts
@@ -906,6 +909,159 @@ async def api_observation(observation_id: str, request: Request):
     if result.get("data") is None:
         raise HTTPException(status_code=404, detail="Observation not found.")
     return {"data": result["data"]}
+
+
+_SIGMF_PLAYBACK_SDR = {
+    "id": "sigmf-playback",
+    "name": "SigMF Playback",
+    "type": "sigmfplayback",
+    "antenna_labels": {},
+    "frequency_min": None,
+    "frequency_max": None,
+}
+
+
+def _sdr_api_metadata(row: SDRs) -> Dict[str, Any]:
+    """Expose device identity and capabilities without connection settings."""
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "type": getattr(row.type, "value", row.type),
+        "antenna_labels": row.antenna_labels or {},
+        "frequency_min": row.frequency_min,
+        "frequency_max": row.frequency_max,
+    }
+
+
+def _rotator_api_metadata(row: Rotators) -> Dict[str, Any]:
+    """Expose pointing limits and park position without connection settings."""
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "azimuth_mode": row.azimuth_mode,
+        "minaz": row.minaz,
+        "maxaz": row.maxaz,
+        "minel": row.minel,
+        "maxel": row.maxel,
+        "parkaz": row.parkaz,
+        "parkel": row.parkel,
+    }
+
+
+def _device_uuid(value: str) -> Optional[uuid.UUID]:
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return None
+
+
+@app.get(
+    "/api/v1/sdrs",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="List SDR device metadata",
+)
+async def api_sdrs(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """List configured SDRs and the built-in SigMF playback device. Requires `sdrs:read`."""
+    await _require_api_token(request, "sdrs:read")
+    # The playback source has a stable ID but no database row. Keep it first
+    # so its detail URL and pagination remain consistent with SSE events.
+    include_playback = offset == 0
+    row_offset = max(0, offset - 1)
+    row_limit = limit - int(include_playback)
+    async with AsyncSessionLocal() as session:
+        total = await session.scalar(select(func.count()).select_from(SDRs))
+        rows = (
+            (
+                await session.execute(
+                    select(SDRs).order_by(SDRs.name, SDRs.id).offset(row_offset).limit(row_limit)
+                )
+            )
+            .scalars()
+            .all()
+            if row_limit
+            else []
+        )
+    data = ([dict(_SIGMF_PLAYBACK_SDR)] if include_playback else []) + [
+        _sdr_api_metadata(row) for row in rows
+    ]
+    return {
+        "data": data,
+        "pagination": {"limit": limit, "offset": offset, "total": (total or 0) + 1},
+    }
+
+
+@app.get(
+    "/api/v1/sdrs/{sdr_id}",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get SDR device metadata",
+)
+async def api_sdr(sdr_id: str, request: Request):
+    """Resolve an SDR streaming event's device ID. Requires `sdrs:read`."""
+    await _require_api_token(request, "sdrs:read")
+    if sdr_id == _SIGMF_PLAYBACK_SDR["id"]:
+        return {"data": dict(_SIGMF_PLAYBACK_SDR)}
+    device_id = _device_uuid(sdr_id)
+    if device_id is None:
+        raise HTTPException(status_code=404, detail="SDR not found.")
+    async with AsyncSessionLocal() as session:
+        row = await session.get(SDRs, device_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="SDR not found.")
+    return {"data": _sdr_api_metadata(row)}
+
+
+@app.get(
+    "/api/v1/rotators",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="List rotator device metadata",
+)
+async def api_rotators(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """List configured rotators and their motion limits. Requires `rotators:read`."""
+    await _require_api_token(request, "rotators:read")
+    async with AsyncSessionLocal() as session:
+        total = await session.scalar(select(func.count()).select_from(Rotators))
+        rows = (
+            (
+                await session.execute(
+                    select(Rotators)
+                    .order_by(Rotators.name, Rotators.id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "data": [_rotator_api_metadata(row) for row in rows],
+        "pagination": {"limit": limit, "offset": offset, "total": total or 0},
+    }
+
+
+@app.get(
+    "/api/v1/rotators/{rotator_id}",
+    dependencies=[Depends(api_bearer_scheme)],
+    summary="Get rotator device metadata",
+)
+async def api_rotator(rotator_id: str, request: Request):
+    """Resolve a tracker hardware event's rotator ID. Requires `rotators:read`."""
+    await _require_api_token(request, "rotators:read")
+    device_id = _device_uuid(rotator_id)
+    if device_id is None:
+        raise HTTPException(status_code=404, detail="Rotator not found.")
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Rotators, device_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rotator not found.")
+    return {"data": _rotator_api_metadata(row)}
 
 
 @app.get(

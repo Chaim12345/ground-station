@@ -19,8 +19,11 @@ from db.models import (
     AuthSessions,
     MonitoredSatellites,
     ObservationStatus,
+    Rotators,
     Satellites,
     ScheduledObservations,
+    SDRs,
+    SDRType,
     UserRole,
     Users,
 )
@@ -99,7 +102,9 @@ async def test_token_is_shown_once_scoped_and_revoked(token_store):
 
     scopes = await _socket_call(sio, "owner", "tokens.scopes")
     assert scopes["success"] is True
-    assert "station:read" in {scope["id"] for scope in scopes["data"]}
+    assert {"station:read", "sdrs:read", "rotators:read"} <= {
+        scope["id"] for scope in scopes["data"]
+    }
     assert (await _socket_call(sio, "owner", "tokens.list"))["data"] == []
 
     wrong_password = await _socket_call(
@@ -207,6 +212,133 @@ async def test_expiry_and_password_reset_invalidate_tokens(token_store):
     assert await apitokens.authenticate_token(another["token"])
     await auth.reset_user_password(owner_id, "replacement123")
     assert await apitokens.authenticate_token(another["token"]) is None
+
+
+@pytest.mark.asyncio
+async def test_public_sdr_and_rotator_metadata_is_scoped_and_sanitized(token_store):
+    for path in (
+        "/api/v1/sdrs",
+        "/api/v1/sdrs/{sdr_id}",
+        "/api/v1/rotators",
+        "/api/v1/rotators/{rotator_id}",
+    ):
+        assert startup.app.openapi()["paths"][path]["get"]["security"]
+
+    owner_id, _ = await _make_user(token_store, "hardware-reader")
+    sdr_id = uuid.uuid4()
+    second_sdr_id = uuid.uuid4()
+    rotator_id = uuid.uuid4()
+    second_rotator_id = uuid.uuid4()
+    async with token_store() as session:
+        session.add_all(
+            [
+                SDRs(
+                    id=sdr_id,
+                    name="Alpha SDR",
+                    type=SDRType.RTLSDRTCPV4,
+                    serial="private-serial",
+                    host="private-sdr-host",
+                    port=1234,
+                    driver="private-driver",
+                    antenna_labels={"RX": {"A": "VHF"}},
+                    frequency_min=24,
+                    frequency_max=1800,
+                ),
+                SDRs(id=second_sdr_id, name="Zulu SDR", type=SDRType.AIRSPY),
+                Rotators(
+                    id=rotator_id,
+                    name="Alpha Rotator",
+                    host="private-rotator-host",
+                    port=4533,
+                    minaz=0,
+                    maxaz=450,
+                    azimuth_mode="0_450",
+                    minel=0,
+                    maxel=90,
+                    parkaz=180,
+                    parkel=0,
+                ),
+                Rotators(
+                    id=second_rotator_id,
+                    name="Zulu Rotator",
+                    host="other-private-host",
+                    port=4534,
+                    minaz=0,
+                    maxaz=360,
+                    minel=0,
+                    maxel=90,
+                ),
+            ]
+        )
+        await session.commit()
+
+    sdr_token = await apitokens.create_token(owner_id, "password123", "SDR reader", ["sdrs:read"])
+    rotator_token = await apitokens.create_token(
+        owner_id, "password123", "Rotator reader", ["rotators:read"]
+    )
+    station_token = await apitokens.create_token(
+        owner_id, "password123", "Station reader", ["station:read"]
+    )
+    sdr_headers = {"Authorization": f"Bearer {sdr_token['token']}"}
+    rotator_headers = {"Authorization": f"Bearer {rotator_token['token']}"}
+    station_headers = {"Authorization": f"Bearer {station_token['token']}"}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=startup.app), base_url="http://testserver"
+    ) as client:
+        assert (await client.get("/api/v1/sdrs")).status_code == 401
+        assert (await client.get("/api/v1/rotators")).status_code == 401
+        assert (await client.get("/api/v1/sdrs", headers=station_headers)).status_code == 403
+        assert (await client.get("/api/v1/rotators", headers=station_headers)).status_code == 403
+        assert (await client.get("/api/v1/rotators", headers=sdr_headers)).status_code == 403
+        assert (await client.get("/api/v1/sdrs", headers=rotator_headers)).status_code == 403
+
+        playback_page = await client.get("/api/v1/sdrs?limit=1", headers=sdr_headers)
+        assert playback_page.status_code == 200
+        assert playback_page.json()["pagination"]["total"] == 3
+        assert [item["id"] for item in playback_page.json()["data"]] == ["sigmf-playback"]
+        first_sdr_page = await client.get("/api/v1/sdrs?limit=1&offset=1", headers=sdr_headers)
+        assert [item["id"] for item in first_sdr_page.json()["data"]] == [str(sdr_id)]
+        second_sdr_page = await client.get("/api/v1/sdrs?limit=1&offset=2", headers=sdr_headers)
+        assert [item["id"] for item in second_sdr_page.json()["data"]] == [str(second_sdr_id)]
+        sdr_detail = await client.get(f"/api/v1/sdrs/{sdr_id}", headers=sdr_headers)
+        assert sdr_detail.status_code == 200
+        assert sdr_detail.json()["data"] == first_sdr_page.json()["data"][0]
+        assert sdr_detail.json()["data"]["type"] == "rtlsdrtcpv4"
+        assert sdr_detail.json()["data"]["antenna_labels"] == {"RX": {"A": "VHF"}}
+        assert all(
+            field not in sdr_detail.json()["data"] for field in ("serial", "host", "port", "driver")
+        )
+        assert (await client.get("/api/v1/sdrs/sigmf-playback", headers=sdr_headers)).json()[
+            "data"
+        ]["name"] == "SigMF Playback"
+        assert (await client.get("/api/v1/sdrs/not-an-id", headers=sdr_headers)).status_code == 404
+        assert (
+            await client.get(f"/api/v1/sdrs/{uuid.uuid4()}", headers=sdr_headers)
+        ).status_code == 404
+
+        rotator_page = await client.get("/api/v1/rotators?limit=1", headers=rotator_headers)
+        assert rotator_page.status_code == 200
+        assert rotator_page.json()["pagination"]["total"] == 2
+        assert [item["id"] for item in rotator_page.json()["data"]] == [str(rotator_id)]
+        second_rotator_page = await client.get(
+            "/api/v1/rotators?limit=1&offset=1", headers=rotator_headers
+        )
+        assert [item["id"] for item in second_rotator_page.json()["data"]] == [
+            str(second_rotator_id)
+        ]
+        rotator_detail = await client.get(f"/api/v1/rotators/{rotator_id}", headers=rotator_headers)
+        assert rotator_detail.status_code == 200
+        assert rotator_detail.json()["data"] == rotator_page.json()["data"][0]
+        assert rotator_detail.json()["data"]["azimuth_mode"] == "0_450"
+        assert rotator_detail.json()["data"]["parkaz"] == 180
+        assert all(field not in rotator_detail.json()["data"] for field in ("host", "port"))
+        assert (
+            await client.get("/api/v1/rotators/not-an-id", headers=rotator_headers)
+        ).status_code == 404
+        assert (
+            await client.get(f"/api/v1/rotators/{uuid.uuid4()}", headers=rotator_headers)
+        ).status_code == 404
 
 
 @pytest.mark.asyncio
