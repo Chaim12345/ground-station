@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
 import requests
+from sgp4.alpha5 import from_alpha5
 from sqlalchemy import delete, select
 
 from db.models import Groups, SatelliteGroupType, SatelliteOrbits, Satellites, Transmitters
@@ -203,13 +204,20 @@ def resolve_sync_source_urls(config_value: Any, default_url: str) -> List[str]:
 
 def parse_norad_id_from_line1(line1: str) -> int:
     """
-    Parses the NORAD ID from the TLE's first line.
+    Parses the NORAD ID from the TLE's first line, including Alpha-5 IDs.
     Assumes the NORAD ID is located at indices 2..6 in the string.
 
     :param line1: TLE line1 string (e.g. '1 25544U 98067A   23109.65481637 ...').
     :return: The integer NORAD ID extracted from line1.
     """
     norad_str = line1[2:7].strip()
+    # Alpha-5 keeps six-digit catalog numbers in the TLE's five-character field.
+    if (
+        len(norad_str) == 5
+        and norad_str[0] in "ABCDEFGHJKLMNPQRSTUVWXYZ"
+        and norad_str[1:].isdigit()
+    ):
+        return int(from_alpha5(norad_str))
     return int(norad_str)
 
 
@@ -243,10 +251,8 @@ def get_norad_id_from_tle(tle: str) -> int:
 
     # According to the TLE format, NORAD ID is within columns 3 to 7 (1-indexed)
     # For Python (0-indexed), this translates to positions [2:7].
-    norad_id_str = tle_line[2:7].strip()
-
     try:
-        return int(norad_id_str)
+        return parse_norad_id_from_line1(tle_line)
     except ValueError as e:
         raise ValueError("Failed to convert the extracted NORAD ID to an integer.") from e
 

@@ -69,6 +69,27 @@ def test_fetch_http_3le_adapter(monkeypatch):
     assert records[0]["line2"].startswith("2 25544")
 
 
+def test_fetch_http_3le_adapter_alpha5(monkeypatch):
+    tle_text = """Surve-Yonsei-OE6ISP
+1 A0956U 26229B   26283.52765152  .00001496  00000-0  13368-3 0  9999
+2 A0956  97.6979  19.6361 0010065  81.6992 278.5371 14.97363145   525"""
+
+    monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: _DummyResponse(tle_text))
+    records = fetch_source_orbit_records(
+        {
+            "adapter": "http_3le",
+            "format": "3le",
+            "url": "https://api.tinygs.com/v1/tinygs_supported.txt",
+        }
+    )
+
+    assert len(records) == 1
+    assert records[0]["name"] == "Surve-Yonsei-OE6ISP"
+    assert records[0]["norad_id"] == 100956
+    assert records[0]["source_object_id"] == "100956"
+    assert records[0]["line1"].startswith("1 A0956U")
+
+
 def test_fetch_http_omm_adapter(monkeypatch):
     payload = json.dumps([_sample_omm_row()])
     monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: _DummyResponse(payload))

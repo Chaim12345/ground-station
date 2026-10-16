@@ -63,6 +63,14 @@ class TestParseNoradId:
         line1 = "1 99999U 98067A   23109.65481637  .00012345  00000-0  21914-3 0  9997"
         assert parse_norad_id_from_line1(line1) == 99999
 
+    def test_parse_norad_id_from_line1_alpha5(self):
+        line1 = "1 A0956U 26229B   26283.52765152  .00001496  00000-0  13368-3 0  9999"
+        assert parse_norad_id_from_line1(line1) == 100956
+
+    def test_parse_norad_id_from_line1_alpha5_skips_i(self):
+        line1 = "1 J0000U 26229B   26283.52765152  .00001496  00000-0  13368-3 0  9999"
+        assert parse_norad_id_from_line1(line1) == 180000
+
     def test_get_norad_id_from_tle_with_name(self):
         """Test extracting NORAD ID from 3LE format with name."""
         tle = """ISS (ZARYA)
@@ -75,6 +83,12 @@ class TestParseNoradId:
         tle = """1 25544U 98067A   23109.65481637  .00012345  00000-0  21914-3 0  9997
 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537"""
         assert get_norad_id_from_tle(tle) == 25544
+
+    def test_get_norad_id_from_tle_alpha5(self):
+        tle = """Surve-Yonsei-OE6ISP
+1 A0956U 26229B   26283.52765152  .00001496  00000-0  13368-3 0  9999
+2 A0956  97.6979  19.6361 0010065  81.6992 278.5371 14.97363145   525"""
+        assert get_norad_id_from_tle(tle) == 100956
 
     def test_get_norad_id_from_tle_with_extra_whitespace(self):
         """Test extracting NORAD ID with extra whitespace."""
