@@ -150,6 +150,27 @@ const normalizeTransmitters = (transmitters = []) =>
         source: normalizeSource(tx.source),
     }));
 
+const syncObservationSelections = (trackerId, view, trackingState) => {
+    if (!String(trackerId).startsWith('obs-') || !trackingState) return;
+    // OBS slots are configured by the scheduler, so their dropdowns follow the
+    // backend's desired state rather than a locally staged hardware choice.
+    if (trackingState.rig_id != null) view.selectedRadioRig = trackingState.rig_id;
+    if (trackingState.rotator_id != null) view.selectedRotator = trackingState.rotator_id;
+    if (trackingState.transmitter_id != null) view.selectedTransmitter = trackingState.transmitter_id;
+    if (trackingState.rig_vfo != null) view.selectedRigVFO = trackingState.rig_vfo;
+    if (trackingState.vfo1 != null) view.selectedVFO1 = trackingState.vfo1;
+    if (trackingState.vfo2 != null) view.selectedVFO2 = trackingState.vfo2;
+};
+
+const syncActiveObservationSelections = (state, view) => {
+    state.selectedRadioRig = view.selectedRadioRig;
+    state.selectedRotator = view.selectedRotator;
+    state.selectedTransmitter = view.selectedTransmitter;
+    state.selectedRigVFO = view.selectedRigVFO;
+    state.selectedVFO1 = view.selectedVFO1;
+    state.selectedVFO2 = view.selectedVFO2;
+};
+
 const normalizeGroupOfSats = (sats = []) =>
     sats.map((sat) => {
         if (!Array.isArray(sat.transmitters)) {
@@ -900,16 +921,21 @@ const targetSatTrackSlice = createSlice({
                     // Sequenced observations carry authoritative desired state.
                     // A delayed sky event must not restore an earlier mode.
                     if (!trackerView.hardwareSequence) trackerView.trackingState = action.payload['tracking_state'];
-                    trackerView.satelliteId = resolveSatelliteIdFromTrackingState(action.payload['tracking_state']);
-                    trackerView.groupId = resolveGroupIdFromTrackingState(action.payload['tracking_state']);
-                    if (action.payload['tracking_state']?.rig_vfo != null) {
-                        trackerView.selectedRigVFO = action.payload['tracking_state'].rig_vfo;
+                    if (!trackerView.hardwareSequence) {
+                        syncObservationSelections(incomingTrackerId, trackerView, action.payload['tracking_state']);
                     }
-                    if (action.payload['tracking_state']?.vfo1 != null) {
-                        trackerView.selectedVFO1 = action.payload['tracking_state'].vfo1;
-                    }
-                    if (action.payload['tracking_state']?.vfo2 != null) {
-                        trackerView.selectedVFO2 = action.payload['tracking_state'].vfo2;
+                    if (!trackerView.hardwareSequence || !incomingTrackerId.startsWith('obs-')) {
+                        trackerView.satelliteId = resolveSatelliteIdFromTrackingState(action.payload['tracking_state']);
+                        trackerView.groupId = resolveGroupIdFromTrackingState(action.payload['tracking_state']);
+                        if (action.payload['tracking_state']?.rig_vfo != null) {
+                            trackerView.selectedRigVFO = action.payload['tracking_state'].rig_vfo;
+                        }
+                        if (action.payload['tracking_state']?.vfo1 != null) {
+                            trackerView.selectedVFO1 = action.payload['tracking_state'].vfo1;
+                        }
+                        if (action.payload['tracking_state']?.vfo2 != null) {
+                            trackerView.selectedVFO2 = action.payload['tracking_state'].vfo2;
+                        }
                     }
                 }
 
@@ -940,6 +966,9 @@ const targetSatTrackSlice = createSlice({
                 }
                 if (hasTransmitters) {
                     trackerView.satelliteData.transmitters = normalizedSatelliteData.transmitters;
+                    if (incomingTrackerId.startsWith('obs-')) {
+                        trackerView.availableTransmitters = normalizedSatelliteData.transmitters;
+                    }
                 }
                 if (hasNextPass) {
                     trackerView.satelliteData.nextPass = rawSatelliteData.nextPass;
@@ -979,10 +1008,15 @@ const targetSatTrackSlice = createSlice({
             }
             if (action.payload['tracking_state']) {
                 if (!trackerView.hardwareSequence) state.trackingState = action.payload['tracking_state'];
+                if (incomingTrackerId.startsWith('obs-') && !trackerView.hardwareSequence) {
+                    syncActiveObservationSelections(state, trackerView);
+                }
                 // Keep selected target in sync with backend tracking updates so
                 // consumers (e.g. earth view map crosshair) follow target changes immediately.
-                state.satelliteId = resolveSatelliteIdFromTrackingState(action.payload['tracking_state']);
-                state.groupId = resolveGroupIdFromTrackingState(action.payload['tracking_state']);
+                if (!trackerView.hardwareSequence || !incomingTrackerId.startsWith('obs-')) {
+                    state.satelliteId = resolveSatelliteIdFromTrackingState(action.payload['tracking_state']);
+                    state.groupId = resolveGroupIdFromTrackingState(action.payload['tracking_state']);
+                }
             }
 
             if (action.payload['satellite_data']) {
@@ -1013,6 +1047,9 @@ const targetSatTrackSlice = createSlice({
 
                 if (hasTransmitters) {
                     const incomingTransmitters = normalizedSatelliteData.transmitters;
+                    if (incomingTrackerId.startsWith('obs-')) {
+                        state.availableTransmitters = trackerView.availableTransmitters;
+                    }
                     const effectiveTrackingState = action.payload['tracking_state'] || state.trackingState || {};
                     const incomingNoradId = hasDetails
                         ? normalizedSatelliteData?.details?.norad_id
@@ -1478,6 +1515,7 @@ const targetSatTrackSlice = createSlice({
                 view.trackingState = data.desired_state;
                 view.satelliteId = resolveSatelliteIdFromTrackingState(data.desired_state);
                 view.groupId = resolveGroupIdFromTrackingState(data.desired_state);
+                syncObservationSelections(trackerId, view, data.desired_state);
             }
             if (data.rotator_data) {
                 view.rotatorData = data.rotator_data;
@@ -1489,7 +1527,12 @@ const targetSatTrackSlice = createSlice({
                     view.lastRotatorEvent
                 );
             }
-            if (data.rig_data) view.rigData = data.rig_data;
+            if (data.rig_data) {
+                view.rigData = data.rig_data;
+                if (trackerId.startsWith('obs-') && Array.isArray(data.rig_data.transmitters) && data.rig_data.transmitters.length) {
+                    view.availableTransmitters = normalizeTransmitters(data.rig_data.transmitters);
+                }
+            }
             state.trackerViews[trackerId] = view;
             if (state.trackerId === trackerId) {
                 state.rotatorData = view.rotatorData;
@@ -1499,7 +1542,9 @@ const targetSatTrackSlice = createSlice({
                     state.trackingState = data.desired_state;
                     state.satelliteId = view.satelliteId;
                     state.groupId = view.groupId;
+                    if (trackerId.startsWith('obs-')) syncActiveObservationSelections(state, view);
                 }
+                if (trackerId.startsWith('obs-')) state.availableTransmitters = view.availableTransmitters;
             }
         },
         reconcileTrackerCommands: (state, action) => {

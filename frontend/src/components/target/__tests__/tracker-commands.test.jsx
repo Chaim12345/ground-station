@@ -3,7 +3,8 @@ import {describe, expect, it, vi} from 'vitest';
 import {configureStore} from '@reduxjs/toolkit';
 import {fireEvent, render, screen} from '@testing-library/react';
 import reducer, {setTrackingStateInBackend, moveRotatorToPosition, stopRotator,
-    setTrackerCommandStatus, setHardwareSnapshot, setSatelliteData, reconcileTrackerCommands, markTrackerCommandsUnknown} from '../target-slice.jsx';
+    setTrackerCommandStatus, setHardwareSnapshot, setSatelliteData, setTrackerId, setRadioRig,
+    reconcileTrackerCommands, markTrackerCommandsUnknown} from '../target-slice.jsx';
 import {isCommandOutstanding, isCommandSpinning, selectTrackerCommand} from '../tracker-command-state.js';
 import ManualRotatorDialog from '../../dashboard/manual-rotator-dialog.jsx';
 
@@ -266,6 +267,51 @@ describe('tracker command lifecycle', () => {
         store.dispatch(setSatelliteData({tracker_id: 'target-1', tracking_state: {...desired, rotator_state: 'tracking'}}));
         expect(store.getState().targetSatTrack.trackingState.rotator_state).toBe('stopped');
         expect(store.getState().targetSatTrack.trackerViews['target-1'].trackingState.rotator_state).toBe('stopped');
+    });
+
+    it('fills OBS hardware menus from the scoped tracker state and transmitter telemetry', () => {
+        const {store} = setup();
+        const desired = {norad_id: 43880, rig_id: 'radio', rotator_id: 'mount',
+            transmitter_id: 'tx-1', rig_vfo: 'none', vfo1: 'uplink', vfo2: 'downlink'};
+        store.dispatch(setHardwareSnapshot({
+            tracker_id: 'obs-pass', worker_generation: 'worker', sequence: 1, observed_at: 200,
+            tracking_state: desired, desired_state: desired,
+            rotator_data: {connected: true},
+            rig_data: {connected: true, transmitters: [{id: 'tx-1', downlink_low: 145800000}]},
+        }));
+        store.dispatch(setTrackerId('obs-pass'));
+
+        let selected = store.getState().targetSatTrack;
+        expect(selected.selectedRotator).toBe('mount');
+        expect(selected.selectedRadioRig).toBe('radio');
+        expect(selected.selectedTransmitter).toBe('tx-1');
+        expect(selected.selectedVFO1).toBe('uplink');
+        expect(selected.selectedVFO2).toBe('downlink');
+        expect(selected.availableTransmitters.map((tx) => tx.id)).toEqual(['tx-1']);
+
+        store.dispatch(setSatelliteData({
+            tracker_id: 'obs-pass',
+            tracking_state: {...desired, rig_id: 'none', transmitter_id: 'none', vfo1: 'downlink'},
+            satellite_data: {transmitters: [
+                {id: 'tx-1', downlink_low: 145800000},
+                {id: 'tx-2', downlink_low: 436800000},
+            ]},
+        }));
+        selected = store.getState().targetSatTrack;
+        expect(selected.selectedRadioRig).toBe('radio');
+        expect(selected.selectedTransmitter).toBe('tx-1');
+        expect(selected.selectedVFO1).toBe('uplink');
+        expect(selected.availableTransmitters.map((tx) => tx.id)).toEqual(['tx-1', 'tx-2']);
+    });
+
+    it('keeps a regular target slot\'s staged rig selection during hardware snapshots', () => {
+        const {store} = setup();
+        store.dispatch(setRadioRig({value: 'staged-radio', trackerId: 'target-1'}));
+        store.dispatch(setHardwareSnapshot({
+            tracker_id: 'target-1', worker_generation: 'worker', sequence: 1, observed_at: 200,
+            desired_state: {rig_id: 'radio'},
+        }));
+        expect(store.getState().targetSatTrack.trackerViews['target-1'].selectedRadioRig).toBe('staged-radio');
     });
 });
 
