@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { toast } from '../utils/toast-with-timestamp.jsx';
 import { Box } from '@mui/material';
 import { useTranslation } from 'react-i18next';
@@ -47,6 +47,7 @@ import { buildTargetKeyFromTrackingState } from '../components/target/celestial-
 import { setTrackerInstances } from '../components/target/tracker-instances-slice.jsx';
 import { setSynchronizing } from '../components/satellites/synchronize-slice.jsx';
 import { initializeAppData } from '../services/data-sync.js';
+import { fetchVersionInfo } from '../components/dashboard/version-slice.jsx';
 import {
     setIsRecording,
     setRecordingDuration,
@@ -122,13 +123,30 @@ const CELESTIAL_LIVE_UPDATE_BATCH_MS = 200;
 export const useSocketEventHandlers = (socket, enabled = true) => {
     const { t } = useTranslation('common');
     const dispatch = useDispatch();
+    const hasVersionChanged = useSelector((state) => state.version.hasVersionChanged);
+    const pendingSyncRef = useRef(null);
+    const bootstrapGenerationRef = useRef(0);
 
     // Track which observations have been notified to prevent duplicate notifications
     const notifiedVisibility = useRef(new Set());
 
+    // Dismissing the update dialog allows the existing page to finish loading.
+    // Reload leaves the flag set, so no old-client data requests are started.
+    useEffect(() => {
+        if (hasVersionChanged || !pendingSyncRef.current) return;
+        const resume = pendingSyncRef.current;
+        pendingSyncRef.current = null;
+        void resume();
+    }, [hasVersionChanged]);
+
     useEffect(() => {
         if (!socket || !enabled) return;
         let lastBootstrappedSocketId = null;
+        const isCurrentSession = (generation, socketId) =>
+            bootstrapGenerationRef.current === generation
+            && socket.connected
+            && socket.id === socketId;
+
         const syncBackgroundTaskSnapshot = async () => {
             try {
                 const taskListReply = await socket.emitWithAck("api.call", {
@@ -147,6 +165,25 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
             }
         };
 
+        const continueBootstrap = async (generation, socketId) => {
+            if (!isCurrentSession(generation, socketId)) return;
+
+            // Reconnect bootstrap pulls wait for the version decision, including
+            // task reconciliation and the tracker command snapshot.
+            store.dispatch(setCurrentSessionId(socketId));
+            setTimeout(() => {
+                if (isCurrentSession(generation, socketId)) {
+                    store.dispatch(cleanupStaleDecoders());
+                }
+            }, 1000);
+
+            await syncBackgroundTaskSnapshot();
+            if (!isCurrentSession(generation, socketId)) return;
+            await initializeAppData(socket);
+            if (!isCurrentSession(generation, socketId)) return;
+            await dispatch(fetchTrackerCommands({socket}));
+        };
+
         const handleConnect = async () => {
             // Avoid duplicate bootstrap for the same socket session when listeners
             // attach after the socket is already connected.
@@ -154,6 +191,9 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
                 return;
             }
             lastBootstrappedSocketId = socket.id || null;
+            const generation = ++bootstrapGenerationRef.current;
+            const socketId = socket.id;
+            pendingSyncRef.current = null;
 
             console.log('Socket connected with ID:', socket.id, socket);
 
@@ -180,18 +220,18 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
                 // If status refresh fails, continue with runtime bootstrap path.
             }
 
-            // Update current session ID and clean up stale decoders from previous sessions
-            store.dispatch(setCurrentSessionId(socket.id));
+            if (!isCurrentSession(generation, socketId)) return;
 
-            // Clean up any stale decoder entries that survived persistence
-            // This handles the case where Redux persisted state has decoders from old sessions
-            setTimeout(() => {
-                store.dispatch(cleanupStaleDecoders());
-            }, 1000);
-
-            // Reconcile task state after reconnect so missed completion events
-            // (during setup/login socket turnover) cannot leave stale running tasks.
-            await syncBackgroundTaskSnapshot();
+            // Version detection must finish before any bulk sync. A failed check
+            // still permits loading so a transient error cannot strand the UI.
+            await dispatch(fetchVersionInfo({ socket }));
+            if (!isCurrentSession(generation, socketId)) return;
+            if (store.getState().version.hasVersionChanged) {
+                pendingSyncRef.current = () => continueBootstrap(generation, socketId);
+                dispatch(setInitialDataLoading(false));
+                dispatch(setInitialDataProgress({ completed: 0, total: 0 }));
+                return;
+            }
 
             // toast.success(
             //     <ToastMessage
@@ -202,8 +242,7 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
             //         icon: () => <CableIcon/>,
             //     }
             // );
-            await initializeAppData(socket);
-            await dispatch(fetchTrackerCommands({socket}));
+            await continueBootstrap(generation, socketId);
         };
 
         // Connection event
@@ -263,6 +302,8 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
 
         // Disconnect event
         socket.on('disconnect', () => {
+            ++bootstrapGenerationRef.current;
+            pendingSyncRef.current = null;
             dispatch(markTrackerCommandsUnknown());
             // Update connection state
             dispatch(setConnecting(true));
@@ -1040,6 +1081,8 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
 
         // Cleanup function
         return () => {
+            ++bootstrapGenerationRef.current;
+            pendingSyncRef.current = null;
             if (celestialLiveUpdateTimer != null) {
                 window.clearTimeout(celestialLiveUpdateTimer);
             }

@@ -106,4 +106,5 @@ ls -lh "$UHD_IMAGES_DIR"/*.bin 2>/dev/null || echo "No UHD images found yet in $
 # Start the application
 echo "Starting Ground Station application..."
 cd /app/backend
-exec /app/venv/bin/python app.py --log-level=INFO --host=127.0.0.1 --port=7001
+# Let app_config.json supply the log level so General Settings can change it.
+exec /app/venv/bin/python app.py --host=127.0.0.1 --port=7001

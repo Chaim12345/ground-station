@@ -48,6 +48,7 @@ export default function App() {
     const dashboardRuntimeState = useSelector((state) => state.dashboard);
     const stationName = String(useSelector((state) => state.location?.location?.name) || '').trim();
     const version = String(useSelector((state) => state.version?.data?.version) || '').trim();
+    const hasVersionChanged = useSelector((state) => state.version.hasVersionChanged);
     const authUserRole = String(authState?.user?.role || '').toLowerCase();
     const isAdmin = authUserRole === 'admin';
     const [systemTheme, setSystemTheme] = React.useState('dark');
@@ -137,7 +138,7 @@ export default function App() {
         !(dashboardRuntimeState?.initialDataLoading ?? false);
 
     useSocketEventHandlers(socket, appRuntimeEnabled);
-    usePassFetching(socket, appRuntimeEnabled);
+    usePassFetching(socket, appRuntimeEnabled && dashboardRuntimeReady && !hasVersionChanged);
 
     React.useEffect(() => {
         if (!authState.authenticated || authState.setupRequired) {

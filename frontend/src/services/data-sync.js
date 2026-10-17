@@ -18,7 +18,6 @@
  */
 
 import { store } from '../components/common/store.jsx';
-import { fetchVersionInfo } from "../components/dashboard/version-slice.jsx";
 import { fetchPreferences, fetchSystemPreferences } from '../components/settings/preferences-slice.jsx';
 import { fetchLocationForUserId } from '../components/settings/location-slice.jsx';
 import { fetchRigs } from '../components/hardware/rig-slice.jsx';
@@ -49,10 +48,6 @@ export async function initializeAppData(socket) {
         {
             name: 'system_preferences',
             run: () => store.dispatch(fetchSystemPreferences({ socket })),
-        },
-        {
-            name: 'version',
-            run: () => store.dispatch(fetchVersionInfo({ socket })),
         },
         {
             name: 'location',

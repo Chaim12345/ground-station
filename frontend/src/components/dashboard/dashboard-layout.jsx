@@ -1666,7 +1666,7 @@ export default function Layout() {
                 }}
             >
                 <Box sx={{ flexGrow: 1, minHeight: 0 }}>
-                    {connected && !initialDataLoading ? <Outlet /> : <ConnectionOverlay />}
+                    {connected && !initialDataLoading && !hasVersionChanged ? <Outlet /> : <ConnectionOverlay />}
                 </Box>
                 <ApplicationFooter />
                 {hasVersionChanged && <VersionUpdateOverlay />}

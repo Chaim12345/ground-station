@@ -4,6 +4,7 @@ import { keyframes } from '@emotion/react';
 import { Backdrop, Box, Typography, Button, useTheme } from "@mui/material";
 import { useSelector, useDispatch } from "react-redux";
 import { clearVersionChangeFlag } from './version-slice.jsx';
+import { setInitialDataLoading } from './dashboard-slice.jsx';
 import { useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next';
 import { alpha } from '@mui/material/styles';
@@ -60,8 +61,6 @@ function VersionUpdateOverlay() {
         // Clear timer
         if (intervalId) clearInterval(intervalId);
 
-        // Clear the version change flag
-        dispatch(clearVersionChangeFlag());
         // Reload the page to get the new version
         window.location.reload();
     };
@@ -70,7 +69,8 @@ function VersionUpdateOverlay() {
         // Clear timer
         if (intervalId) clearInterval(intervalId);
 
-        // Just clear the flag without reloading
+        // Keep the page behind the loading overlay until its deferred sync finishes.
+        dispatch(setInitialDataLoading(true));
         dispatch(clearVersionChangeFlag());
     };
 
