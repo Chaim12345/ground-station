@@ -50,11 +50,13 @@ parser.add_argument(
     default=None,
     help="Path to the logger configuration file (defaults to data/configs/log_config.yaml)",
 )
+# Existing startup commands may still pass this option. Keep parsing it, but
+# do not load it into runtime configuration because no authentication code uses it.
 parser.add_argument(
     "--secret-key",
     type=str,
     default=None,
-    help="Secret key used for user authentication",
+    help="Deprecated and ignored; accepted for compatibility with existing startup commands",
 )
 parser.add_argument(
     "--track-interval-ms",
@@ -99,7 +101,6 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         temp_db=False,
         log_level="INFO",
         log_config="data/configs/log_config.yaml",
-        secret_key="YOUR_RANDOM_SECRET_KEY",
         track_interval_ms=2000,
         max_tracker_targets=10,
         enable_soapy_discovery=False,
@@ -126,7 +127,6 @@ else:
             "temp_db": _raw_args.temp_db,
             "log_level": _raw_args.log_level,
             "log_config": _raw_args.log_config,
-            "secret_key": _raw_args.secret_key,
             "track_interval_ms": _raw_args.track_interval_ms,
             "max_tracker_targets": _raw_args.max_tracker_targets,
             "enable_soapy_discovery": _raw_args.enable_soapy_discovery,
@@ -169,7 +169,6 @@ else:
         temp_db=_pick(_raw_args.temp_db, "temp_db"),
         log_level=_pick(_raw_args.log_level, "log_level"),
         log_config=_pick(_raw_args.log_config, "log_config"),
-        secret_key=_pick(_raw_args.secret_key, "secret_key"),
         track_interval_ms=(
             cli_track_interval_ms if cli_track_interval_ms is not None else file_track_interval_ms
         ),

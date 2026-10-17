@@ -83,14 +83,6 @@ const SETTINGS_GROUP_DEFS = [
         fieldKeys: ['log_level', 'log_config'],
     },
     {
-        key: 'security',
-        titleKey: 'app_settings.group_security',
-        titleDefault: 'Security',
-        descriptionKey: 'app_settings.group_security_help',
-        descriptionDefault: 'Sensitive keys and authentication-related settings.',
-        fieldKeys: ['secret_key'],
-    },
-    {
         key: 'tracking',
         titleKey: 'app_settings.group_tracking',
         titleDefault: 'Tracking',

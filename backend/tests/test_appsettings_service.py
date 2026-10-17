@@ -2,7 +2,8 @@
 
 import json
 
-from common import appsettings
+from common import appconfig, appsettings
+from common import arguments as arguments_module
 
 
 def _write_json(path, payload):
@@ -53,6 +54,34 @@ def test_update_rejects_unknown_settings(tmp_path):
 
     assert result["success"] is False
     assert "Unknown settings" in result["error"]
+
+
+def test_legacy_secret_key_is_preserved_without_being_exposed(tmp_path):
+    service = _build_service(tmp_path)
+    _write_json(service.config_path, {"secret_key": "legacy-value", "log_level": "INFO"})
+
+    assert appconfig.load_app_config(service.config_path)["secret_key"] == "legacy-value"
+    payload = service.get_payload()
+    assert "secret_key" not in payload["values"]
+    assert "secret_key" not in {field["key"] for field in payload["fields"]}
+
+    result = service.update({"log_level": "DEBUG"})
+    assert result["success"] is True
+    assert _read_json(service.config_path)["secret_key"] == "legacy-value"
+    assert service.update({"secret_key": "replacement"})["success"] is False
+
+
+def test_new_configs_omit_secret_key_but_legacy_cli_flag_is_accepted(tmp_path):
+    config_path = tmp_path / "new_app_config.json"
+
+    appconfig.load_app_config(config_path)
+
+    assert "secret_key" not in _read_json(config_path)
+    assert (
+        arguments_module.parser.parse_args(["--secret-key", "legacy-value"]).secret_key
+        == "legacy-value"
+    )
+    assert not hasattr(arguments_module.arguments, "secret_key")
 
 
 def test_update_returns_validation_errors(tmp_path):

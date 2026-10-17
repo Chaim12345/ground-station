@@ -120,15 +120,6 @@ FIELDS: Tuple[AppSettingField, ...] = (
         cli_flag="--log-config",
     ),
     AppSettingField(
-        key="secret_key",
-        value_type="string",
-        default=DEFAULT_APP_CONFIG["secret_key"],
-        description="Secret value reserved for authentication/signing integrations.",
-        apply_mode="restart_required",
-        sensitive=True,
-        cli_flag="--secret-key",
-    ),
-    AppSettingField(
         key="track_interval_ms",
         value_type="integer",
         default=DEFAULT_APP_CONFIG["track_interval_ms"],
