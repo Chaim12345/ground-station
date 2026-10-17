@@ -138,7 +138,12 @@ class StateManager:
             }
         )
 
-        # Update rig state in database
+        # A new OBS slot receives its first target, rig, and transmitter in one
+        # command. Clearing the rig here would cancel that startup command.
+        if old is None and self.tracker.tracker_id.startswith("obs-"):
+            return
+
+        # Stop tracking the previous target's transmitter on later target changes.
         updated_tracking_state = dict(self.tracker.input_tracking_state or {})
         updated_tracking_state["transmitter_id"] = "none"
         updated_tracking_state["rig_state"] = (
