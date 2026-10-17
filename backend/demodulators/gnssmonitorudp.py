@@ -150,6 +150,9 @@ def parse_gnss_synchro_message(data: bytes) -> Dict[str, Any]:
         elif field_number == 20 and wire_type == 0:
             value, index = _read_varint(data, index)
             obs["flag_valid_word"] = bool(value)
+        elif field_number == 24 and wire_type == 0:
+            value, index = _read_varint(data, index)
+            obs["flag_valid_pseudorange"] = bool(value)
         else:
             index = _skip_wire_value(data, index, wire_type)
 

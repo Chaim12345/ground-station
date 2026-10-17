@@ -17,8 +17,8 @@
  *
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Chip, IconButton, Tooltip, Typography, useTheme } from '@mui/material';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Chip, CircularProgress, IconButton, Link, Tooltip, Typography, useTheme } from '@mui/material';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import { alpha } from '@mui/material/styles';
@@ -38,8 +38,13 @@ import { DevRenderProfiler } from './render-profiler.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDateTime, formatTime } from '../../utils/date-time.js';
 import { clearDecoderOutputs } from '../decoders/decoders-slice.jsx';
+import { SatelliteInfoDialog } from '../satellites/satellite-info-page.jsx';
+import { fetchSatellite } from '../satellites/satellite-slice.jsx';
+import { useSocket } from '../common/socket.jsx';
+import { toast } from '../../utils/toast-with-timestamp.jsx';
 import {
     clearGnssInsightsHistory,
+    getVerifiedGnssSatellites,
     setDecodedInsightsActiveTab,
     setGnssSatellitesSortModel,
 } from './gnss-slice.jsx';
@@ -102,10 +107,15 @@ const LastSeenFormatter = React.memo(function LastSeenFormatter({ value, nowMs, 
 
 const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
     const { t } = useTranslation('waterfall');
+    const { t: satellitesT } = useTranslation('satellites');
     const dispatch = useDispatch();
+    const { socket } = useSocket();
     const theme = useTheme();
     const { timezone, locale } = useUserTimeSettings();
     const [selectedSatelliteId, setSelectedSatelliteId] = useState(null);
+    const [satelliteInfo, setSatelliteInfo] = useState(null);
+    const [loadingNoradId, setLoadingNoradId] = useState(null);
+    const latestInfoRequestRef = useRef(0);
     const [relativeNowMs, setRelativeNowMs] = useState(() => Date.now());
     // Translated constellation metadata, rebuilt when the language/translator changes.
     const constellationOperatorMeta = useMemo(() => getConstellationOperatorMeta(t), [t]);
@@ -143,6 +153,44 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
         setSelectedSatelliteId(null);
     }, [dispatch]);
 
+    useEffect(() => () => {
+        latestInfoRequestRef.current += 1;
+    }, []);
+
+    const handleOpenSatelliteInfo = useCallback(async (noradId) => {
+        const parsedNoradId = Number(noradId);
+        if (!socket || !Number.isInteger(parsedNoradId) || parsedNoradId <= 0) return;
+
+        // Only the latest click may open the dialog after an asynchronous fetch.
+        const requestId = ++latestInfoRequestRef.current;
+        setLoadingNoradId(parsedNoradId);
+        setSatelliteInfo(null);
+        try {
+            const response = await dispatch(fetchSatellite({ socket, noradId: parsedNoradId })).unwrap();
+            if (latestInfoRequestRef.current !== requestId) return;
+            if (Number(response?.details?.norad_id) !== parsedNoradId) {
+                throw new Error('Satellite details unavailable');
+            }
+            setSatelliteInfo({
+                ...response.details,
+                position: response.position || null,
+                transmitters: response.transmitters || [],
+            });
+        } catch {
+            if (latestInfoRequestRef.current === requestId) {
+                toast.error(satellitesT('satellite_database.failed_load'));
+            }
+        } finally {
+            if (latestInfoRequestRef.current === requestId) setLoadingNoradId(null);
+        }
+    }, [dispatch, satellitesT, socket]);
+
+    const handleCloseSatelliteInfo = useCallback(() => {
+        latestInfoRequestRef.current += 1;
+        setSatelliteInfo(null);
+        setLoadingNoradId(null);
+    }, []);
+
     const formatTimestamp = useCallback((value) => {
         if (!value) return '-';
         return formatDateTime(value, {
@@ -161,7 +209,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
     }, [timezone, locale]);
 
     const satelliteRows = useMemo(() => {
-        return Object.values(gnssSatellitesById || {}).sort((a, b) => {
+        return getVerifiedGnssSatellites(gnssSatellitesById).sort((a, b) => {
             const aSeen = Number(a?.lastSeen) || 0;
             const bSeen = Number(b?.lastSeen) || 0;
             return bSeen - aSeen;
@@ -354,9 +402,17 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
             flex: 1.1,
             renderCell: (params) => {
                 const operatorMeta = getOperatorMetadata(params.row?.constellation, constellationOperatorMeta);
-                const satelliteLabel = params.row?.matchedNorad
-                    ? `${params.value} (${params.row.matchedNorad})`
+                const noradId = Number(params.row?.matchedNorad);
+                const hasNoradId = Number.isInteger(noradId) && noradId > 0;
+                const satelliteLabel = hasNoradId
+                    ? `${params.value} (${noradId})`
                     : params.value;
+                const labelSx = {
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                };
 
                 return (
                     <Box
@@ -380,18 +436,27 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                 </Typography>
                             </Tooltip>
                         )}
-                        <Typography
-                            variant="caption"
-                            sx={{
-                                fontWeight: 700,
-                                color: 'text.primary',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                            }}
-                        >
-                            {satelliteLabel}
-                        </Typography>
+                        {hasNoradId ? (
+                            <Link
+                                component="button"
+                                type="button"
+                                variant="caption"
+                                underline="hover"
+                                aria-busy={loadingNoradId === noradId}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleOpenSatelliteInfo(noradId);
+                                }}
+                                sx={{ ...labelSx, textAlign: 'left' }}
+                            >
+                                {satelliteLabel}
+                                {loadingNoradId === noradId && <CircularProgress size={10} sx={{ ml: 0.5 }} />}
+                            </Link>
+                        ) : (
+                            <Typography variant="caption" sx={{ ...labelSx, color: 'text.primary' }}>
+                                {satelliteLabel}
+                            </Typography>
+                        )}
                     </Box>
                 );
             },
@@ -521,7 +586,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                 />
             ),
         },
-    ]), [locale, relativeNowMs, timezone, constellationOperatorMeta]);
+    ]), [locale, relativeNowMs, timezone, constellationOperatorMeta, handleOpenSatelliteInfo, loadingNoradId]);
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -691,7 +756,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                     getRowClassName={(params) => (
                                         selectedSatelliteId === params.id ? 'gnss-row-selected' : ''
                                     )}
-                                    localeText={{ noRowsLabel: 'No GNSS satellite events yet' }}
+                                    localeText={{ noRowsLabel: 'Waiting for validated GNSS navigation data' }}
                                     sx={{
                                         border: 0,
                                         '& .MuiDataGrid-row': {
@@ -859,9 +924,13 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                         </Typography>
                                     </Box>
                                     <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
-                                            {t('decoded_insights_island.detected_satellites', { defaultValue: 'Detected satellites:' })}
-                                        </Typography>
+                                        <Tooltip title={t('decoded_insights_island.verified_satellites_help', {
+                                            defaultValue: 'Shown after GNSS-SDR reports a valid navigation word or pseudorange for that satellite.',
+                                        })}>
+                                            <Typography variant="caption" sx={{ color: 'text.secondary', opacity: 0.72, fontSize: '0.66rem', lineHeight: 1.2 }}>
+                                                {t('decoded_insights_island.verified_satellites', { defaultValue: 'Verified satellites:' })}
+                                            </Typography>
+                                        </Tooltip>
                                         <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.66rem', lineHeight: 1.2, fontWeight: 700, marginLeft: 'auto', textAlign: 'right' }}>
                                             {satelliteRows.length}
                                         </Typography>
@@ -986,7 +1055,7 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                                 </Typography>
                                 <Box sx={{ opacity: 0.55 }}>•</Box>
                                 <Box sx={{ display: 'flex', gap: 0.45, flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
-                                    <Box component="span">sat: <Box component="span" sx={{ fontWeight: 700 }}>{satelliteRows.length}</Box></Box>
+                                    <Box component="span">verified: <Box component="span" sx={{ fontWeight: 700 }}>{satelliteRows.length}</Box></Box>
                                     <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
                                     <Box component="span">trk: <Box component="span" sx={{ fontWeight: 700 }}>{gnssStatusStats.trackingSatCount}</Box></Box>
                                     <Box component="span" sx={{ opacity: 0.55 }}>•</Box>
@@ -1044,6 +1113,11 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                     </Box>
                 )}
             </Box>
+            <SatelliteInfoDialog
+                open={Boolean(satelliteInfo)}
+                onClose={handleCloseSatelliteInfo}
+                satelliteData={satelliteInfo}
+            />
         </Box>
     );
 });

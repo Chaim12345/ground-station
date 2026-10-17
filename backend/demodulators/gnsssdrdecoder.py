@@ -971,18 +971,28 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         except (TypeError, ValueError):
             channel = None
 
-        if not self._should_emit_udp_event(event_type, system, prn, channel):
-            return
-
         cn0 = observation.get("cn0_db_hz")
         doppler = observation.get("carrier_doppler_hz")
+        word_valid = bool(observation.get("flag_valid_word"))
+        pseudorange_valid = bool(observation.get("flag_valid_pseudorange"))
+        navigation_verified = word_valid or pseudorange_valid
+
+        # Keep the first decoded word even if a tracking update was just emitted.
+        # The valid-word flag may be brief, so it needs its own throttle key.
+        throttle_event_type = f"{event_type}_verified" if navigation_verified else event_type
+        if not self._should_emit_udp_event(throttle_event_type, system, prn, channel):
+            return
+
         payload: Dict[str, Any] = {
             "event": event_type,
             "satellite_system": system,
             "satellite_prn": prn,
             "channel": channel,
             "message": f"{event_type.upper()} {system}{prn:02d}",
+            "navigation_verified": navigation_verified,
         }
+        if navigation_verified:
+            payload["verification_source"] = "navigation_word" if word_valid else "pseudorange"
         if cn0 is not None:
             payload["cn0_db_hz"] = cn0
         if doppler is not None:
@@ -1060,7 +1070,11 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         saw_tracking = False
 
         for obs in monitor_messages:
-            if bool(obs.get("flag_valid_word")) or bool(obs.get("flag_valid_symbol_output")):
+            if (
+                bool(obs.get("flag_valid_word"))
+                or bool(obs.get("flag_valid_symbol_output"))
+                or bool(obs.get("flag_valid_pseudorange"))
+            ):
                 self._emit_udp_satellite_event("tracking", obs)
                 saw_tracking = True
             elif bool(obs.get("flag_valid_acquisition")):
@@ -1068,10 +1082,19 @@ class GNSSSdrDecoder(BaseDecoderProcess):
                 saw_acquisition = True
 
         for obs in acquisition_messages:
+            # Monitors also report PRNs assigned to channels without a valid lock.
+            if not bool(obs.get("flag_valid_acquisition")):
+                continue
             self._emit_udp_satellite_event("acquisition", obs)
             saw_acquisition = True
 
         for obs in tracking_messages:
+            if not (
+                bool(obs.get("flag_valid_symbol_output"))
+                or bool(obs.get("flag_valid_word"))
+                or bool(obs.get("flag_valid_pseudorange"))
+            ):
+                continue
             self._emit_udp_satellite_event("tracking", obs)
             saw_tracking = True
 

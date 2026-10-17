@@ -24,6 +24,10 @@ const FIX_QUALITY_TIMELINE_MAX_POINTS = 4000;
 const FIX_QUALITY_TIMELINE_MIN_APPEND_MS = 15 * 1000;
 const GNSS_SATELLITE_EVENT_HISTORY_MAX = 40;
 
+export function getVerifiedGnssSatellites(satellitesById) {
+    return Object.values(satellitesById || {}).filter((satellite) => Number.isFinite(satellite.verifiedAtMs));
+}
+
 const CONSTELLATION_BY_CODE = {
     G: 'GPS',
     E: 'GALILEO',
@@ -436,6 +440,8 @@ export const gnssSlice = createSlice({
                         lastChannel: null,
                         lastEvent: eventTypeLabel,
                         lastMessage: '-',
+                        verifiedAtMs: null,
+                        verificationSource: null,
                         lastCn0DbHz: null,
                         lastCarrierDopplerHz: null,
                         lastUtcTime: null,
@@ -460,6 +466,11 @@ export const gnssSlice = createSlice({
                 row.lastEvent = eventTypeLabel;
                 row.lastMessage = message || row.lastMessage;
                 row.state = eventState;
+                if (output.navigation_verified === true && row.verifiedAtMs === null) {
+                    // Keep proof of reception after a later loss of lock.
+                    row.verifiedAtMs = timestampMs;
+                    row.verificationSource = String(output.verification_source || 'navigation_data');
+                }
 
                 if (eventTypeLabel === 'acquisition') row.acquisitionCount += 1;
                 if (eventTypeLabel === 'tracking') row.trackingCount += 1;

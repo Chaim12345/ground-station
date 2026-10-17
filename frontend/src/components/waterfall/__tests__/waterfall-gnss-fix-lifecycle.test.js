@@ -1,12 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import reducer, {
     clearGnssInsightsHistory,
+    getVerifiedGnssSatellites,
     resetGnssFixLifecycle,
     updateGnssFixLifecycleFromOutput,
     updateGnssFixLifecycleFromStatus,
 } from '../gnss-slice.jsx';
 
 describe('waterfall gnss fix lifecycle', () => {
+    it('lists only satellites with validated navigation data and retains later lock loss', () => {
+        let state = reducer(undefined, { type: '@@INIT' });
+        const emit = (timestamp, satellite_system, satellite_prn, output) => {
+            state = reducer(state, updateGnssFixLifecycleFromOutput({
+                decoder_type: 'gnss',
+                timestamp,
+                output: { satellite_system, satellite_prn, ...output },
+            }));
+        };
+
+        emit(100, 'R', 4, { event: 'acquisition' });
+        emit(101, 'G', 12, { event: 'tracking', navigation_verified: false, cn0_db_hz: 42 });
+        expect(getVerifiedGnssSatellites(state.gnssSatellitesById)).toEqual([]);
+
+        emit(102, 'G', 12, {
+            event: 'tracking',
+            navigation_verified: true,
+            verification_source: 'navigation_word',
+        });
+        expect(getVerifiedGnssSatellites(state.gnssSatellitesById).map((row) => row.id)).toEqual(['GPS-12']);
+        expect(state.gnssSatellitesById['GPS-12']).toMatchObject({
+            verifiedAtMs: 102_000,
+            verificationSource: 'navigation_word',
+            trackingCount: 2,
+        });
+
+        emit(103, 'G', 12, { event: 'lost' });
+        expect(getVerifiedGnssSatellites(state.gnssSatellitesById)).toHaveLength(1);
+        expect(state.gnssSatellitesById['GPS-12'].state).toBe('lost');
+    });
     it('accepts backend-authored gnss_fix_status for fix transitions', () => {
         let state = reducer(undefined, { type: '@@INIT' });
 

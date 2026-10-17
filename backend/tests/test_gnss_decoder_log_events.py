@@ -16,6 +16,7 @@
 import queue
 from types import SimpleNamespace
 
+from demodulators.gnssmonitorudp import parse_gnss_synchro_message
 from demodulators.gnsssdrdecoder import DecoderStatus, GNSSSdrDecoder
 
 
@@ -154,3 +155,71 @@ def test_emit_activity_heartbeat_includes_loss_of_lock_fields():
     _, status_info = status_payloads[0]
     assert status_info["gnss_loss_of_lock_total"] == 7
     assert status_info["gnss_loss_of_lock_delta"] == 3
+
+
+def test_gnss_synchro_parser_reads_valid_pseudorange_flag():
+    # GnssSynchro fields 1, 3, and 24: constellation, PRN, valid pseudorange.
+    packet = bytes([0x0A, 0x01, ord("G"), 0x18, 0x07, 0xC0, 0x01, 0x01])
+    assert parse_gnss_synchro_message(packet) == {
+        "system": "G",
+        "prn": 7,
+        "flag_valid_pseudorange": True,
+    }
+
+
+def test_monitor_events_ignore_invalid_assigned_channels():
+    decoder = _build_decoder()
+    decoder.stats.update(
+        {"udp_monitor_observations": 0, "udp_events_emitted": 0, "udp_events_suppressed": 0}
+    )
+    emitted = []
+    decoder._send_output_update = lambda payload: emitted.append(payload)
+    decoder._send_status_update = lambda *_args, **_kwargs: None
+    decoder.monitor_receiver = SimpleNamespace(
+        poll=lambda: {
+            "monitor": [
+                {"system": "G", "prn": 7, "flag_valid_word": True},
+                {"system": "C", "prn": 9, "flag_valid_pseudorange": True},
+            ],
+            "acquisition": [
+                {"system": "R", "prn": 4, "flag_valid_acquisition": False},
+                {"system": "G", "prn": 3, "flag_valid_acquisition": True},
+            ],
+            "tracking": [
+                {"system": "J", "prn": 194, "flag_valid_symbol_output": False},
+                {"system": "E", "prn": 11, "flag_valid_symbol_output": True},
+            ],
+            "pvt": [],
+        },
+        snapshot_stats=lambda: {},
+    )
+
+    decoder._poll_monitor_updates()
+
+    assert [
+        (event["event"], event["satellite_system"], event["satellite_prn"]) for event in emitted
+    ] == [
+        ("tracking", "G", 7),
+        ("tracking", "C", 9),
+        ("acquisition", "G", 3),
+        ("tracking", "E", 11),
+    ]
+    assert emitted[0]["navigation_verified"] is True
+    assert emitted[0]["verification_source"] == "navigation_word"
+    assert emitted[1]["navigation_verified"] is True
+    assert emitted[1]["verification_source"] == "pseudorange"
+    assert emitted[2]["navigation_verified"] is False
+    assert emitted[3]["navigation_verified"] is False
+
+
+def test_navigation_proof_is_not_throttled_by_earlier_tracking_event():
+    decoder = _build_decoder()
+    decoder.stats.update({"udp_events_emitted": 0, "udp_events_suppressed": 0})
+    emitted = []
+    decoder._send_output_update = lambda payload: emitted.append(payload)
+
+    candidate = {"system": "G", "prn": 12, "channel_id": 2}
+    decoder._emit_udp_satellite_event("tracking", candidate)
+    decoder._emit_udp_satellite_event("tracking", {**candidate, "flag_valid_word": True})
+
+    assert [event["navigation_verified"] for event in emitted] == [False, True]
