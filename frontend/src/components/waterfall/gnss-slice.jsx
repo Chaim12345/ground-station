@@ -28,6 +28,12 @@ export function getVerifiedGnssSatellites(satellitesById) {
     return Object.values(satellitesById || {}).filter((satellite) => Number.isFinite(satellite.verifiedAtMs));
 }
 
+export function getVerifiedGnssSatelliteCountForStream(satellitesById, lifecycle, sessionId, vfo) {
+    if (!lifecycle || !streamMatchesLifecycle(lifecycle, sessionId, vfo)) return 0;
+    // The marker and decoded table must count the same persisted verification evidence.
+    return getVerifiedGnssSatellites(satellitesById).length;
+}
+
 const CONSTELLATION_BY_CODE = {
     G: 'GPS',
     E: 'GALILEO',

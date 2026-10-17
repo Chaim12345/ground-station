@@ -39,6 +39,7 @@ import {
     formatBaudrate
 } from './vfo-utils.js';
 import { resolveVfoAudioStatus, VFO_AUDIO_STATUS } from '../vfo-audio-status.js';
+import { getVerifiedGnssSatelliteCountForStream } from '../gnss-slice.jsx';
 import {
     useVFODragHandlers,
     useVFOMouseHandlers,
@@ -54,85 +55,6 @@ import {
     isCenterLineOnly,
     isLockedBandwidth
 } from './vfo-config.js';
-
-const GNSS_CONSTELLATION_BY_CODE = {
-    G: 'GPS',
-    E: 'GALILEO',
-    R: 'GLONASS',
-    C: 'BEIDOU',
-    B: 'BEIDOU',
-    J: 'QZSS',
-};
-
-const normalizeGnssConstellation = (value) => {
-    if (!value) return '';
-    const raw = String(value).trim();
-    const upper = raw.toUpperCase();
-    if (GNSS_CONSTELLATION_BY_CODE[upper]) {
-        return GNSS_CONSTELLATION_BY_CODE[upper];
-    }
-    if (upper === 'GALILEO' || upper === 'GLONASS' || upper === 'BEIDOU' || upper === 'GPS' || upper === 'QZSS') {
-        return upper;
-    }
-    return raw.toUpperCase();
-};
-
-const parseGnssPrnValue = (value) => {
-    if (value === null || value === undefined) return null;
-    const match = String(value).toUpperCase().match(/(\d{1,3})/);
-    if (!match) return null;
-    const parsed = Number(match[1]);
-    return Number.isFinite(parsed) ? parsed : null;
-};
-
-const extractGnssSatelliteIdentity = (output) => {
-    if (!output) return null;
-
-    const code = String(output.satellite_system || '').trim().toUpperCase();
-    const prnFromFields = parseGnssPrnValue(output.satellite_prn);
-    if (code && Number.isFinite(prnFromFields)) {
-        return {
-            constellation: normalizeGnssConstellation(code),
-            prn: prnFromFields,
-        };
-    }
-
-    const satelliteText = String(output.satellite || '');
-    const prnNameMatch = satelliteText.match(/([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
-    if (prnNameMatch) {
-        const parsedPrn = parseGnssPrnValue(prnNameMatch[2]);
-        if (!Number.isFinite(parsedPrn)) {
-            return null;
-        }
-        return {
-            constellation: normalizeGnssConstellation(prnNameMatch[1]),
-            prn: parsedPrn,
-        };
-    }
-
-    const message = String(output.message || '');
-    const acqMatch = message.match(/for satellite\s+([A-Z])\s+(\d+)/i);
-    if (acqMatch) {
-        return {
-            constellation: normalizeGnssConstellation(acqMatch[1]),
-            prn: parseGnssPrnValue(acqMatch[2]),
-        };
-    }
-
-    const trackingMatch = message.match(/for satellite\s+([A-Za-z]+)\s+PRN\s+([A-Za-z]?\d+)/i);
-    if (trackingMatch) {
-        const parsedPrn = parseGnssPrnValue(trackingMatch[2]);
-        if (!Number.isFinite(parsedPrn)) {
-            return null;
-        }
-        return {
-            constellation: normalizeGnssConstellation(trackingMatch[1]),
-            prn: parsedPrn,
-        };
-    }
-
-    return null;
-};
 
 const VFOMarkersContainer = ({
                                  centerFrequency,
@@ -168,6 +90,8 @@ const VFOMarkersContainer = ({
         outputs: decoderOutputs,
         currentSessionId
     } = useSelector(state => state.decoders);
+    const gnssSatellitesById = useSelector(state => state.gnss.gnssSatellitesById);
+    const gnssFixLifecycle = useSelector(state => state.gnss.gnssFixLifecycle);
 
     // Get runtime snapshot for internal VFO data
     const runtimeSnapshot = useSelector(state => state.sessions?.runtimeSnapshot?.data);
@@ -357,31 +281,16 @@ const VFOMarkersContainer = ({
         };
     }, [decoderOutputs, getDecoderInfoForVFO]);
 
-    // Count unique satellites currently detected by GNSS outputs for this VFO/session.
-    const getGnssDetectedSatCountForVFO = useCallback((vfoNumber, sessionId = null) => {
-        const decoderInfo = getDecoderInfoForVFO(vfoNumber);
-        const effectiveSessionId = sessionId || decoderInfo?.session_id;
-        if (!effectiveSessionId) {
-            return 0;
-        }
-
-        const identities = new Set();
-        const outputs = decoderOutputs?.filter(
-            (out) => out.session_id === effectiveSessionId
-                && out.decoder_type === 'gnss'
-                && out.vfo === vfoNumber
-        ) || [];
-
-        for (const out of outputs) {
-            const identity = extractGnssSatelliteIdentity(out.output || {});
-            if (!identity || !identity.constellation || !Number.isFinite(identity.prn)) {
-                continue;
-            }
-            identities.add(`${identity.constellation}-${identity.prn}`);
-        }
-
-        return identities.size;
-    }, [decoderOutputs, getDecoderInfoForVFO]);
+    // Match the decoded table's verified count for the GNSS stream owning this VFO.
+    const getGnssVerifiedSatCountForVFO = useCallback((vfoNumber, decoderInfo = getDecoderInfoForVFO(vfoNumber)) => {
+        if (decoderInfo?.decoder_type !== 'gnss') return 0;
+        return getVerifiedGnssSatelliteCountForStream(
+            gnssSatellitesById,
+            gnssFixLifecycle,
+            decoderInfo.session_id,
+            vfoNumber,
+        );
+    }, [getDecoderInfoForVFO, gnssSatellitesById, gnssFixLifecycle]);
 
     // Get or create canvas context with caching
     const getCanvasContext = useCallback(() => {
@@ -605,7 +514,7 @@ const VFOMarkersContainer = ({
     useEffect(() => {
         queueVFOMarkerRender();
     }, [vfoActive, vfoMarkers, actualWidth, height,
-        centerFrequency, sampleRate, selectedVFO, streamingVFOs, vfoMuted, vfoSquelchOpen, containerWidth, currentPositionX, activeDecoders, decoderOutputs, runtimeSnapshot, queueVFOMarkerRender]);
+        centerFrequency, sampleRate, selectedVFO, streamingVFOs, vfoMuted, vfoSquelchOpen, containerWidth, currentPositionX, activeDecoders, decoderOutputs, gnssSatellitesById, gnssFixLifecycle, runtimeSnapshot, queueVFOMarkerRender]);
 
     // Rendering function with cached context
     const renderVFOMarkersDirect = () => {
@@ -698,7 +607,9 @@ const VFOMarkersContainer = ({
                 null, // no morse text
                 false, // not streaming
                 null, // no packet outputs
-                null, // no GNSS count
+                decoderInfo?.decoder_type === 'gnss'
+                    ? getGnssVerifiedSatCountForVFO(vfoNumber, decoderInfo)
+                    : null,
                 false, // not muted
                 VFO_AUDIO_STATUS.NO_AUDIO
             );
@@ -777,8 +688,8 @@ const VFOMarkersContainer = ({
 
             // Get packet decoder output info when this VFO has an AX.25 decoder.
             const packetOutputs = getPacketDecoderOutputsForVFO(parseInt(markerIdx));
-            const gnssDetectedSatCount = decoderInfo?.decoder_type === 'gnss'
-                ? getGnssDetectedSatCountForVFO(parseInt(markerIdx))
+            const gnssVerifiedSatCount = decoderInfo?.decoder_type === 'gnss'
+                ? getGnssVerifiedSatCountForVFO(parseInt(markerIdx))
                 : null;
 
             // Check if this VFO is currently streaming audio
@@ -805,7 +716,7 @@ const VFOMarkersContainer = ({
                 morseText,
                 isStreaming,
                 packetOutputs,
-                gnssDetectedSatCount,
+                gnssVerifiedSatCount,
                 isMuted,
                 audioStatus
             );
@@ -884,7 +795,7 @@ const VFOMarkersContainer = ({
                         secondaryLabelText = `${status.toUpperCase()} | ${decoderType.toUpperCase()} ${formattedBaudrate} | ${framing.toUpperCase()}`;
                     } else if (decoderType === 'gnss') {
                         const status = decoderInfo.status || 'listening';
-                        const satCount = getGnssDetectedSatCountForVFO(parseInt(key));
+                        const satCount = getGnssVerifiedSatCountForVFO(parseInt(key));
                         secondaryLabelText = `${status.toUpperCase()} | SAT ${satCount}`;
                     } else if (decoderType === 'lora') {
                         const status = decoderInfo.status || 'listening';
@@ -990,7 +901,7 @@ const VFOMarkersContainer = ({
 
         return { key: null, element: null };
     }, [vfoActive, actualWidth, startFreq, freqRange, selectedVFO,
-        edgeHandleHeight, edgeHandleYOffset, vfoMarkers, getCanvasContext, getDecoderInfoForVFO, getGnssDetectedSatCountForVFO]);
+        edgeHandleHeight, edgeHandleYOffset, vfoMarkers, getCanvasContext, getDecoderInfoForVFO, getGnssVerifiedSatCountForVFO]);
 
     // Use VFO mouse handlers
     const {

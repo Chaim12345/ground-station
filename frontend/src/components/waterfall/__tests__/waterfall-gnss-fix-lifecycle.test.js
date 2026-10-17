@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import reducer, {
     clearGnssInsightsHistory,
+    getVerifiedGnssSatelliteCountForStream,
     getVerifiedGnssSatellites,
     resetGnssFixLifecycle,
     updateGnssFixLifecycleFromOutput,
@@ -38,6 +39,45 @@ describe('waterfall gnss fix lifecycle', () => {
         expect(getVerifiedGnssSatellites(state.gnssSatellitesById)).toHaveLength(1);
         expect(state.gnssSatellitesById['GPS-12'].state).toBe('lost');
     });
+
+    it('counts the same verified satellites for the owning VFO marker as the table', () => {
+        let state = reducer(undefined, { type: '@@INIT' });
+        state = reducer(state, updateGnssFixLifecycleFromStatus({
+            decoder_type: 'gnss',
+            session_id: 'session-1',
+            vfo: 2,
+            status: 'starting',
+            timestamp: 99,
+        }));
+
+        for (const prn of [12, 13, 14, 15]) {
+            state = reducer(state, updateGnssFixLifecycleFromOutput({
+                decoder_type: 'gnss',
+                session_id: 'session-1',
+                vfo: 2,
+                timestamp: 100 + prn,
+                output: {
+                    satellite_system: 'G',
+                    satellite_prn: prn,
+                    event: 'tracking',
+                    navigation_verified: prn === 12,
+                },
+            }));
+        }
+
+        expect(Object.keys(state.gnssSatellitesById)).toHaveLength(4);
+        expect(getVerifiedGnssSatellites(state.gnssSatellitesById)).toHaveLength(1);
+        expect(getVerifiedGnssSatelliteCountForStream(
+            state.gnssSatellitesById, state.gnssFixLifecycle, 'session-1', 2,
+        )).toBe(1);
+        expect(getVerifiedGnssSatelliteCountForStream(
+            state.gnssSatellitesById, state.gnssFixLifecycle, 'session-1', 3,
+        )).toBe(0);
+        expect(getVerifiedGnssSatelliteCountForStream(
+            state.gnssSatellitesById, state.gnssFixLifecycle, 'session-2', 2,
+        )).toBe(0);
+    });
+
     it('accepts backend-authored gnss_fix_status for fix transitions', () => {
         let state = reducer(undefined, { type: '@@INIT' });
 

@@ -96,7 +96,7 @@ export const canvasDrawingUtils = {
         morseText = null,
         isStreaming = false,
         bpskOutputs = null,
-        gnssDetectedSatCount = null,
+        gnssVerifiedSatCount = null,
         isMuted = false,
         audioStatus = null
     ) => {
@@ -293,9 +293,9 @@ export const canvasDrawingUtils = {
                     ctx.textAlign = 'center';
                     ctx.fillText(decoderText, centerX, secondaryLabelTop + 12);
                 } else if (decoderType === 'gnss') {
-                    // GNSS-specific label format: status + currently detected satellites.
+                    // GNSS-specific label format: status + satellites with verified navigation data.
                     const status = decoderInfo.status || 'listening';
-                    const satCount = Number.isFinite(gnssDetectedSatCount) ? gnssDetectedSatCount : 0;
+                    const satCount = Number.isFinite(gnssVerifiedSatCount) ? gnssVerifiedSatCount : 0;
                     const decoderText = `${status.toUpperCase()} | SAT ${satCount}`;
 
                     ctx.font = '10px Monospace';
