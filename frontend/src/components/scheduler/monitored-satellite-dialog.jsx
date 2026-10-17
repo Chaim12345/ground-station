@@ -54,7 +54,8 @@ import {
     Switch,
     Tooltip,
 } from '@mui/material';
-import { Add as AddIcon, Close as CloseIcon, Delete as DeleteIcon, ExpandMore as ExpandMoreIcon, ErrorOutline as ErrorOutlineIcon } from '@mui/icons-material';
+import { Add as AddIcon, Close as CloseIcon, Delete as DeleteIcon, ExpandMore as ExpandMoreIcon, ErrorOutline as ErrorOutlineIcon, Memory as MemoryIcon, RadioButtonUnchecked as RadioButtonUncheckedIcon } from '@mui/icons-material';
+import { FaSatelliteDish } from 'react-icons/fa6';
 import {
     setMonitoredSatelliteDialogOpen,
     createMonitoredSatellite,
@@ -1239,15 +1240,21 @@ export default function MonitoredSatelliteDialog() {
                                     label={t('scheduler_dialogs.shared.rotator_label')}
                                 >
                                     <MenuItem value="__none__">
-                                        <em>{t('scheduler_dialogs.shared.none')}</em>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                            <RadioButtonUncheckedIcon sx={{ fontSize: '1rem', opacity: 0.8 }} />
+                                            {t('scheduler_dialogs.shared.none')}
+                                        </Box>
                                     </MenuItem>
                                     {rotators.map((rotator) => (
                                         <MenuItem key={rotator.id} value={rotator.id}>
-                                            <Box>
-                                                <Typography variant="body2">
-                                                    {rotator.name}{rotator.type ? ` (${rotator.type})` : ''}
-                                                </Typography>
-                                                <Typography variant="caption" color="text.secondary">
+                                            <Box sx={{ width: '100%', minWidth: 0 }}>
+                                                <Stack direction="row" spacing={1} alignItems="center">
+                                                    <FaSatelliteDish size={18} style={{ opacity: 0.7, flexShrink: 0 }} />
+                                                    <Typography variant="body2">
+                                                        {rotator.name}{rotator.type ? ` (${rotator.type})` : ''}
+                                                    </Typography>
+                                                </Stack>
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                                                     {[
                                                         rotator.host ? `${rotator.host}:${rotator.port}` : null,
                                                         (() => {
@@ -1527,6 +1534,7 @@ export default function MonitoredSatelliteDialog() {
                                             >
                                                 <Box sx={{ width: '100%', minWidth: 0 }}>
                                                     <Stack direction="row" spacing={1} alignItems="center">
+                                                        <MemoryIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
                                                         <Typography variant="body2">
                                                             {sdr.name} ({sdr.type})
                                                         </Typography>

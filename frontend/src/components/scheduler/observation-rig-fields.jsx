@@ -9,7 +9,38 @@
  */
 
 import React, { useId } from 'react';
-import { Box, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material';
+import { Box, FormControl, InputLabel, ListSubheader, MenuItem, Select, Stack, Typography } from '@mui/material';
+import RadioIcon from '@mui/icons-material/Radio';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+
+const BAND_ORDER = ['hf', 'vhf', 'uhf', 'l_band', 's_band', 'c_band', 'x_band', 'other'];
+
+const getBand = (frequencyHz) => {
+    const freqMHz = frequencyHz / 1000000;
+    if (freqMHz >= 30 && freqMHz < 300) return 'vhf';
+    if (freqMHz >= 300 && freqMHz < 1000) return 'uhf';
+    if (freqMHz >= 1000 && freqMHz < 2000) return 'l_band';
+    if (freqMHz >= 2000 && freqMHz < 4000) return 's_band';
+    if (freqMHz >= 4000 && freqMHz < 8000) return 'c_band';
+    if (freqMHz >= 8000 && freqMHz < 12000) return 'x_band';
+    if (freqMHz < 30) return 'hf';
+    return 'other';
+};
+
+const groupTransmittersByBand = (transmitters) => {
+    const grouped = {};
+    transmitters.forEach((transmitter) => {
+        const band = getBand(Number(transmitter.downlink_low));
+        if (!grouped[band]) grouped[band] = [];
+        grouped[band].push(transmitter);
+    });
+    return BAND_ORDER
+        .filter((band) => grouped[band])
+        .map((band) => ({
+            band,
+            transmitters: grouped[band].sort((a, b) => Number(a.downlink_low) - Number(b.downlink_low)),
+        }));
+};
 
 export function ObservationRigFields({ rig, rigs, transmitters, disabled, onChange, t }) {
     const rigLabelId = useId();
@@ -38,9 +69,27 @@ export function ObservationRigFields({ rig, rigs, transmitters, disabled, onChan
                             doppler_correction: event.target.value !== '__none__',
                         })}
                     >
-                        <MenuItem value="__none__"><em>{t('scheduler_dialogs.shared.none')}</em></MenuItem>
+                        <MenuItem value="__none__">
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <RadioButtonUncheckedIcon sx={{ fontSize: '1rem', opacity: 0.8 }} />
+                                {t('scheduler_dialogs.shared.none')}
+                            </Box>
+                        </MenuItem>
                         {rigs.map((item) => (
-                            <MenuItem key={item.id} value={item.id}>{item.name || item.id}</MenuItem>
+                            <MenuItem key={item.id} value={item.id}>
+                                <Box sx={{ width: '100%', minWidth: 0 }}>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                        <RadioIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                                        <Typography variant="body2">{item.name || item.id}</Typography>
+                                    </Stack>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        {[
+                                            item.host ? `${item.host}${item.port ? `:${item.port}` : ''}` : null,
+                                            item.radio_mode ? t('scheduler_dialogs.shared.mode_value', { value: item.radio_mode }) : null,
+                                        ].filter(Boolean).join(' • ') || t('scheduler_dialogs.shared.no_additional_details')}
+                                    </Typography>
+                                </Box>
+                            </MenuItem>
                         ))}
                     </Select>
                 </FormControl>
@@ -52,11 +101,41 @@ export function ObservationRigFields({ rig, rigs, transmitters, disabled, onChan
                         label={t('scheduler_dialogs.shared.observation_rig_transmitter')}
                         onChange={(event) => onChange({ ...rig, transmitter_id: event.target.value })}
                     >
-                        {available.map((transmitter) => (
-                            <MenuItem key={transmitter.id} value={String(transmitter.id)}>
-                                {transmitter.description || transmitter.id} — {(Number(transmitter.downlink_low) / 1000000).toFixed(3)} MHz
-                            </MenuItem>
-                        ))}
+                        {groupTransmittersByBand(available).map(({ band, transmitters: bandTransmitters }) => [
+                            <ListSubheader key={`header-${band}`}>
+                                {t(`scheduler_dialogs.shared.band_${band}`)}
+                            </ListSubheader>,
+                            ...bandTransmitters.map((transmitter) => (
+                                <MenuItem key={transmitter.id} value={String(transmitter.id)}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+                                        <Box sx={{
+                                            width: 8,
+                                            height: 8,
+                                            borderRadius: '50%',
+                                            backgroundColor: transmitter.alive ? '#4caf50' : '#f44336',
+                                            boxShadow: transmitter.alive
+                                                ? '0 0 6px rgba(76, 175, 80, 0.6)'
+                                                : '0 0 6px rgba(244, 67, 54, 0.6)',
+                                            flexShrink: 0,
+                                        }} />
+                                        <Box sx={{ flexGrow: 1 }}>
+                                            <Typography variant="body2">
+                                                {transmitter.description || t('unknown')} - {(Number(transmitter.downlink_low) / 1000000).toFixed(3)} MHz
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                                {[
+                                                    t('scheduler_dialogs.shared.source_value', { value: transmitter.source || t('unknown') }),
+                                                    transmitter.mode ? t('scheduler_dialogs.shared.mode_value', { value: transmitter.mode }) : null,
+                                                    transmitter.baud ? t('scheduler_dialogs.shared.baud_value', { value: transmitter.baud }) : null,
+                                                    transmitter.baudrate ? t('scheduler_dialogs.shared.baudrate_value', { value: transmitter.baudrate }) : null,
+                                                    transmitter.drift != null ? t('scheduler_dialogs.shared.drift_hz_value', { value: transmitter.drift }) : null,
+                                                ].filter(Boolean).join(' • ') || t('scheduler_dialogs.shared.no_additional_details')}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                </MenuItem>
+                            )),
+                        ])}
                     </Select>
                 </FormControl>
             </Stack>
