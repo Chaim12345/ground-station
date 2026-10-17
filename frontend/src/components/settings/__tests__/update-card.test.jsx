@@ -60,6 +60,8 @@ test('shows GitHub check errors and copies release commands', async () => {
     expect(screen.getByText('Check failed')).toBeInTheDocument();
     expect(screen.getByText('docker pull ghcr.io/sgoudelis/ground-station:1.3.0')).toBeInTheDocument();
     expect(screen.getByText(/--platform linux\/amd64[\s\S]*--network host/)).toBeInTheDocument();
+    expect(screen.getAllByText(/--network host[\s\S]*GS_HTTP_PORT=7000/)).toHaveLength(2);
+    expect(screen.getByText(/Docker ignores -p in this mode/)).toBeInTheDocument();
     expect(screen.getByText(/--platform linux\/arm64[\s\S]*-p 7000:7000/)).toBeInTheDocument();
 
     const copyButtons = screen.getAllByRole('button', { name: 'Copy command' });

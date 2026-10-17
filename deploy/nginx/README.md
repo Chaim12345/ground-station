@@ -1,6 +1,9 @@
 # Nginx Reverse Proxy
 
-The container already runs a small Nginx proxy on port 7000 to serve its startup lobby.
+The container runs a small Nginx proxy on port 7000 by default to serve its startup lobby.
+With host networking, set `GS_HTTP_PORT` in `docker run` to change that public port;
+the backend remains on `127.0.0.1:7001`. Adjust the upstream below if you change
+the public port.
 This example adds TLS in front of that public port. The Python backend listens only on
 `127.0.0.1:7001` inside the container.
 

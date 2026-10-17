@@ -49,6 +49,17 @@ jobs:
             ground-station-backend:test \
             /bin/bash -lc "/app/venv/bin/python -m pip install --no-cache-dir -r requirements-dev.txt && ALEMBIC_CONTEXT=1 /app/venv/bin/pytest"
 
+      - name: Check configurable Nginx listener
+        run: |
+          docker run --rm --entrypoint /bin/sh \
+            -e GS_HTTP_PORT=8080 ground-station-backend:test \
+            -c '/app/configure-nginx.sh && grep -Fq "listen 8080;" /etc/nginx/conf.d/ground-station.conf && grep -Fq "listen [::]:8080;" /etc/nginx/conf.d/ground-station.conf'
+          if docker run --rm --entrypoint /app/configure-nginx.sh \
+            -e GS_HTTP_PORT=7001 ground-station-backend:test; then
+            echo "Reserved backend port was accepted as the public port"
+            exit 1
+          fi
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         if: always()

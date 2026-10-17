@@ -365,6 +365,7 @@ const UpdateCard = () => {
                         <CodeBlock>{`docker run -d \\
   --platform linux/amd64 \\
   --network host \\
+  -e GS_HTTP_PORT=7000 \\
   --name ground-station \\
   --restart unless-stopped \\
   --device=/dev/bus/usb \\
@@ -379,12 +380,18 @@ const UpdateCard = () => {
                         <CodeBlock>{`docker run -d \\
   --platform linux/arm64 \\
   --network host \\
+  -e GS_HTTP_PORT=7000 \\
   --name ground-station \\
   --restart unless-stopped \\
   -v /dev:/dev \\
   --privileged \\
   -v /path/to/data:/app/backend/data \\
   ${IMAGE_NAME}:${imageVersion}`}</CodeBlock>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                            {t('maintenance.updates.host_network_port_note', {
+                                defaultValue: 'For a different HTTP port with host networking, change GS_HTTP_PORT=7000 to your chosen port. Docker ignores -p in this mode. The backend remains on port 7001.',
+                            })}
+                        </Typography>
 
                         <Typography variant="subtitle2" sx={{ mt: 2 }}>
                             {t('maintenance.updates.bridge_network_title', {
@@ -417,6 +424,11 @@ const UpdateCard = () => {
   --privileged \\
   -v /path/to/data:/app/backend/data \\
   ${IMAGE_NAME}:${imageVersion}`}</CodeBlock>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                            {t('maintenance.updates.bridge_network_port_note', {
+                                defaultValue: 'For a different HTTP port with bridge networking, change the host side of -p 7000:7000, for example to -p 8080:7000.',
+                            })}
+                        </Typography>
                     </li>
                 </Box>
 

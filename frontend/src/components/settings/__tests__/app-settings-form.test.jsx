@@ -42,6 +42,7 @@ function buildPayload({
     port = 5000,
     hostSource = 'file',
     hostLocked = false,
+    portLocked = false,
     portApplyMode = 'restart_required',
 } = {}) {
     return {
@@ -78,17 +79,17 @@ function buildPayload({
         },
         source: {
             host: hostSource,
-            port: 'file',
+            port: portLocked ? 'cli' : 'file',
         },
         locked: {
             host: hostLocked,
-            port: false,
+            port: portLocked,
         },
         defined_in_file: {
             host: true,
             port: true,
         },
-        overridden_by_cli: hostLocked ? ['host'] : [],
+        overridden_by_cli: [hostLocked && 'host', portLocked && 'port'].filter(Boolean),
     };
 }
 
@@ -102,9 +103,9 @@ describe('app-settings-form', () => {
     });
 
     it('loads and saves settings, then shows restart-required state', async () => {
-        const initialPayload = buildPayload({ hostLocked: true, hostSource: 'cli' });
+        const initialPayload = buildPayload();
         const updatedPayload = {
-            ...buildPayload({ host: '127.0.0.1', hostLocked: true, hostSource: 'cli' }),
+            ...buildPayload({ host: '127.0.0.1' }),
             changed_keys: ['host'],
             changed_hot_keys: [],
             changed_restart_keys: ['host'],
@@ -129,7 +130,6 @@ describe('app-settings-form', () => {
         expect(screen.getByRole('heading', { name: 'Application Settings' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
         expect(screen.getByText('2 settings')).toBeInTheDocument();
-        expect(screen.getByText('CLI override active')).toBeInTheDocument();
 
         fireEvent.change(screen.getByLabelText('Host'), {
             target: { value: '127.0.0.1' },
@@ -151,6 +151,27 @@ describe('app-settings-form', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Open Maintenance' }));
         expect(navigateMock).toHaveBeenCalledWith('/admin/system/maintenance?mtab=system-control');
+    });
+
+    it('keeps CLI-controlled backend ports read-only', async () => {
+        socketValue = {
+            emit: vi.fn((event, payload, callback) => {
+                if (event === 'api.call' && payload?.cmd === 'get-app-config') {
+                    callback({ success: true, data: buildPayload({ port: 7001, portLocked: true }) });
+                }
+            }),
+        };
+
+        render(<AppSettingsForm />);
+
+        expect(await screen.findByLabelText('Port')).toBeDisabled();
+        expect(screen.getByLabelText('Host')).not.toBeDisabled();
+        expect(screen.getByText('Set by startup command (read-only)')).toBeInTheDocument();
+        expect(socketValue.emit).not.toHaveBeenCalledWith(
+            'api.call',
+            expect.objectContaining({ cmd: 'update-app-config' }),
+            expect.any(Function)
+        );
     });
 
     it('renders backend validation errors when save fails', async () => {

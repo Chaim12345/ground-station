@@ -590,6 +590,7 @@ Uses host networking to enable automatic mDNS discovery of SoapySDR remote serve
 docker run -d \
   --platform linux/amd64 \
   --network host \
+  -e GS_HTTP_PORT=7000 \
   --name ground-station \
   --restart unless-stopped \
   --device=/dev/bus/usb \
@@ -601,6 +602,7 @@ docker run -d \
 docker run -d \
   --platform linux/arm64 \
   --network host \
+  -e GS_HTTP_PORT=7000 \
   --name ground-station \
   --restart unless-stopped \
   -v /dev:/dev \
@@ -639,13 +641,16 @@ docker run -d \
 
 **Important Notes:**
 - Replace `/path/to/data` with your desired data directory path
+- With host networking, change `GS_HTTP_PORT=7000` to choose the HTTP port (for example, `GS_HTTP_PORT=8080`). Docker ignores `-p` in this mode.
+- With bridge networking, change the host side of `-p 7000:7000` (for example, `-p 8080:7000`). Leave the container port at 7000.
+- The backend stays on `127.0.0.1:7001` inside the container; its port is controlled by the image startup command.
 - Option 1 (host networking) is required for automatic discovery of SoapySDR remote servers via mDNS
 - Option 2 works for local SDRs and all other features
 - For Raspberry Pi hardware, only the Raspberry Pi 5 is recommended
 - For ARM64, using `-v /dev:/dev` ensures all USB devices are accessible
-- Access the web interface at `http://<YOUR_HOST>:7000`
+- Access the web interface at `http://<YOUR_HOST>:7000`, or at the host port selected above.
 - While the backend initializes, a lobby page appears and opens the app automatically when it is ready.
-- For readiness checks, use `GET http://<YOUR_HOST>:7000/api/ready`; it returns HTTP 200 only after the backend is serving requests.
+- For readiness checks, use `GET http://<YOUR_HOST>:<HTTP_PORT>/api/ready`; it returns HTTP 200 only after the backend is serving requests.
 - For TLS reverse-proxy deployments, see [deploy/nginx/README.md](deploy/nginx/README.md)
 
 ### Private DNS and HTTPS services in Docker

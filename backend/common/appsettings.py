@@ -418,6 +418,12 @@ class AppSettingsService:
 
         for key, input_value in updates.items():
             field = FIELDS_BY_KEY[key]
+            if key in app_config_cli_overrides:
+                # Saving a CLI-controlled value would report success but never change the runtime.
+                validation_errors[key] = (
+                    "Controlled by a startup command; change that command instead"
+                )
+                continue
             try:
                 normalized_value = _validate_value(field, input_value)
             except Exception as exc:

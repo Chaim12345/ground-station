@@ -570,8 +570,10 @@ COPY backend/ ./backend/
 COPY backend/startup.sh /app/startup.sh
 RUN chmod +x /app/startup.sh
 
-# The public port stays available while UHD images and the backend initialize.
-COPY deploy/nginx/container.conf /etc/nginx/conf.d/ground-station.conf
+# Render the public listener port at startup before serving the lobby.
+COPY deploy/nginx/container.conf /app/ground-station.conf.template
+COPY deploy/nginx/configure.sh /app/configure-nginx.sh
+RUN chmod +x /app/configure-nginx.sh
 RUN rm -f /etc/nginx/sites-enabled/default
 COPY deploy/nginx/lobby.html /app/lobby/lobby.html
 COPY frontend/public/gs-logo-green-blue.png /app/lobby/logo.png

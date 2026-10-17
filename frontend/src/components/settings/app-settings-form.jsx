@@ -269,12 +269,15 @@ const AppSettingsForm = () => {
     const changedKeys = useMemo(() => {
         return fields
             .filter((field) => {
+                if (payload?.locked?.[field.key]) {
+                    return false;
+                }
                 const current = normalizeDraftForCompare(field, draft[field.key]);
                 const baseline = normalizeDraftForCompare(field, savedDraft[field.key]);
                 return JSON.stringify(current) !== JSON.stringify(baseline);
             })
             .map((field) => field.key);
-    }, [draft, fields, savedDraft]);
+    }, [draft, fields, payload?.locked, savedDraft]);
 
     const isDirty = changedKeys.length > 0;
 
@@ -439,7 +442,7 @@ const AppSettingsForm = () => {
 });
     };
 
-    const renderFieldControl = (field) => {
+    const renderFieldControl = (field, locked) => {
         const fieldKey = field.key;
         const value = draft[fieldKey];
         const validationMessage = validationErrors[fieldKey];
@@ -476,7 +479,7 @@ const AppSettingsForm = () => {
                             <Switch
                                 checked={Boolean(value)}
                                 onChange={(event) => handleFieldChange(fieldKey, event.target.checked)}
-                                disabled={loading || saving}
+                                disabled={loading || saving || locked}
                             />
                         }
                         label={
@@ -510,7 +513,7 @@ const AppSettingsForm = () => {
                     onChange={(event) => handleFieldChange(fieldKey, event.target.value)}
                     helperText={validationMessage || helperText}
                     error={Boolean(validationMessage)}
-                    disabled={loading || saving}
+                    disabled={loading || saving || locked}
                     FormHelperTextProps={{ sx: helperTextSx }}
                 />
             );
@@ -527,7 +530,7 @@ const AppSettingsForm = () => {
                     onChange={(event) => handleFieldChange(fieldKey, event.target.value)}
                     helperText={validationMessage || helperText}
                     error={Boolean(validationMessage)}
-                    disabled={loading || saving}
+                    disabled={loading || saving || locked}
                     FormHelperTextProps={{ sx: helperTextSx }}
                 >
                     {field.choices.map((choice) => (
@@ -553,7 +556,7 @@ const AppSettingsForm = () => {
                 onChange={(event) => handleFieldChange(fieldKey, event.target.value)}
                 helperText={validationMessage || helperText}
                 error={Boolean(validationMessage)}
-                disabled={loading || saving}
+                disabled={loading || saving || locked}
                 FormHelperTextProps={{ sx: helperTextSx }}
                 inputProps={isInteger ? { min: field.minimum, max: field.maximum, step: 1 } : undefined}
                 InputProps={
@@ -748,7 +751,7 @@ const AppSettingsForm = () => {
                                                 </Typography>
                                                 {locked && (
                                                     <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
-                                                        {t('app_settings.locked', { defaultValue: 'CLI override active' })}
+                                                        {t('app_settings.locked', { defaultValue: 'Set by startup command (read-only)' })}
                                                     </Typography>
                                                 )}
                                                 {!definedInFile && (
@@ -757,7 +760,7 @@ const AppSettingsForm = () => {
                                                     </Typography>
                                                 )}
                                             </SettingsMetaRow>
-                                            {renderFieldControl(field)}
+                                            {renderFieldControl(field, locked)}
                                         </Box>
                                     </Grid>
                                 );

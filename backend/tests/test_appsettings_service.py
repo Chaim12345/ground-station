@@ -65,6 +65,18 @@ def test_update_returns_validation_errors(tmp_path):
     assert "port" in result["data"]["validation_errors"]
 
 
+def test_update_rejects_cli_controlled_port_without_writing_config(tmp_path, monkeypatch):
+    service = _build_service(tmp_path)
+    _write_json(service.config_path, {"port": 5000})
+    monkeypatch.setattr(appsettings, "app_config_cli_overrides", {"port"})
+
+    result = service.update({"port": 8080})
+
+    assert result["success"] is False
+    assert "startup command" in result["data"]["validation_errors"]["port"]
+    assert _read_json(service.config_path)["port"] == 5000
+
+
 def test_update_hot_apply_updates_runtime_and_removes_legacy_alias(tmp_path, monkeypatch):
     service = _build_service(tmp_path)
     _write_json(

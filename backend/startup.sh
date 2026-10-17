@@ -2,8 +2,11 @@
 # Startup script for Ground Station with conditional UHD device support
 
 # Serve the lobby before the blocking UHD download and backend initialization.
+if ! /app/configure-nginx.sh; then
+    exit 1
+fi
 if ! nginx; then
-    echo "ERROR: Nginx failed to start"
+    echo "ERROR: Nginx failed to start on port ${GS_HTTP_PORT-7000}"
     exit 1
 fi
 

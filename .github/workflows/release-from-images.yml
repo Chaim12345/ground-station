@@ -107,6 +107,7 @@ jobs:
             docker run -d \
               --platform linux/amd64 \
               --network host \
+              -e GS_HTTP_PORT=7000 \
               --name ground-station \
               --restart unless-stopped \
               --device=/dev/bus/usb \
@@ -120,6 +121,7 @@ jobs:
             docker run -d \
               --platform linux/arm64 \
               --network host \
+              -e GS_HTTP_PORT=7000 \
               --name ground-station \
               --restart unless-stopped \
               -v /dev:/dev \
@@ -158,9 +160,11 @@ jobs:
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_version }}
             ```
 
+            > **Port selection:** In host-network mode, change `GS_HTTP_PORT=7000` to your desired HTTP port, such as `GS_HTTP_PORT=8080`. Docker ignores `-p` in this mode. In bridge mode, change the host side of `-p 7000:7000`, such as `-p 8080:7000`; keep the container side at 7000. The backend remains on `127.0.0.1:7001` inside the container.
+
             > **Note:** Replace `/path/to/data` with your desired data directory path. For ARM64, using `-v /dev:/dev` ensures all USB devices are accessible.
 
-            After starting the container, access the web interface at `http://<YOUR_HOST>:7000`
+            After starting the container, access the web interface at `http://<YOUR_HOST>:<HTTP_PORT>` (7000 by default).
 
             > **First startup note:** On first run, it can take up to ~30 seconds after container startup for the frontend to become available.
             >
@@ -178,7 +182,7 @@ jobs:
             # Pull the new version
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_version }}
 
-            # Run the container again (use the appropriate command above for your architecture)
+            # Run the container again (use the appropriate command above for your architecture and retain your HTTP port choice)
             ```
 
             ### Multi-arch support:
