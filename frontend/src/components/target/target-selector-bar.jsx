@@ -396,6 +396,9 @@ const TargetSelectorBar = React.memo(function TargetSelectorBar() {
             const instanceTrackerId = String(instance?.tracker_id || '').trim();
             if (!instanceTrackerId) return false;
             if (parseTargetSlotNumber(instanceTrackerId) !== null) return true;
+            // A failed disconnect keeps OBS alive for manual recovery, even after
+            // the observation itself has reached a terminal status.
+            if (instanceTrackerId.startsWith('obs-')) return true;
             return runningObservationTrackerIds.has(instanceTrackerId);
         });
     }, [trackerInstances, runningObservationTrackerIds]);
@@ -964,8 +967,8 @@ const TargetSelectorBar = React.memo(function TargetSelectorBar() {
         }) || 'No target';
         const targetIdentifier = getTrackingTargetIdentifier(effectiveTrackingState) || 'none';
         const rotatorId = view?.selectedRotator || instance?.rotator_id || effectiveTrackingState?.rotator_id || 'none';
-        // Observations reuse the backend's rotator owner. UI selections can be stale
-        // after an automated assignment, so use the instance's ownership snapshot.
+        // Observation hardware belongs to the temporary OBS slot while it runs.
+        // Use the instance snapshot because local selections can lag a handoff.
         const normalizedTabRotatorId = normalizeAssignedResourceId(instance?.rotator_id);
         const rigId = view?.selectedRadioRig || instance?.rig_id || effectiveTrackingState?.rig_id || 'none';
         const rotatorName = String(rotatorId) === 'none'

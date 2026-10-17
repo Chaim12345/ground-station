@@ -76,6 +76,7 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
  *   },
  *   rig: {
  *     id: string | null,
+ *     transmitter_id: string,
  *     doppler_correction: boolean,
  *     vfo: string ('VFO_A', 'VFO_B')
  *   },

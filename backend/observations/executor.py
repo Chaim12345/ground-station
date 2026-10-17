@@ -71,7 +71,7 @@ KNOWN_SATDUMP_PIPELINES = {
 
 RESTART_INTERRUPTION_REASON = "Backend restarted while observation was running"
 SHUTDOWN_INTERRUPTION_REASON = "Backend shutdown interrupted observation"
-INTERRUPTION_CLEANUP_TIMEOUT_SECONDS = 15
+INTERRUPTION_CLEANUP_TIMEOUT_SECONDS = 90
 
 
 class ObservationExecutor:
@@ -428,7 +428,7 @@ class ObservationExecutor:
                 return {"success": False, "error": error_msg}
 
             # 3. If rotator is required and currently parked, either unpark or cancel
-            rotator_config = observation.get("rotator", {})
+            rotator_config = observation.get("rotator", {}) or {}
             if rotator_config.get("tracking_enabled") and rotator_config.get("id"):
                 tracker_id = self._resolve_tracker_id(rotator_config)
                 if not tracker_id:
@@ -517,10 +517,11 @@ class ObservationExecutor:
             for session in sessions:
                 combined_tasks.extend(session.get("tasks", []) if isinstance(session, dict) else [])
 
-            rotator_config = observation.get("rotator", {})
+            rotator_config = observation.get("rotator", {}) or {}
+            rig_config = observation.get("rig", {}) or {}
             satellite = observation.get("satellite", {})
             tracker_start_result = await self.tracker_handler.start_tracker_task(
-                observation_id, satellite, rotator_config, combined_tasks
+                observation_id, satellite, rotator_config, combined_tasks, rig_config
             )
             if not tracker_start_result.get("success"):
                 tracker_error = tracker_start_result.get("error", "tracker_start_failed")
@@ -674,7 +675,7 @@ class ObservationExecutor:
 
         This method:
         1. Stops SDR process (cascades to decoders/recorders)
-        2. Applies rotator stop policy (leave connected by default, optional park)
+        2. Disconnects observation hardware and closes its temporary target
         3. Cleans up internal VFO session
         4. Updates observation status to COMPLETED
 
@@ -1038,7 +1039,7 @@ class ObservationExecutor:
         logger.info(f"Observation ID: {observation_id}")
 
         try:
-            # 1. Stop tracker / optionally park rotator based on observation rotator config
+            # 1. Release observation hardware and remove its temporary tracker.
             rotator_config = observation.get("rotator", {}) or {}
             tracker_context = self._tracker_context_by_observation.get(observation_id)
             tracker_stop_ok = await self.tracker_handler.stop_tracker_task(
@@ -1064,6 +1065,10 @@ class ObservationExecutor:
             logger.info(
                 f"Observation task {observation_id} cleaned up (decoders stopped, sessions unregistered, VFOs cleaned)"
             )
+            if not tracker_stop_ok:
+                raise RuntimeError(
+                    "OBS hardware disconnect could not be confirmed; OBS slot retained"
+                )
 
         except Exception as e:
             logger.error(f"Failed to stop observation {observation_id}: {e}")

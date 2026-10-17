@@ -7,103 +7,211 @@
 #
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""Tracker task handler - manages rotator tracking lifecycle."""
+"""Temporary tracker and hardware lifecycle for automated observations."""
 
 import asyncio
-import traceback
+import time
 from typing import Any, Dict, List, Optional
 
 from common.logger import logger
 from crud import trackingstate as trackingstate_crud
+from crud import transmitters as transmitters_crud
 from db import AsyncSessionLocal
 from tracker.contracts import get_tracking_state_name
 from tracker.instances import emit_tracker_instances
-from tracker.operations import operations
+from tracker.operations import TERMINAL, operations
 from tracker.runner import (
     create_observation_tracker_slot,
+    get_all_tracker_managers,
     get_assigned_tracker_for_rotator,
     get_tracker_manager,
     remove_tracker_instance,
 )
 from tracker.stateupdate import update_tracking_state_with_ownership
 
+# Serialize observation handoffs. Worker status messages still run while this lock
+# is held, so physical disconnections can be confirmed before ownership moves.
+_handoff_lock = asyncio.Lock()
+COMMAND_TIMEOUT_SECONDS = 35
+
+
+class TrackerHandoffError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
 
 class TrackerHandler:
-    """Handles rotator tracking lifecycle for observations."""
+    """Owns the pass-scoped OBS slot and its optional rotator and rig."""
 
     def __init__(self, sio: Optional[Any] = None):
         self.sio = sio
 
     async def _emit_tracker_instances_snapshot(self) -> None:
-        if self.sio is None:
-            return
-        try:
-            await emit_tracker_instances(self.sio)
-        except Exception as exc:
-            logger.warning("Failed to emit tracker instance snapshot: %s", exc)
+        if self.sio is not None:
+            try:
+                await emit_tracker_instances(self.sio)
+            except Exception as exc:
+                logger.warning("Failed to emit tracker instance snapshot: %s", exc)
 
     @staticmethod
     def _extract_transmitter_id(tasks: List[Dict[str, Any]]) -> str:
-        """Extract transmitter ID from decoder tasks (if any)."""
         for task in tasks:
             if task.get("type") == "decoder":
-                return str(task.get("config", {}).get("transmitter_id", "none"))
+                return str(task.get("config", {}).get("transmitter_id") or "none")
         return "none"
 
-    async def _remove_observation_tracker_instance(self, tracker_id: str) -> bool:
-        """
-        Remove an observation-owned tracker runtime and its persisted tracking state row.
-
-        Used for ephemeral tracker slots created for observations without rotator ownership.
-        """
-        try:
-            # Keep the lock free while the process flushes its output queue. The queue
-            # consumer may need the same lock to process its final hardware snapshot.
-            remove_result = await asyncio.to_thread(remove_tracker_instance, tracker_id)
-            if remove_result.get("success"):
-                async with operations.lock:
-                    operations.forget_tracker(tracker_id)
-            if not remove_result.get("success"):
-                logger.warning(
-                    "Failed to remove observation tracker instance %s: %s",
-                    tracker_id,
-                    remove_result,
-                )
-                return False
-
-            state_name = get_tracking_state_name(tracker_id)
-            async with AsyncSessionLocal() as dbsession:
-                delete_reply = await trackingstate_crud.delete_tracking_state(dbsession, state_name)
-            if not delete_reply.get("success"):
-                logger.warning(
-                    "Failed deleting tracking state '%s' for observation tracker %s: %s",
-                    state_name,
-                    tracker_id,
-                    delete_reply,
-                )
-                return False
-
-            await self._emit_tracker_instances_snapshot()
-            return True
-        except Exception as exc:
-            logger.warning("Error removing observation tracker %s: %s", tracker_id, exc)
-            return False
+    @staticmethod
+    def _assigned(value: Any) -> bool:
+        return value is not None and str(value).strip().lower() not in {"", "none"}
 
     @staticmethod
-    def _resolve_tracker_id(rotator_config: Dict[str, Any]) -> str:
-        owner_tracker_id = get_assigned_tracker_for_rotator(rotator_config.get("id"))
-        if owner_tracker_id is None:
-            return ""
-        tracker_id = str(owner_tracker_id).strip()
-        if not tracker_id or tracker_id.lower() == "none":
-            return ""
-        return tracker_id
+    async def _rig_transmitter_exists(norad_id: Any, transmitter_id: Any) -> bool:
+        async with AsyncSessionLocal() as dbsession:
+            reply = await transmitters_crud.fetch_transmitters_for_satellite(
+                dbsession, norad_id=norad_id
+            )
+        return bool(
+            reply.get("success")
+            and any(
+                str(item.get("id")) == str(transmitter_id)
+                and float(item.get("downlink_low") or 0) > 0
+                for item in reply.get("data") or []
+            )
+        )
+
+    async def _update_and_confirm(
+        self, tracker_id: str, value: Dict[str, Any], observation_id: str
+    ) -> None:
+        deadline = time.monotonic() + COMMAND_TIMEOUT_SECONDS
+        while True:
+            reply = await update_tracking_state_with_ownership(
+                tracker_id=tracker_id,
+                value=value,
+                requester_sid=f"observation:{observation_id}",
+                # An explicit operation confirms a Disconnect even when the desired
+                # state already says disconnected but hardware telemetry disagrees.
+                operation={"action": "configure"},
+            )
+            if reply.get("success"):
+                break
+            error = str(reply.get("error") or "tracker_update_failed")
+            if (
+                "command is already in progress" not in error.lower()
+                or time.monotonic() >= deadline
+            ):
+                raise TrackerHandoffError(error, str(reply.get("message") or error))
+            await asyncio.sleep(0.1)
+        result = reply.get("result") or {}
+        command_id = result.get("command_id") or result.get("command", {}).get("command_id")
+        if not command_id:
+            raise TrackerHandoffError("missing_command", "Tracker update returned no command ID")
+
+        while time.monotonic() < deadline:
+            async with operations.lock:
+                command = operations.existing(command_id, tracker_id)
+            if command and command.get("status") in TERMINAL:
+                if command["status"] == "succeeded":
+                    return
+                raise TrackerHandoffError(
+                    "hardware_command_failed",
+                    f"Tracker {tracker_id} command {command_id} {command['status']}: "
+                    f"{command.get('reason') or 'no reason reported'}",
+                )
+            if command and command.get("status") == "unknown":
+                raise TrackerHandoffError(
+                    "hardware_command_unknown",
+                    f"Tracker {tracker_id} command outcome is unknown: {command.get('reason')}",
+                )
+            await asyncio.sleep(0.1)
+        raise TrackerHandoffError(
+            "hardware_command_timeout",
+            f"Timed out waiting for tracker {tracker_id} to confirm {value}",
+        )
+
+    async def _disconnect_slot_hardware(
+        self, tracker_id: str, observation_id: str, *, rotator: bool, rig: bool
+    ) -> None:
+        manager = get_tracker_manager(tracker_id)
+        state = await manager.get_tracking_state() or {}
+        # Disconnect first, then clear each assignment. Changing an ID in the
+        # same update as its state is rejected by TrackerManager.
+        if rig and self._assigned(state.get("rig_id")):
+            await self._update_and_confirm(
+                tracker_id, {"rig_state": "disconnected"}, observation_id
+            )
+            await self._update_and_confirm(
+                tracker_id, {"rig_id": "none", "rig_vfo": "none"}, observation_id
+            )
+        if rotator and self._assigned(state.get("rotator_id")):
+            await self._update_and_confirm(
+                tracker_id, {"rotator_state": "disconnected"}, observation_id
+            )
+            await self._update_and_confirm(tracker_id, {"rotator_id": "none"}, observation_id)
+
+    async def _release_existing_hardware(
+        self, observation_id: str, rotator_id: Any, rig_id: Any
+    ) -> None:
+        rotator_owner = (
+            get_assigned_tracker_for_rotator(rotator_id) if self._assigned(rotator_id) else None
+        )
+        if rotator_owner:
+            if str(rotator_owner).startswith("obs-"):
+                raise TrackerHandoffError(
+                    "rotator_in_use", f"Rotator is in use by observation slot {rotator_owner}"
+                )
+            # Any rig on the rotator's old slot also belongs to that interactive
+            # setup; release it before transferring the rotator to OBS.
+            await self._disconnect_slot_hardware(
+                str(rotator_owner), observation_id, rotator=True, rig=True
+            )
+
+        if self._assigned(rig_id):
+            # Rigs have no central assignment map. Inspect live tracker states,
+            # including disconnected assignments that still reserve a slot.
+            for tracker_id, manager in list(get_all_tracker_managers().items()):
+                state = await manager.get_tracking_state() or {}
+                if str(state.get("rig_id")) != str(rig_id):
+                    continue
+                if tracker_id.startswith("obs-"):
+                    raise TrackerHandoffError(
+                        "rig_in_use", f"Rig is in use by observation slot {tracker_id}"
+                    )
+                await self._disconnect_slot_hardware(
+                    tracker_id, observation_id, rotator=False, rig=True
+                )
+
+    async def _remove_observation_tracker_instance(self, tracker_id: str) -> bool:
+        try:
+            # Removal flushes the worker queue; its consumer needs operations.lock.
+            remove_result = await asyncio.to_thread(remove_tracker_instance, tracker_id)
+            if not remove_result.get("success"):
+                logger.warning(
+                    "Failed to remove observation tracker %s: %s", tracker_id, remove_result
+                )
+                return False
+            async with operations.lock:
+                operations.forget_tracker(tracker_id)
+            async with AsyncSessionLocal() as dbsession:
+                reply = await trackingstate_crud.delete_tracking_state(
+                    dbsession, get_tracking_state_name(tracker_id)
+                )
+            if not reply.get("success"):
+                logger.warning(
+                    "Failed to delete observation tracker state %s: %s", tracker_id, reply
+                )
+                return False
+            await self._emit_tracker_instances_snapshot()
+            return True
+        except Exception:
+            logger.exception("Error removing observation tracker %s", tracker_id)
+            return False
 
     async def start_tracker_task(
         self,
@@ -111,164 +219,131 @@ class TrackerHandler:
         satellite: Dict[str, Any],
         rotator_config: Dict[str, Any],
         tasks: List[Dict[str, Any]],
+        rig_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Start rotator tracking for an observation.
-
-        Args:
-            observation_id: The observation ID
-            satellite: Satellite information dict
-            rotator_config: Rotator configuration dict
-            tasks: List of observation tasks
-
-        Returns:
-            Dictionary with success/failure metadata
-        """
+        """Release interactive hardware, then create and configure a new OBS slot."""
+        rig_config = rig_config or {}
+        rotator_id = rotator_config.get("id")
+        rig_id = rig_config.get("id")
+        transmitter_id = (
+            rig_config.get("transmitter_id")
+            if self._assigned(rig_id)
+            else self._extract_transmitter_id(tasks)
+        )
         tracker_id = ""
-        has_rotator = bool(rotator_config.get("id"))
-        uses_observation_slot = False
-        try:
-            norad_id = satellite.get("norad_id")
-            if not norad_id:
-                return {
-                    "success": False,
-                    "error": "missing_target",
-                    "message": "Observation has no target NORAD ID; tracker startup is mandatory.",
-                }
-
-            tracking_enabled = bool(rotator_config.get("tracking_enabled"))
-            transmitter_id = self._extract_transmitter_id(tasks)
-            rotator_id = rotator_config.get("id") if has_rotator else None
-            satellite_name = str(satellite.get("name") or norad_id).strip() or str(norad_id)
-
-            # Reuse existing target owner when available. Otherwise, use a dedicated
-            # observation-scoped tracker slot that will be removed after the pass.
-            if has_rotator:
-                owner_tracker_id = get_assigned_tracker_for_rotator(rotator_id)
-                if owner_tracker_id:
-                    tracker_resolution = {
-                        "success": True,
-                        "tracker_id": owner_tracker_id,
-                        "created": False,
-                    }
-                else:
-                    tracker_resolution = create_observation_tracker_slot(observation_id)
-                    uses_observation_slot = True
-            else:
-                tracker_resolution = create_observation_tracker_slot(observation_id)
-                uses_observation_slot = True
-
-            if not tracker_resolution.get("success"):
-                return {
-                    "success": False,
-                    "error": tracker_resolution.get("error", "tracker_resolution_failed"),
-                    "message": (
-                        tracker_resolution.get("message") or "Failed to resolve tracker slot."
-                    ),
-                }
-            tracker_id = str(tracker_resolution.get("tracker_id", "")).strip()
-            if not tracker_id:
-                return {
-                    "success": False,
-                    "error": "invalid_tracker_id",
-                    "message": "Tracker resolution returned an invalid tracker ID.",
-                }
-
-            if has_rotator and uses_observation_slot:
-                logger.info(
-                    "Created observation tracker slot %s for rotator %s (observation %s)",
-                    tracker_id,
-                    rotator_id,
-                    observation_id,
-                )
-            elif uses_observation_slot:
-                logger.info(
-                    "Created observation tracker slot %s for observation %s (no rotator)",
-                    tracker_id,
-                    observation_id,
-                )
-
-            tracker_manager = get_tracker_manager(tracker_id)
-
-            requested_rotator_state = "disconnected"
-            requested_rotator_id = rotator_id if has_rotator else "none"
-
-            if has_rotator and tracking_enabled:
-                requested_rotator_state = "tracking"
-                unpark_before_tracking = bool(rotator_config.get("unpark_before_tracking", False))
-                tracking_state = await tracker_manager.get_tracking_state() or {}
-                current_rotator_state = str(tracking_state.get("rotator_state", "")).lower()
-
-                # Optional unpark step before switching to tracking mode.
-                if current_rotator_state == "parked" and unpark_before_tracking:
-                    unpark_reply: Dict[str, Any] = await update_tracking_state_with_ownership(
-                        tracker_id=tracker_id,
-                        value={
-                            "rotator_state": "connected",
-                            "rotator_id": rotator_id,
-                        },
-                        requester_sid=f"observation:{observation_id}",
-                    )
-                    if not unpark_reply.get("success"):
-                        return unpark_reply
-                    await asyncio.sleep(0.2)
-
-            tracking_reply: Dict[str, Any] = await update_tracking_state_with_ownership(
-                tracker_id=tracker_id,
-                value={
-                    # Observation hijack must fully retarget tracker identity, not only NORAD.
-                    # If command/body fields are left behind, the UI can keep rendering the
-                    # previous mission/body identity for this slot.
-                    "target_type": "satellite",
-                    "target_name": satellite_name,
-                    "norad_id": norad_id,
-                    "group_id": satellite.get("group_id"),
-                    "command": None,
-                    "body_id": None,
-                    "rotator_state": requested_rotator_state,
-                    "rotator_id": requested_rotator_id,
-                    "rig_state": "disconnected",  # Observations don't use rig for now
-                    "rig_id": "none",
-                    "transmitter_id": transmitter_id,
-                    "rig_vfo": "none",
-                    "vfo1": "uplink",
-                    "vfo2": "downlink",
-                },
-                requester_sid=f"observation:{observation_id}",
-            )
-            if not tracking_reply.get("success"):
-                if uses_observation_slot:
-                    await self._remove_observation_tracker_instance(tracker_id)
-                return tracking_reply
-
-            await self._emit_tracker_instances_snapshot()
-
-            logger.info(
-                "Started tracker %s for observation %s: sat=%s (NORAD %s), mode=%s",
-                tracker_id,
-                observation_id,
-                satellite.get("name"),
-                norad_id,
-                "tracking" if requested_rotator_state == "tracking" else "context-only",
-            )
-            return {
-                "success": True,
-                "tracker_id": tracker_id,
-                "created": bool(tracker_resolution.get("created", False)),
-                "reused_existing": not bool(tracker_resolution.get("created", False)),
-                "ephemeral": uses_observation_slot,
-            }
-
-        except Exception as e:
-            if tracker_id and uses_observation_slot:
-                await self._remove_observation_tracker_instance(tracker_id)
-            logger.error(f"Error starting tracker: {e}")
-            logger.error(traceback.format_exc())
+        if not satellite.get("norad_id"):
             return {
                 "success": False,
-                "error": "tracker_start_failed",
-                "message": str(e),
+                "error": "missing_target",
+                "message": "Observation has no target NORAD ID",
             }
+        if self._assigned(rig_id) and not self._assigned(transmitter_id):
+            return {
+                "success": False,
+                "error": "missing_rig_transmitter",
+                "message": "Select a transmitter when using an observation rig",
+            }
+        if self._assigned(rig_id) and not await self._rig_transmitter_exists(
+            satellite["norad_id"], transmitter_id
+        ):
+            return {
+                "success": False,
+                "error": "invalid_rig_transmitter",
+                "message": "The selected rig transmitter has no downlink frequency for this satellite",
+            }
+
+        async with _handoff_lock:
+            try:
+                await self._release_existing_hardware(observation_id, rotator_id, rig_id)
+                resolution = create_observation_tracker_slot(observation_id)
+                if not resolution.get("success"):
+                    raise TrackerHandoffError(
+                        str(resolution.get("error") or "slot_creation_failed"),
+                        str(resolution.get("message") or "Could not create OBS slot"),
+                    )
+                tracker_id = str(resolution["tracker_id"])
+                get_tracker_manager(tracker_id)
+                await self._update_and_confirm(
+                    tracker_id,
+                    {
+                        "target_type": "satellite",
+                        "target_name": str(satellite.get("name") or satellite["norad_id"]),
+                        "norad_id": satellite["norad_id"],
+                        "group_id": satellite.get("group_id"),
+                        "command": None,
+                        "body_id": None,
+                        "rotator_state": (
+                            "tracking"
+                            if self._assigned(rotator_id) and rotator_config.get("tracking_enabled")
+                            else "disconnected"
+                        ),
+                        "rotator_id": rotator_id if self._assigned(rotator_id) else "none",
+                        "rig_state": "tracking" if self._assigned(rig_id) else "disconnected",
+                        "rig_id": rig_id if self._assigned(rig_id) else "none",
+                        "transmitter_id": str(transmitter_id or "none"),
+                        "rig_vfo": "none",
+                        "vfo1": "uplink",
+                        "vfo2": "downlink",
+                    },
+                    observation_id,
+                )
+                await self._emit_tracker_instances_snapshot()
+                logger.info(
+                    "Started observation %s in temporary tracker %s", observation_id, tracker_id
+                )
+                return {
+                    "success": True,
+                    "tracker_id": tracker_id,
+                    "created": True,
+                    "reused_existing": False,
+                    "ephemeral": True,
+                }
+            except Exception as exc:
+                logger.exception("Failed to start tracker for observation %s", observation_id)
+                if tracker_id:
+                    cleaned = await self._stop_observation_slot(observation_id, tracker_id)
+                    if not cleaned:
+                        logger.error(
+                            "Observation %s left tracker %s for manual cleanup",
+                            observation_id,
+                            tracker_id,
+                        )
+                return {
+                    "success": False,
+                    "error": (
+                        exc.code if isinstance(exc, TrackerHandoffError) else "tracker_start_failed"
+                    ),
+                    "message": str(exc),
+                }
+
+    async def _stop_observation_slot(
+        self, observation_id: str, tracker_id: str, *, park_rotator: bool = False
+    ) -> bool:
+        try:
+            if park_rotator:
+                state = await get_tracker_manager(tracker_id).get_tracking_state() or {}
+                if (
+                    self._assigned(state.get("rotator_id"))
+                    and state.get("rotator_state") != "disconnected"
+                ):
+                    try:
+                        await self._update_and_confirm(
+                            tracker_id, {"rotator_state": "parked"}, observation_id
+                        )
+                    except Exception:
+                        # Parking is optional; disconnect remains mandatory.
+                        logger.exception(
+                            "Could not park rotator for observation %s", observation_id
+                        )
+            await self._disconnect_slot_hardware(tracker_id, observation_id, rotator=True, rig=True)
+        except Exception:
+            logger.exception(
+                "Could not confirm hardware disconnect for observation %s", observation_id
+            )
+            # Keep the worker and state available for a retry; removing it while
+            # connected would lose the only handle on the hardware.
+            return False
+        return await self._remove_observation_tracker_instance(tracker_id)
 
     async def stop_tracker_task(
         self,
@@ -276,74 +351,18 @@ class TrackerHandler:
         rotator_config: Dict[str, Any],
         tracker_context: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """
-        Stop rotator tracking for an observation.
-
-        Args:
-            observation_id: The observation ID
-            rotator_config: Rotator configuration dict
-            tracker_context: Optional tracker metadata returned by start_tracker_task
-
-        Returns:
-            True if tracker stop/park operations succeeded
-        """
-        try:
-            context = tracker_context or {}
-            tracker_id = str(context.get("tracker_id") or "").strip()
-            is_ephemeral = bool(context.get("ephemeral"))
-
-            if is_ephemeral:
-                if not tracker_id:
-                    logger.warning(
-                        "Observation %s has ephemeral tracker context without tracker_id",
-                        observation_id,
-                    )
-                    return False
-                removed = await self._remove_observation_tracker_instance(tracker_id)
-                if removed:
-                    logger.info(
-                        "Removed ephemeral observation tracker %s for observation %s",
-                        tracker_id,
-                        observation_id,
-                    )
-                return removed
-
-            if not rotator_config.get("tracking_enabled") or not rotator_config.get("id"):
-                logger.debug(f"No rotator configured for observation {observation_id}")
-                return True
-
-            tracker_id = tracker_id or self._resolve_tracker_id(rotator_config)
-            if not tracker_id:
-                logger.debug(
-                    "Skipping tracker stop for observation %s: no tracker currently assigned to rotator %s",
-                    observation_id,
-                    rotator_config.get("id"),
-                )
-                return True
-            park_after_observation = bool(rotator_config.get("park_after_observation", False))
-
-            if park_after_observation:
-                park_reply = await update_tracking_state_with_ownership(
-                    tracker_id=tracker_id,
-                    value={
-                        "rotator_state": "parked",
-                        "rotator_id": rotator_config.get("id"),
-                    },
-                    requester_sid=f"observation:{observation_id}",
-                )
-                if not park_reply.get("success"):
-                    logger.warning(
-                        "Failed to park rotator for observation %s: %s",
-                        observation_id,
-                        park_reply,
-                    )
-                    return False
-                logger.info(f"Parked rotator after observation {observation_id}")
-            else:
-                logger.debug(f"Leaving rotator connected after observation {observation_id}")
-
+        """Disconnect OBS hardware, clear assignments, and remove the OBS slot."""
+        context = tracker_context or {}
+        tracker_id = str(context.get("tracker_id") or "").strip()
+        if not tracker_id:
+            # A restored process has already dropped pass-scoped tracker rows.
             return True
-        except Exception as e:
-            logger.error(f"Error stopping tracker for observation {observation_id}: {e}")
-            logger.error(traceback.format_exc())
+        if not tracker_id.startswith("obs-"):
+            logger.warning("Refusing to remove non-observation tracker %s", tracker_id)
             return False
+        async with _handoff_lock:
+            return await self._stop_observation_slot(
+                observation_id,
+                tracker_id,
+                park_rotator=bool(rotator_config.get("park_after_observation")),
+            )

@@ -87,6 +87,7 @@ import { fetchSatellite } from '../satellites/satellite-slice.jsx';
 import { SatelliteSelector } from './satellite-selector.jsx';
 import { getSatdumpPipelines, getDecoderParameters, getDecoderDefaultParameters } from '../waterfall/decoder-parameters.js';
 import { DecoderConfigSuggestion } from './decoder-config-suggestion.jsx';
+import { ObservationRigFields } from './observation-rig-fields.jsx';
 
 const DECODER_TYPES = [
     { value: 'none', labelKey: 'decoder_type_none' },
@@ -261,6 +262,7 @@ const ObservationFormDialog = () => {
     const selectedGroupId = useSelector((state) => state.scheduler?.satelliteSelection?.groupId);
     const groupOfSats = useSelector((state) => state.scheduler?.satelliteSelection?.groupOfSats || []);
     const rotators = useSelector((state) => state.rotators?.rotators || []);
+    const rigs = useSelector((state) => state.rigs?.rigs || []);
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const passes = useSelector((state) => state.scheduler?.satelliteSelection?.passes || []);
     const observations = useSelector((state) => state.scheduler?.observations || []);
@@ -298,7 +300,7 @@ const ObservationFormDialog = () => {
                 unpark_before_tracking: false,
                 park_after_observation: false,
             },
-            rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
+            rig: { id: null, transmitter_id: '', doppler_correction: false, vfo: 'VFO_A' },
         };
     });
 
@@ -516,6 +518,12 @@ const ObservationFormDialog = () => {
                 sdr: primarySession.sdr,
                 tasks: primarySession.tasks,
                 rotator: normalizedRotator,
+                rig: {
+                    id: selectedObservation?.rig?.id ?? null,
+                    transmitter_id: selectedObservation?.rig?.transmitter_id ?? '',
+                    doppler_correction: Boolean(selectedObservation?.rig?.doppler_correction),
+                    vfo: selectedObservation?.rig?.vfo || 'VFO_A',
+                },
             });
             setActiveSessionIndex(0);
         } else {
@@ -536,7 +544,7 @@ const ObservationFormDialog = () => {
                     unpark_before_tracking: false,
                     park_after_observation: false,
                 },
-                rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
+                rig: { id: null, transmitter_id: '', doppler_correction: false, vfo: 'VFO_A' },
             });
             setActiveSessionIndex(0);
             setExpandedTasks({});
@@ -1138,6 +1146,10 @@ const ObservationFormDialog = () => {
             .filter(Boolean)
             .map(String);
         const hasUniqueSdrs = new Set(selectedSdrIds).size === selectedSdrIds.length;
+        const rigTransmitterValid = !formData.rig?.id || availableTransmitters.some(
+            (transmitter) => String(transmitter.id) === String(formData.rig.transmitter_id)
+                && Number(transmitter.downlink_low) > 0
+        );
         const sessionsValid = sessions.every((session) => {
             const sdr = session?.sdr || {};
             return (
@@ -1162,6 +1174,7 @@ const ObservationFormDialog = () => {
             formData.satellite.norad_id !== '' &&
             sessionsValid &&
             hasUniqueSdrs &&
+            rigTransmitterValid &&
             hasValidPass &&  // Enable only if pass is valid (or null for continuous observation)
             !hasConflict  // Disable if pass conflicts with existing observation
         );
@@ -1290,6 +1303,9 @@ const ObservationFormDialog = () => {
                             onSatelliteSelect={(satellite) => {
                                 setFormData((prev) => ({
                                     ...prev,
+                                    rig: prev.satellite.norad_id === satellite.norad_id
+                                        ? prev.rig
+                                        : { ...prev.rig, transmitter_id: '' },
                                     satellite: {
                                         norad_id: satellite.norad_id,
                                         name: satellite.name,
@@ -1350,10 +1366,6 @@ const ObservationFormDialog = () => {
                                                         ? Boolean(prev.rotator?.park_after_observation)
                                                         : false,
                                             },
-                                            rig: {
-                                                ...prev.rig,
-                                                doppler_correction: value ? true : false,
-                                            },
                                         }));
                                     }}
                                     label={t('scheduler_dialogs.shared.rotator_label')}
@@ -1387,7 +1399,7 @@ const ObservationFormDialog = () => {
                                 </Select>
                             </FormControl>
                             <Typography variant="caption" color="text.secondary">
-                                {t('scheduler_dialogs.shared.rotator_assignment_runtime')}
+                                {t('scheduler_dialogs.shared.observation_hardware_behavior')}
                             </Typography>
                             <FormControlLabel
                                 control={
@@ -1427,6 +1439,17 @@ const ObservationFormDialog = () => {
                             />
                         </Stack>
                     </Box>
+
+                    <Divider />
+
+                    <ObservationRigFields
+                        rig={formData.rig}
+                        rigs={rigs}
+                        transmitters={availableTransmitters}
+                        disabled={isFormDisabled}
+                        onChange={(rig) => setFormData((prev) => ({ ...prev, rig }))}
+                        t={t}
+                    />
 
                     <Divider />
 

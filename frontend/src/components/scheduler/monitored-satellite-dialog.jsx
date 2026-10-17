@@ -70,6 +70,7 @@ import { getLibreTargetOptions, isLibrePairSupported, resolveTranslationBackend,
 import { SatelliteSelector } from './satellite-selector.jsx';
 import { getSatdumpPipelines, getDecoderParameters, getDecoderDefaultParameters } from '../waterfall/decoder-parameters.js';
 import { DecoderConfigSuggestion } from './decoder-config-suggestion.jsx';
+import { ObservationRigFields } from './observation-rig-fields.jsx';
 
 const DECODER_TYPES = [
     { value: 'none', labelKey: 'decoder_type_none' },
@@ -245,6 +246,7 @@ export default function MonitoredSatelliteDialog() {
     const selectedGroupId = useSelector((state) => state.scheduler?.satelliteSelection?.groupId);
     const groupOfSats = useSelector((state) => state.scheduler?.satelliteSelection?.groupOfSats || []);
     const rotators = useSelector((state) => state.rotators?.rotators || []);
+    const rigs = useSelector((state) => state.rigs?.rigs || []);
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const satGroups = useSelector((state) => state.scheduler?.satelliteSelection?.satGroups || []);
     const sdrParameters = useSelector((state) => state.scheduler?.sdrParameters || {});
@@ -279,7 +281,7 @@ export default function MonitoredSatelliteDialog() {
                 unpark_before_tracking: false,
                 park_after_observation: false,
             },
-            rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
+            rig: { id: null, transmitter_id: '', doppler_correction: false, vfo: 'VFO_A' },
             min_elevation: 20,
             task_start_elevation: 10,
             lookahead_hours: 24,
@@ -483,6 +485,12 @@ export default function MonitoredSatelliteDialog() {
                 sdr: primarySession.sdr,
                 tasks: primarySession.tasks,
                 rotator: normalizedRotator,
+                rig: {
+                    id: selectedMonitoredSatellite?.rig?.id ?? null,
+                    transmitter_id: selectedMonitoredSatellite?.rig?.transmitter_id ?? '',
+                    doppler_correction: Boolean(selectedMonitoredSatellite?.rig?.doppler_correction),
+                    vfo: selectedMonitoredSatellite?.rig?.vfo || 'VFO_A',
+                },
             });
             setActiveSessionIndex(0);
         } else {
@@ -499,7 +507,7 @@ export default function MonitoredSatelliteDialog() {
                     unpark_before_tracking: false,
                     park_after_observation: false,
                 },
-                rig: { id: null, doppler_correction: false, vfo: 'VFO_A' },
+                rig: { id: null, transmitter_id: '', doppler_correction: false, vfo: 'VFO_A' },
                 min_elevation: 20,
                 task_start_elevation: 10,
                 lookahead_hours: 24,
@@ -529,6 +537,9 @@ export default function MonitoredSatelliteDialog() {
     const handleSatelliteSelect = (satellite) => {
         setFormData((prev) => ({
             ...prev,
+            rig: prev.satellite.norad_id === satellite.norad_id
+                ? prev.rig
+                : { ...prev.rig, transmitter_id: '' },
             satellite: {
                 norad_id: satellite.norad_id,
                 name: satellite.name,
@@ -946,6 +957,10 @@ export default function MonitoredSatelliteDialog() {
             .filter(Boolean)
             .map(String);
         const hasUniqueSdrs = new Set(selectedSdrIds).size === selectedSdrIds.length;
+        const rigTransmitterValid = !formData.rig?.id || availableTransmitters.some(
+            (transmitter) => String(transmitter.id) === String(formData.rig.transmitter_id)
+                && Number(transmitter.downlink_low) > 0
+        );
         const sessionsValid = sessions.every((session) => {
             const sdr = session?.sdr || {};
             return (
@@ -959,6 +974,7 @@ export default function MonitoredSatelliteDialog() {
             formData.satellite.norad_id !== '' &&
             sessionsValid &&
             hasUniqueSdrs &&
+            rigTransmitterValid &&
             formData.min_elevation >= 0 &&
             formData.task_start_elevation >= 0 &&
             formData.task_start_elevation <= formData.min_elevation &&
@@ -1218,10 +1234,6 @@ export default function MonitoredSatelliteDialog() {
                                                         ? Boolean(prev.rotator?.park_after_observation)
                                                         : false,
                                             },
-                                            rig: {
-                                                ...prev.rig,
-                                                doppler_correction: value ? true : false,
-                                            },
                                         }));
                                     }}
                                     label={t('scheduler_dialogs.shared.rotator_label')}
@@ -1255,7 +1267,7 @@ export default function MonitoredSatelliteDialog() {
                                 </Select>
                             </FormControl>
                             <Typography variant="caption" color="text.secondary">
-                                {t('scheduler_dialogs.shared.rotator_assignment_runtime')}
+                                {t('scheduler_dialogs.shared.observation_hardware_behavior')}
                             </Typography>
                             <FormControlLabel
                                 control={
@@ -1295,6 +1307,16 @@ export default function MonitoredSatelliteDialog() {
                             />
                         </Stack>
                     </Box>
+
+                    <Divider />
+
+                    <ObservationRigFields
+                        rig={formData.rig}
+                        rigs={rigs}
+                        transmitters={availableTransmitters}
+                        onChange={(rig) => setFormData((prev) => ({ ...prev, rig }))}
+                        t={t}
+                    />
 
                     <Divider />
 
