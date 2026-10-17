@@ -36,7 +36,7 @@ import DecodedPacketsDrawer from './decoded-packets-drawer.jsx';
 import GnssFixQualityTimeline from './gnss-fix-quality-timeline.jsx';
 import { DevRenderProfiler } from './render-profiler.jsx';
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
-import { formatDateTime, formatTime } from '../../utils/date-time.js';
+import { formatDateTime } from '../../utils/date-time.js';
 import { clearDecoderOutputs } from '../decoders/decoders-slice.jsx';
 import { SatelliteInfoDialog } from '../satellites/satellite-info-page.jsx';
 import { fetchSatellite } from '../satellites/satellite-slice.jsx';
@@ -85,21 +85,13 @@ function getOperatorMetadata(constellation, operatorMeta) {
     return operatorMeta[String(constellation || '').toUpperCase()] || null;
 }
 
-const LastSeenFormatter = React.memo(function LastSeenFormatter({ value, nowMs, timezone, locale }) {
+const LastSeenFormatter = React.memo(function LastSeenFormatter({ value, nowMs }) {
     const relativeTime = useMemo(() => humanizeFutureDateInMinutes(value), [value, nowMs]);
-    const absoluteTime = useMemo(() => formatTime(value, {
-        timezone,
-        locale,
-        options: { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' },
-    }), [value, timezone, locale]);
 
     return (
         <Box sx={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             <Typography component="span" variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>
                 {relativeTime}
-            </Typography>
-            <Typography component="span" variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>
-                {`· ${absoluteTime}`}
             </Typography>
         </Box>
     );
@@ -581,12 +573,10 @@ const DecodedInsightsIsland = React.memo(function DecodedInsightsIsland() {
                 <LastSeenFormatter
                     value={params.value}
                     nowMs={relativeNowMs}
-                    timezone={timezone}
-                    locale={locale}
                 />
             ),
         },
-    ]), [locale, relativeNowMs, timezone, constellationOperatorMeta, handleOpenSatelliteInfo, loadingNoradId]);
+    ]), [relativeNowMs, constellationOperatorMeta, handleOpenSatelliteInfo, loadingNoradId]);
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
