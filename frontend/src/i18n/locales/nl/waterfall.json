@@ -140,7 +140,7 @@
     "audio_demodulation": "Geluidsdemodulatie",
     "audio_demodulation_help": "Audio uit het RF-signaal halen",
     "data_decoders": "Data-decoders",
-    "data_decoders_help": "Een interne FM- of SSB-demodulator wordt indien nodig gestart om bepaalde modi te decoderen",
+    "data_decoders_help": "Gegevens uit het signaal halen.",
     "decoder_active_info": "Audiodecodering wordt automatisch door de decoder afgehandeld",
     "decoders_modes": {
       "none": "Geen",

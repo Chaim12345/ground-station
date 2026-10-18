@@ -111,7 +111,7 @@
     "audio_demodulation": "Audio Demodulation",
     "audio_demodulation_help": "How to extract audio from the RF signal",
     "data_decoders": "Data Decoders",
-    "data_decoders_help": "An internal FM or SSB demodulator will be spun up as needed to decode some modes",
+    "data_decoders_help": "Extract data from the signal.",
     "decoder_active_info": "Audio demodulation is automatically handled by the decoder",
     "decoders_modes": {
       "none": "None",

@@ -349,7 +349,7 @@ export const DataDecoderSelector = ({
                 {t('vfo.data_decoders', 'Data Decoders')}
             </Typography>
             <Typography variant="caption" sx={{ mb: 1, display: 'block', color: 'text.disabled', fontSize: '0.7rem' }}>
-                {t('vfo.data_decoders_help', 'An internal FM or SSB demodulator will be spun up as needed to decode some modes')}
+                {t('vfo.data_decoders_help', 'Extract data from the signal.')}
             </Typography>
             <ToggleButtonGroup
                 value={decoder || 'none'}

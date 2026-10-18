@@ -140,7 +140,7 @@
     "audio_demodulation": "Demodulación de audio",
     "audio_demodulation_help": "Cómo extraer el audio de la señal RF",
     "data_decoders": "Decodificadores de datos",
-    "data_decoders_help": "Un demodulador interno FM o SSB se activará según sea necesario para decodificar algunos modos",
+    "data_decoders_help": "Extrae datos de la señal.",
     "decoder_active_info": "Demodulación de audio es manejado automáticamente por el decodificador",
     "decoders_modes": {
       "none": "Ninguno",

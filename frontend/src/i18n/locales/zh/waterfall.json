@@ -124,7 +124,7 @@
     "audio_demodulation": "音频解调",
     "audio_demodulation_help": "如何从射频信号中提取音频",
     "data_decoders": "数据解码器",
-    "data_decoders_help": "内部 FM 或 SSB 解调器将根据需要启动以解码某些模式",
+    "data_decoders_help": "从信号中提取数据。",
     "decoder_active_info": "音频解调由解码器自动处理",
     "decoders_modes": {
       "none": "无",

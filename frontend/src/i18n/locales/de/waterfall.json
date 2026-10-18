@@ -140,7 +140,7 @@
     "audio_demodulation": "Audiodemodulation",
     "audio_demodulation_help": "Legt fest, wie Audio aus dem HF-Signal extrahiert wird.",
     "data_decoders": "Datendecoder",
-    "data_decoders_help": "Für einige Modi wird bei Bedarf intern ein FM- oder SSB-Demodulator zur Dekodierung gestartet.",
+    "data_decoders_help": "Daten aus dem Signal extrahieren.",
     "decoder_active_info": "Audio-Demodulation wird automatisch vom Decoder gehandhabt",
     "decoders_modes": {
       "none": "Keine",
