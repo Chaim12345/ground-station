@@ -30,6 +30,28 @@ import {
 } from './vfo-config.js';
 import { resolveVfoAudioStatus, VFO_AUDIO_STATUS, VFO_AUDIO_STATUS_COLORS } from '../vfo-audio-status.js';
 
+const GNSS_CONSTELLATION_CODES = {
+    gps: 'GPS',
+    galileo: 'GAL',
+    glonass: 'GLO',
+    beidou: 'BDS',
+    qzss: 'QZS',
+};
+
+export const formatGnssMarkerLabel = (decoderInfo, verifiedSatCount) => {
+    const status = decoderInfo?.status || 'listening';
+    const satCount = Number.isFinite(verifiedSatCount) ? verifiedSatCount : 0;
+    const enabled = Array.isArray(decoderInfo?.info?.constellations)
+        ? decoderInfo.info.constellations.map((name) => {
+            const normalized = String(name).trim().toLowerCase();
+            return GNSS_CONSTELLATION_CODES[normalized] || normalized.slice(0, 3).toUpperCase();
+        }).filter(Boolean)
+        : [];
+
+    // Status metadata reflects the active GNSS-SDR instance, including overrides.
+    return `${status.toUpperCase()} | SAT ${satCount}${enabled.length ? ` | ${enabled.join(' ')}` : ''}`;
+};
+
 /**
  * Drawing utilities for VFO markers on the waterfall canvas
  */
@@ -293,10 +315,7 @@ export const canvasDrawingUtils = {
                     ctx.textAlign = 'center';
                     ctx.fillText(decoderText, centerX, secondaryLabelTop + 12);
                 } else if (decoderType === 'gnss') {
-                    // GNSS-specific label format: status + satellites with verified navigation data.
-                    const status = decoderInfo.status || 'listening';
-                    const satCount = Number.isFinite(gnssVerifiedSatCount) ? gnssVerifiedSatCount : 0;
-                    const decoderText = `${status.toUpperCase()} | SAT ${satCount}`;
+                    const decoderText = formatGnssMarkerLabel(decoderInfo, gnssVerifiedSatCount);
 
                     ctx.font = '10px Monospace';
                     const decoderTextMetrics = ctx.measureText(decoderText);

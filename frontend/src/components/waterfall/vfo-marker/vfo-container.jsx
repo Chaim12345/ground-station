@@ -36,7 +36,8 @@ import {
     generateVFOLabelText,
     getVisibleFrequencyRange,
     formatFrequency,
-    formatBaudrate
+    formatBaudrate,
+    formatGnssMarkerLabel
 } from './vfo-utils.js';
 import { resolveVfoAudioStatus, VFO_AUDIO_STATUS } from '../vfo-audio-status.js';
 import { getVerifiedGnssSatelliteCountForStream } from '../gnss-slice.jsx';
@@ -794,9 +795,8 @@ const VFOMarkersContainer = ({
                         const formattedBaudrate = formatBaudrate(baudrate);
                         secondaryLabelText = `${status.toUpperCase()} | ${decoderType.toUpperCase()} ${formattedBaudrate} | ${framing.toUpperCase()}`;
                     } else if (decoderType === 'gnss') {
-                        const status = decoderInfo.status || 'listening';
                         const satCount = getGnssVerifiedSatCountForVFO(parseInt(key));
-                        secondaryLabelText = `${status.toUpperCase()} | SAT ${satCount}`;
+                        secondaryLabelText = formatGnssMarkerLabel(decoderInfo, satCount);
                     } else if (decoderType === 'lora') {
                         const status = decoderInfo.status || 'listening';
                         const sf = decoderInfo.info?.spreading_factor;
