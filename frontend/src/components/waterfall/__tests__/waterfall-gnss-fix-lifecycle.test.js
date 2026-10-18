@@ -122,6 +122,27 @@ describe('waterfall gnss fix lifecycle', () => {
         expect(state.gnssFixLifecycle.noFixSinceAtMs).toBe(106_000);
     });
 
+    it('ends a fix when zero quality arrives with stale coordinates', () => {
+        let state = reducer(undefined, { type: '@@INIT' });
+        state = reducer(state, updateGnssFixLifecycleFromStatus({
+            decoder_type: 'gnss', session_id: 'session-1', vfo: 2,
+            status: 'starting', timestamp: 99,
+        }));
+        state = reducer(state, updateGnssFixLifecycleFromOutput({
+            decoder_type: 'gnss', session_id: 'session-1', vfo: 2,
+            timestamp: 100,
+            output: { event: 'nmea_gga', latitude: 37.9838, longitude: 23.7275, fix_quality: '1' },
+        }));
+        state = reducer(state, updateGnssFixLifecycleFromOutput({
+            decoder_type: 'gnss', session_id: 'session-1', vfo: 2,
+            timestamp: 106,
+            output: { event: 'nmea_gga', latitude: 37.9838, longitude: 23.7275, fix_quality: '0' },
+        }));
+
+        expect(state.gnssFixLifecycle.currentStatus).toBe('NO FIX');
+        expect(state.gnssFixLifecycle.lastFixLostAtMs).toBe(106_000);
+    });
+
     it('starts no-fix timer on gnss decoder starting and keeps it until first fix', () => {
         let state = reducer(undefined, { type: '@@INIT' });
 

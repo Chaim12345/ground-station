@@ -747,10 +747,10 @@ export const getDefaultVFOConfig = () => {
             gnss_output_rate_ms: 500,
             gnss_doppler_max: 6000,
             gnss_enable_gps: true,
-            gnss_enable_galileo: true,
-            gnss_enable_glonass: true,
-            gnss_enable_beidou: true,
-            gnss_enable_qzss: true,
+            gnss_enable_galileo: false,
+            gnss_enable_glonass: false,
+            gnss_enable_beidou: false,
+            gnss_enable_qzss: false,
         }
     };
 };

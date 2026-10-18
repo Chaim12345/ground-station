@@ -172,6 +172,10 @@ function getGnssFixStatusFromOutput(output) {
     if (!isFixSignal) {
         return null;
     }
+    // A no-fix quality value takes precedence over coordinates from an older fix.
+    if (hasFixQualityField && !hasFixQuality) {
+        return 'NO FIX';
+    }
     return (hasCoords || hasFixQuality || hasPvt) ? 'FIX' : 'NO FIX';
 }
 

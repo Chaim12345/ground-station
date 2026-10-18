@@ -111,6 +111,7 @@ import { fetchPlaybackRecordings } from "../filebrowser/filebrowser-slice.jsx";
 import { useSdrTakeoverDialog } from './use-sdr-takeover-dialog.jsx';
 import { callSdrApi, liveConfigToUpdates, joinSdr } from './sdr-join.js';
 import { DevRenderProfiler } from './render-profiler.jsx';
+import { formatGnssRate, getGnssTuningAdvice } from './gnss-tuning.js';
 
 const PLAYBACK_DEFAULT_FFT_OVERLAP_PERCENT = 50;
 
@@ -1019,6 +1020,13 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         sendSDRConfigToBackend({sampleRate: value});
     }, [dispatch, sendSDRConfigToBackend]);
 
+    const handleGnssSampleRateChange = useCallback((rate) => (
+        sendSDRConfigToBackend({ sampleRate: rate }).then((response) => {
+            if (response?.success) dispatch(setSampleRate(rate));
+            return response;
+        })
+    ), [dispatch, sendSDRConfigToBackend]);
+
     const handleAntennaChange = useCallback((value) => {
         dispatch(setSelectedAntenna(value));
         if (value !== 'none' && value !== null && value !== undefined) {
@@ -1127,17 +1135,55 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         sendSDRConfigToBackend({centerFrequency: nextCenterFrequency});
     }, [dispatch, sendSDRConfigToBackend]);
 
+    const warnGnssSetup = useCallback((vfoNumber) => {
+        const current = store.getState();
+        const vfo = current.vfo.vfoMarkers?.[vfoNumber];
+        if (vfo?.decoder !== 'gnss') return;
+
+        const advice = getGnssTuningAdvice({
+            parameters: vfo.parameters,
+            parametersEnabled: vfo.parametersEnabled,
+            vfoFrequency: vfo.frequency,
+            sdrCenterFrequency: current.waterfall.centerFrequency,
+            sdrSampleRate: current.waterfall.sampleRate,
+        });
+        if (advice.bandCount === 0) {
+            toast.warning(`VFO ${vfoNumber}: Select at least one GNSS constellation in decoder parameters.`);
+        } else if (advice.bandCount > 1) {
+            toast.warning(`VFO ${vfoNumber}: The selected GNSS signals use different RF bands. Review decoder parameters.`);
+        } else if (!advice.hasReceiver) {
+            toast.warning(`VFO ${vfoNumber}: Select an SDR capture rate and center frequency for GNSS. Review decoder parameters.`);
+        } else if (advice.needsTune) {
+            toast.warning(`VFO ${vfoNumber}: Tune the receiver and VFO to ${advice.band.label} for the selected GNSS signals.`);
+        } else if (advice.rateBelowRecommendation) {
+            toast.warning(`VFO ${vfoNumber}: ${formatGnssRate(current.waterfall.sampleRate)} capture is narrow for the selected GNSS signals. Review decoder parameters.`);
+        }
+    }, [store]);
+
     const handleVFOPropertyChange = useCallback((vfoNumber, updates) => {
         dispatch(setVFOProperty({ vfoNumber, updates }));
-    }, [dispatch]);
+        if (updates.decoder === 'gnss' && store.getState().vfo.vfoActive?.[vfoNumber]) {
+            warnGnssSetup(vfoNumber);
+        }
+    }, [dispatch, store, warnGnssSetup]);
 
     const handleVFOActiveChange = useCallback((vfoNumber, isActive) => {
         if (isActive) {
             dispatch(setVfoActive(vfoNumber));
+            warnGnssSetup(vfoNumber);
         } else {
             dispatch(setVfoInactive(vfoNumber));
         }
-    }, [dispatch]);
+    }, [dispatch, warnGnssSetup]);
+
+    const wasStreamingForGnssRef = useRef(isStreaming);
+    useEffect(() => {
+        if (isStreaming && !wasStreamingForGnssRef.current) {
+            const active = store.getState().vfo.vfoActive || {};
+            Object.keys(active).filter((vfoNumber) => active[vfoNumber]).forEach(warnGnssSetup);
+        }
+        wasStreamingForGnssRef.current = isStreaming;
+    }, [isStreaming, store, warnGnssSetup]);
 
     const handleVFOListenChange = useCallback((vfoNumber, isListening) => {
         if (isListening) {
@@ -1725,7 +1771,9 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     deepgramConfigured={deepgramConfigured}
                     centerFrequency={centerFrequency}
                     sampleRate={sampleRate}
+                    sampleRateValues={sampleRateValues}
                     onCenterFrequencyChange={handleVfoCenterFrequencyChange}
+                    onSampleRateChange={handleGnssSampleRateChange}
                     />
                 </DevRenderProfiler>
 

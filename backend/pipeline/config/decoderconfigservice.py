@@ -104,10 +104,10 @@ class DecoderConfigService:
                 gnss_output_rate_ms=500,
                 gnss_doppler_max=6000,
                 gnss_enable_gps=True,
-                gnss_enable_galileo=True,
-                gnss_enable_glonass=True,
-                gnss_enable_beidou=True,
-                gnss_enable_qzss=True,
+                gnss_enable_galileo=False,
+                gnss_enable_glonass=False,
+                gnss_enable_beidou=False,
+                gnss_enable_qzss=False,
             )
 
             if overrides:

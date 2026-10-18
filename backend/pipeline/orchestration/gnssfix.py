@@ -64,6 +64,10 @@ def derive_gnss_fix_status_from_output(output: Dict[str, Any]) -> Optional[str]:
     if not has_fix_signal:
         return None
 
+    # A zero GGA/PVT quality explicitly invalidates stale coordinates.
+    if has_fix_quality_field and not has_fix_quality:
+        return "NO FIX"
+
     return "FIX" if (has_coords or has_fix_quality or has_pvt) else "NO FIX"
 
 

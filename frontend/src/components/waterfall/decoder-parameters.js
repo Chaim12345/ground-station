@@ -518,22 +518,22 @@ export const getGnssParameters = (t = englishFallback) => ({
     gnss_enable_galileo: {
         label: t('decoder_parameters.galileo_e1b', { defaultValue: 'Galileo (E1B)' }),
         type: 'switch',
-        default: true
+        default: false
     },
     gnss_enable_glonass: {
         label: t('decoder_parameters.glonass_l1_c_a', { defaultValue: 'GLONASS (L1 C/A)' }),
         type: 'switch',
-        default: true
+        default: false
     },
     gnss_enable_beidou: {
         label: t('decoder_parameters.beidou_b1i', { defaultValue: 'BeiDou (B1I)' }),
         type: 'switch',
-        default: true
+        default: false
     },
     gnss_enable_qzss: {
         label: t('decoder_parameters.qzss_l1_c_a', { defaultValue: 'QZSS (L1 C/A)' }),
         type: 'switch',
-        default: true
+        default: false
     }
 });
 
@@ -727,10 +727,10 @@ export function mapParametersToBackend(decoder, parameters) {
             gnss_output_rate_ms: parameters.gnss_output_rate_ms ?? 500,
             gnss_doppler_max: parameters.gnss_doppler_max ?? 6000,
             gnss_enable_gps: parameters.gnss_enable_gps ?? true,
-            gnss_enable_galileo: parameters.gnss_enable_galileo ?? true,
-            gnss_enable_glonass: parameters.gnss_enable_glonass ?? true,
-            gnss_enable_beidou: parameters.gnss_enable_beidou ?? true,
-            gnss_enable_qzss: parameters.gnss_enable_qzss ?? true
+            gnss_enable_galileo: parameters.gnss_enable_galileo ?? false,
+            gnss_enable_glonass: parameters.gnss_enable_glonass ?? false,
+            gnss_enable_beidou: parameters.gnss_enable_beidou ?? false,
+            gnss_enable_qzss: parameters.gnss_enable_qzss ?? false
         };
     }
 

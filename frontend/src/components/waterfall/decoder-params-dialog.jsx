@@ -33,6 +33,7 @@ import {
     MenuItem,
     Switch,
     FormControlLabel,
+    Alert,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useSelector } from 'react-redux';
@@ -40,6 +41,12 @@ import { getDecoderParameters } from './vfo-marker/vfo-config.js';
 import { DecoderConfigSuggestion } from '../scheduler/decoder-config-suggestion.jsx';
 import { selectRunningRigTransmitters } from '../target/transmitter-selectors.js';
 import { useTranslation } from 'react-i18next';
+import {
+    formatGnssFrequency,
+    formatGnssRate,
+    getGnssTuningAdvice,
+    getSupportedGnssRate,
+} from './gnss-tuning.js';
 
 const normalizeTrackerId = (value) => {
     if (typeof value !== 'string') {
@@ -66,12 +73,19 @@ const DecoderParamsDialog = ({
     vfoMarkers,
     vfoActive,
     onVFOPropertyChange,
+    centerFrequency,
+    sampleRate,
+    sampleRateValues,
+    onCenterFrequencyChange,
+    onSampleRateChange,
 }) => {
     const { t } = useTranslation('waterfall');
     // Get satellite and transmitter data from Redux
     const activeSatelliteDetails = useSelector(state => state.targetSatTrack.satelliteData?.details || null);
     const trackerViews = useSelector(state => state.targetSatTrack?.trackerViews || {});
     const transmitters = useSelector(selectRunningRigTransmitters);
+    const liveVfoFrequency = useSelector(state => state.vfo?.vfoMarkers?.[vfoIndex]?.frequency);
+    const selectedSDRId = useSelector(state => state.waterfall?.selectedSDRId);
     const vfo = vfoMarkers?.[vfoIndex];
     // The parent mounts this dialog only while open; keep edits out of Redux until Apply.
     const [draft, setDraft] = React.useState(() => ({
@@ -79,6 +93,8 @@ const DecoderParamsDialog = ({
         parameters: { ...(vfo?.parameters || {}) },
     }));
     const [initialDraft] = React.useState(draft);
+    const [hardwareBusy, setHardwareBusy] = React.useState(false);
+    const [hardwareError, setHardwareError] = React.useState('');
     const changedParameters = Object.entries(draft.parameters).filter(
         ([key, value]) => !sameParameterValue(value, initialDraft.parameters[key])
     );
@@ -97,11 +113,23 @@ const DecoderParamsDialog = ({
     // Pass the component translator so parameter labels/tooltips stay localized.
     const decoderParams = getDecoderParameters(decoder, t);
     const parametersEnabled = draft.parametersEnabled; // Default to disabled
+    const gnssAdvice = decoder === 'gnss' ? getGnssTuningAdvice({
+        parameters: draft.parameters,
+        parametersEnabled,
+        vfoFrequency: liveVfoFrequency ?? vfo.frequency,
+        sdrCenterFrequency: centerFrequency,
+        sdrSampleRate: sampleRate,
+    }) : null;
+    const suggestedRate = gnssAdvice && (gnssAdvice.rateBelowRecommendation || !gnssAdvice.hasSampleRate)
+        ? getSupportedGnssRate(gnssAdvice.recommendedRateHz, sampleRateValues)
+        : null;
+    const canConfigureReceiver = Boolean(selectedSDRId && selectedSDRId !== 'none' && selectedSDRId !== 'sigmf-playback');
 
     // Get locked transmitter if available
     const lockedTransmitterId = vfo.lockedTransmitterId;
     const lockedTransmitterTrackerId = normalizeTrackerId(vfo.lockedTransmitterTrackerId);
     const isLocked = lockedTransmitterId && lockedTransmitterId !== 'none';
+    const canTuneReceiver = canConfigureReceiver && !isLocked;
     const lockedTransmitter = isLocked
         ? transmitters.find((tx) => {
             if (!sameIdentifier(tx.id, lockedTransmitterId)) {
@@ -163,8 +191,8 @@ const DecoderParamsDialog = ({
         });
     };
 
-    const handleApply = () => {
-        const updates = {};
+    const commitDraft = (extraUpdates = {}) => {
+        const updates = { ...extraUpdates };
         if (draft.parametersEnabled !== initialDraft.parametersEnabled) {
             updates.parametersEnabled = draft.parametersEnabled;
         }
@@ -179,6 +207,45 @@ const DecoderParamsDialog = ({
             onVFOPropertyChange(vfoIndex, updates);
         }
         onClose();
+    };
+
+    const handleApplyAndTune = async () => {
+        if (!gnssAdvice?.band || !canTuneReceiver || hardwareBusy) return;
+        setHardwareError('');
+        setHardwareBusy(true);
+        try {
+            const target = gnssAdvice.band.centerHz;
+            // Change the shared SDR center first. If it fails or takeover is
+            // declined, leave the VFO and decoder draft untouched.
+            if (Math.abs(Number(centerFrequency) - target) > 10_000) {
+                const response = await onCenterFrequencyChange(target);
+                if (!response?.success) {
+                    setHardwareError(response?.error || 'Could not tune the SDR receiver.');
+                    return;
+                }
+            }
+            commitDraft({ frequency: target });
+        } catch (error) {
+            setHardwareError(error?.message || 'Could not tune the SDR receiver.');
+        } finally {
+            setHardwareBusy(false);
+        }
+    };
+
+    const handleSetSuggestedRate = async () => {
+        if (!suggestedRate || !canConfigureReceiver || hardwareBusy) return;
+        setHardwareError('');
+        setHardwareBusy(true);
+        try {
+            const response = await onSampleRateChange(suggestedRate);
+            if (!response?.success) {
+                setHardwareError(response?.error || 'Could not change the SDR capture rate.');
+            }
+        } catch (error) {
+            setHardwareError(error?.message || 'Could not change the SDR capture rate.');
+        } finally {
+            setHardwareBusy(false);
+        }
     };
 
     return (
@@ -237,6 +304,75 @@ const DecoderParamsDialog = ({
                                 : 'Parameter overrides are disabled. The decoder will use default values.'}
                         </Typography>
                     </Box>
+
+                    {gnssAdvice && (
+                        <Box sx={{ mb: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                            <Typography variant="subtitle2" sx={{ mb: 1 }}>GNSS receiver setup</Typography>
+                            <Typography variant="body2">
+                                Selected signals: {gnssAdvice.selectedSignals.join(', ') || 'none'}
+                            </Typography>
+                            {gnssAdvice.band && (
+                                <Typography variant="body2">Target RF band: {gnssAdvice.band.label}</Typography>
+                            )}
+                            <Typography variant="body2">
+                                Current VFO: {Number(liveVfoFrequency ?? vfo.frequency) > 0
+                                    ? formatGnssFrequency(Number(liveVfoFrequency ?? vfo.frequency)) : 'unknown'}
+                                {' · '}SDR center: {Number(centerFrequency) > 0
+                                    ? formatGnssFrequency(Number(centerFrequency)) : 'unknown'}
+                            </Typography>
+                            <Typography variant="body2">
+                                SDR capture rate: {Number(sampleRate) > 0 ? formatGnssRate(Number(sampleRate)) : 'unknown'}
+                            </Typography>
+                            <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                                GNSS Processing Rate below is a decoder target; it cannot restore bandwidth missing from the SDR capture.
+                            </Typography>
+                            {gnssAdvice.bandCount === 0 && (
+                                <Alert severity="error" sx={{ mt: 1 }}>Select at least one GNSS constellation.</Alert>
+                            )}
+                            {gnssAdvice.bandCount > 1 && (
+                                <Alert severity="warning" sx={{ mt: 1 }}>
+                                    These signals use different RF bands. Select signals from one band to tune and decode them together.
+                                </Alert>
+                            )}
+                            {gnssAdvice.band?.centerHz === 1_602_000_000 && (
+                                <Alert severity="info" sx={{ mt: 1 }}>
+                                    GLONASS satellites use channels around 1602 MHz. A narrow capture contains only some channels.
+                                </Alert>
+                            )}
+                            {gnssAdvice.needsTune && (
+                                <Alert severity="warning" sx={{ mt: 1 }}>
+                                    Center the SDR and VFO on {gnssAdvice.band.label} to avoid clipping the GNSS signal.
+                                </Alert>
+                            )}
+                            {gnssAdvice.recommendedRateHz && (
+                                <Typography variant="body2" sx={{ mt: 1 }}>
+                                    Recommended SDR capture rate: at least {formatGnssRate(gnssAdvice.recommendedRateHz)}.
+                                </Typography>
+                            )}
+                            {!canConfigureReceiver && (
+                                <Alert severity="info" sx={{ mt: 1 }}>
+                                    Select a live SDR to change its tuning or capture rate here.
+                                </Alert>
+                            )}
+                            {isLocked && (
+                                <Alert severity="info" sx={{ mt: 1 }}>
+                                    Unlock transmitter tracking before tuning this VFO for GNSS.
+                                </Alert>
+                            )}
+                            {(gnssAdvice.rateBelowRecommendation || !gnssAdvice.hasSampleRate) && canConfigureReceiver && (
+                                suggestedRate ? (
+                                    <Button size="small" sx={{ mt: 1 }} disabled={hardwareBusy} onClick={handleSetSuggestedRate}>
+                                        Set SDR capture to {formatGnssRate(suggestedRate)}
+                                    </Button>
+                                ) : (
+                                    <Alert severity="info" sx={{ mt: 1 }}>
+                                        No suitable higher capture rate is available from the selected SDR. You can still try this rate.
+                                    </Alert>
+                                )
+                            )}
+                            {hardwareError && <Alert severity="error" sx={{ mt: 1 }}>{hardwareError}</Alert>}
+                        </Box>
+                    )}
 
                     {Object.entries(decoderParams).map(([paramKey, paramDef]) => {
                         const currentValue = draft.parameters[paramKey] ?? paramDef.default;
@@ -321,7 +457,12 @@ const DecoderParamsDialog = ({
             </DialogContent>
             <DialogActions>
                 <Button onClick={onClose}>{t('common:cancel', { defaultValue: 'Cancel' })}</Button>
-                <Button variant="contained" onClick={handleApply} disabled={!hasChanges}>
+                {gnssAdvice?.band && canTuneReceiver && gnssAdvice.needsTune && (
+                    <Button variant="outlined" onClick={handleApplyAndTune} disabled={hardwareBusy}>
+                        Apply and tune receiver
+                    </Button>
+                )}
+                <Button variant="contained" onClick={() => commitDraft()} disabled={!hasChanges || hardwareBusy || gnssAdvice?.bandCount === 0}>
                     {t('common:apply', { defaultValue: 'Apply' })}
                 </Button>
             </DialogActions>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import DecoderParamsDialog from '../decoder-params-dialog.jsx';
 import { TranscriptionParamsDialog } from '../vfo-settings/vfo-dialogs.jsx';
@@ -166,5 +166,85 @@ describe('Waterfall VFO parameter dialogs', () => {
                 fsk_geoscan_frame_size: 74,
             },
         });
+    });
+
+    it('shows GNSS capture guidance and tunes the SDR before applying the VFO frequency', async () => {
+        const onVFOPropertyChange = vi.fn();
+        const onCenterFrequencyChange = vi.fn().mockResolvedValue({ success: true });
+        const onSampleRateChange = vi.fn().mockResolvedValue({ success: true });
+        const vfo = {
+            decoder: 'gnss',
+            frequency: 145_000_000,
+            parametersEnabled: false,
+            parameters: {},
+            lockedTransmitterId: 'none',
+        };
+        const gnssStore = configureStore({
+            reducer: () => ({
+                targetSatTrack: { satelliteData: { details: null }, trackerViews: {} },
+                waterfall: { selectedSDRId: 'rtl-sdr' },
+                vfo: { vfoMarkers: { 1: vfo } },
+            }),
+        });
+
+        render(
+            <Provider store={gnssStore}>
+                <DecoderParamsDialog
+                    open
+                    onClose={vi.fn()}
+                    vfoIndex={1}
+                    vfoMarkers={{ 1: vfo }}
+                    vfoActive={{ 1: true }}
+                    onVFOPropertyChange={onVFOPropertyChange}
+                    centerFrequency={145_000_000}
+                    sampleRate={2_000_000}
+                    sampleRateValues={[2_000_000, 2_400_000]}
+                    onCenterFrequencyChange={onCenterFrequencyChange}
+                    onSampleRateChange={onSampleRateChange}
+                />
+            </Provider>
+        );
+
+        expect(screen.getByText(/Selected signals: GPS L1 C\/A/)).toBeInTheDocument();
+        expect(screen.getByText(/SDR capture rate: 2.00 MS\/s/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Set SDR capture to 2.40 MS/s' }));
+        await waitFor(() => expect(onSampleRateChange).toHaveBeenCalledWith(2_400_000));
+
+        fireEvent.click(screen.getByRole('button', { name: 'Apply and tune receiver' }));
+        await waitFor(() => expect(onCenterFrequencyChange).toHaveBeenCalledWith(1_575_420_000));
+        expect(onVFOPropertyChange).toHaveBeenCalledWith(1, { frequency: 1_575_420_000 });
+    });
+
+    it('keeps GNSS draft and VFO frequency unchanged if receiver retuning fails', async () => {
+        const onVFOPropertyChange = vi.fn();
+        const vfo = { decoder: 'gnss', frequency: 145_000_000, parametersEnabled: false, parameters: {} };
+        const gnssStore = configureStore({
+            reducer: () => ({
+                targetSatTrack: { satelliteData: { details: null }, trackerViews: {} },
+                waterfall: { selectedSDRId: 'rtl-sdr' },
+                vfo: { vfoMarkers: { 1: vfo } },
+            }),
+        });
+
+        render(
+            <Provider store={gnssStore}>
+                <DecoderParamsDialog
+                    open
+                    onClose={vi.fn()}
+                    vfoIndex={1}
+                    vfoMarkers={{ 1: vfo }}
+                    vfoActive={{ 1: true }}
+                    onVFOPropertyChange={onVFOPropertyChange}
+                    centerFrequency={145_000_000}
+                    sampleRate={2_000_000}
+                    sampleRateValues={[2_000_000]}
+                    onCenterFrequencyChange={vi.fn().mockResolvedValue({ success: false, error: 'Retune refused' })}
+                />
+            </Provider>
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Apply and tune receiver' }));
+        await waitFor(() => expect(screen.getByText('Retune refused')).toBeInTheDocument());
+        expect(onVFOPropertyChange).not.toHaveBeenCalled();
     });
 });

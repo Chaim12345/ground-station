@@ -58,7 +58,9 @@ const VfoAccordion = ({
     deepgramConfigured,
     centerFrequency,
     sampleRate,
+    sampleRateValues,
     onCenterFrequencyChange,
+    onSampleRateChange,
 }) => {
     const { t } = useTranslation('waterfall');
     const vfoMarkers = useSelector(
@@ -279,6 +281,11 @@ const VfoAccordion = ({
                     vfoMarkers={vfoMarkers}
                     vfoActive={vfoActive}
                     onVFOPropertyChange={onVFOPropertyChange}
+                    centerFrequency={centerFrequency}
+                    sampleRate={sampleRate}
+                    sampleRateValues={sampleRateValues}
+                    onCenterFrequencyChange={onCenterFrequencyChange}
+                    onSampleRateChange={onSampleRateChange}
                 />
             )}
 
@@ -310,7 +317,9 @@ function areVfoAccordionPropsEqual(prevProps, nextProps) {
         prevProps.deepgramConfigured === nextProps.deepgramConfigured &&
         prevProps.centerFrequency === nextProps.centerFrequency &&
         prevProps.sampleRate === nextProps.sampleRate &&
-        prevProps.onCenterFrequencyChange === nextProps.onCenterFrequencyChange
+        prevProps.sampleRateValues === nextProps.sampleRateValues &&
+        prevProps.onCenterFrequencyChange === nextProps.onCenterFrequencyChange &&
+        prevProps.onSampleRateChange === nextProps.onSampleRateChange
     );
 }
 

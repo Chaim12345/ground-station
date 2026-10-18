@@ -18,6 +18,24 @@ from types import SimpleNamespace
 
 from demodulators.gnssmonitorudp import parse_gnss_synchro_message
 from demodulators.gnsssdrdecoder import DecoderStatus, GNSSSdrDecoder
+from pipeline.config.decoderconfigservice import DecoderConfigService
+from pipeline.orchestration.gnssfix import derive_gnss_fix_status_from_output
+
+
+def test_gnss_config_defaults_to_gps_only_but_allows_other_constellations():
+    service = DecoderConfigService()
+    default = service.get_config("gnss")
+    assert default.gnss_enable_gps is True
+    assert default.gnss_enable_galileo is False
+    assert default.gnss_enable_glonass is False
+    assert default.gnss_enable_beidou is False
+    assert default.gnss_enable_qzss is False
+
+    selected = service.get_config(
+        "gnss", overrides={"gnss_enable_gps": False, "gnss_enable_galileo": True}
+    )
+    assert selected.gnss_enable_gps is False
+    assert selected.gnss_enable_galileo is True
 
 
 def _build_test_config():
@@ -155,6 +173,51 @@ def test_emit_activity_heartbeat_includes_loss_of_lock_fields():
     _, status_info = status_payloads[0]
     assert status_info["gnss_loss_of_lock_total"] == 7
     assert status_info["gnss_loss_of_lock_delta"] == 3
+
+
+def test_pvt_fix_expires_once_after_valid_updates_stop():
+    decoder = _build_decoder()
+    decoder.stats.update({"udp_events_emitted": 0, "activity_heartbeats_emitted": 0})
+    emitted = []
+    decoder._send_output_update = lambda payload: emitted.append(payload)
+    decoder._send_status_update = lambda *_args, **_kwargs: None
+    decoder._should_emit_udp_event = lambda *_args: True
+
+    decoder._emit_udp_pvt_event({"latitude": 37.9838, "longitude": 23.7275, "solution_status": 5})
+    last_pvt_ts = decoder._last_valid_pvt_ts
+    assert last_pvt_ts is not None
+    assert derive_gnss_fix_status_from_output(emitted[-1]) == "FIX"
+
+    decoder._emit_activity_heartbeat(now=last_pvt_ts + decoder._pvt_fix_timeout_s - 0.1)
+    assert not any(event["event"] == "pvt_lost" for event in emitted)
+
+    decoder._emit_activity_heartbeat(now=last_pvt_ts + decoder._pvt_fix_timeout_s + 0.1)
+    lost_events = [event for event in emitted if event["event"] == "pvt_lost"]
+    assert len(lost_events) == 1
+    assert derive_gnss_fix_status_from_output(lost_events[0]) == "NO FIX"
+    assert emitted[-1]["event"] == "gnss_activity"
+    assert emitted[-1]["has_pvt"] is False
+
+    decoder._emit_activity_heartbeat(now=last_pvt_ts + decoder._pvt_fix_timeout_s + 2.0)
+    assert sum(event["event"] == "pvt_lost" for event in emitted) == 1
+
+
+def test_no_solution_pvt_ends_fix_immediately_without_reusing_coordinates():
+    decoder = _build_decoder()
+    decoder.stats.update({"udp_events_emitted": 0})
+    emitted = []
+    decoder._send_output_update = lambda payload: emitted.append(payload)
+    decoder._send_status_update = lambda *_args, **_kwargs: None
+
+    decoder._emit_udp_pvt_event({"latitude": 37.9838, "longitude": 23.7275, "solution_status": 5})
+    decoder._emit_udp_pvt_event({"latitude": 37.9838, "longitude": 23.7275, "solution_status": 0})
+    decoder._emit_udp_pvt_event({"solution_status": 0})
+    decoder._emit_udp_pvt_event({"latitude": 37.9838, "longitude": 23.7275, "solution_status": 5})
+
+    assert [event["event"] for event in emitted] == ["nmea_gga", "pvt_lost", "nmea_gga"]
+    assert derive_gnss_fix_status_from_output(emitted[1]) == "NO FIX"
+    assert derive_gnss_fix_status_from_output(emitted[-1]) == "FIX"
+    assert decoder._pvt_fix_active is True
 
 
 def test_gnss_synchro_parser_reads_valid_pseudorange_flag():

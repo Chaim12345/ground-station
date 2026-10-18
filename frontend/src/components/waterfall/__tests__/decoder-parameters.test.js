@@ -73,3 +73,18 @@ describe('SSTV decoder parameters', () => {
         });
     });
 });
+
+describe('GNSS decoder parameters', () => {
+    it('defaults to GPS L1 only and keeps other constellations selectable', () => {
+        const defaults = getDecoderDefaultParameters('gnss');
+
+        expect(defaults).toMatchObject({
+            gnss_enable_gps: true,
+            gnss_enable_galileo: false,
+            gnss_enable_glonass: false,
+            gnss_enable_beidou: false,
+            gnss_enable_qzss: false,
+        });
+        expect(mapParametersToBackend('gnss', defaults)).toMatchObject(defaults);
+    });
+});

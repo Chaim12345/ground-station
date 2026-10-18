@@ -122,26 +122,32 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         self.decimation_factor = 1
         self.decimation_filter = None
         self.cached_vfo_state = None
+        self._translation_phase_rad = 0.0
 
         # GNSS parameters (from DecoderConfig)
         self.gnss_sample_rate = int(config.gnss_sample_rate or 4_000_000)
         self.gnss_total_channels = int(config.gnss_total_channels or 24)
         self.gnss_output_rate_ms = int(config.gnss_output_rate_ms or 500)
         self.gnss_doppler_max = int(config.gnss_doppler_max or 6000)
+        # GNSS-SDR only publishes PVT while its solution is valid. Silence after a
+        # fix therefore needs a timeout to close the fix lifecycle.
+        self._pvt_fix_timeout_s = max(5.0, 3 * self.gnss_output_rate_ms / 1000.0)
+        self._last_valid_pvt_ts: Optional[float] = None
+        self._pvt_fix_active = False
         self.enable_gps = bool(
             config.gnss_enable_gps if config.gnss_enable_gps is not None else True
         )
         self.enable_galileo = bool(
-            config.gnss_enable_galileo if config.gnss_enable_galileo is not None else True
+            config.gnss_enable_galileo if config.gnss_enable_galileo is not None else False
         )
         self.enable_glonass = bool(
-            config.gnss_enable_glonass if config.gnss_enable_glonass is not None else True
+            config.gnss_enable_glonass if config.gnss_enable_glonass is not None else False
         )
         self.enable_beidou = bool(
-            config.gnss_enable_beidou if config.gnss_enable_beidou is not None else True
+            config.gnss_enable_beidou if config.gnss_enable_beidou is not None else False
         )
         self.enable_qzss = bool(
-            config.gnss_enable_qzss if config.gnss_enable_qzss is not None else True
+            config.gnss_enable_qzss if config.gnss_enable_qzss is not None else False
         )
 
         # Ensure we always have at least one enabled constellation.
@@ -350,14 +356,23 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         except queue.Full:
             pass
 
-    @staticmethod
     def _frequency_translate(
-        samples: np.ndarray, offset_freq: float, sample_rate: float
+        self, samples: np.ndarray, offset_freq: float, sample_rate: float
     ) -> np.ndarray:
+        # A VFO move changes the oscillator frequency, not its phase. Preserve
+        # phase across IQ chunks so GNSS-SDR sees one continuous sample stream.
+        phase = self._translation_phase_rad
         if offset_freq == 0:
-            return samples
-        t = np.arange(len(samples), dtype=np.float64) / sample_rate
-        shift = np.exp(-2j * np.pi * offset_freq * t)
+            if phase == 0.0:
+                return samples
+            return samples * np.exp(1j * phase)
+
+        phase_step = -2.0 * np.pi * offset_freq / sample_rate
+        sample_indices = np.arange(len(samples), dtype=np.float64)
+        shift = np.exp(1j * (phase + phase_step * sample_indices))
+        self._translation_phase_rad = float(
+            np.remainder(phase + phase_step * len(samples), 2.0 * np.pi)
+        )
         return samples * shift
 
     @staticmethod
@@ -613,6 +628,8 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         self._last_activity_packets_total = 0
         self._last_activity_monitor_obs_total = 0
         self._last_activity_loss_of_lock_total = 0
+        self._last_valid_pvt_ts = None
+        self._pvt_fix_active = False
         if self.monitor_receiver is not None:
             self.monitor_receiver.close()
         self.monitor_receiver = GnssUdpMonitorReceiver(bind_host=self.monitor_bind_host)
@@ -1002,6 +1019,26 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         with self.stats_lock:
             self.stats["udp_events_emitted"] += 1
 
+    def _lose_pvt_fix(self, message: str) -> None:
+        if not self._pvt_fix_active:
+            return
+
+        self._pvt_fix_active = False
+        self._last_valid_pvt_ts = None
+        # Let the first recovered solution through even if the previous PVT
+        # update was emitted less than one throttle interval ago.
+        self._last_udp_event_emit_ts.pop(("nmea_gga", "P", 0, 0), None)
+        self._send_output_update(
+            {
+                "event": "pvt_lost",
+                "message": message,
+                "gnss_fix_status": "NO FIX",
+                "fix_quality": "0",
+            }
+        )
+        with self.stats_lock:
+            self.stats["udp_events_emitted"] += 1
+
     def _emit_udp_pvt_event(self, pvt: Dict[str, Any]) -> None:
         latitude = pvt.get("latitude")
         longitude = pvt.get("longitude")
@@ -1009,11 +1046,18 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         valid_sats = pvt.get("valid_sats")
         solution_status = pvt.get("solution_status")
 
+        if solution_status == 0:
+            self._lose_pvt_fix("GNSS-SDR reported no PVT solution")
+            return
+
         has_coords = latitude is not None and longitude is not None
         has_solution = solution_status is not None
         if not has_coords and not has_solution:
             return
 
+        # Refresh on every valid packet, including ones suppressed by the UI throttle.
+        self._last_valid_pvt_ts = time.time()
+        self._pvt_fix_active = True
         if not self._should_emit_udp_event("nmea_gga", "P", 0, 0):
             return
 
@@ -1024,7 +1068,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
             "longitude": longitude,
             "altitude_m": altitude,
             "satellites": valid_sats,
-            "fix_quality": str(solution_status) if solution_status is not None else "0",
+            "fix_quality": str(solution_status) if solution_status is not None else None,
         }
         utc_time = pvt.get("utc_time")
         if utc_time:
@@ -1100,7 +1144,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
 
         for pvt in polled.get("pvt", []):
             self._emit_udp_pvt_event(pvt)
-            saw_tracking = True
+            saw_tracking = saw_tracking or self._pvt_fix_active
 
         # Backward-compatible state updates for the decoder lifecycle panel.
         now = time.time()
@@ -1113,6 +1157,13 @@ class GNSSSdrDecoder(BaseDecoderProcess):
 
     def _emit_activity_heartbeat(self, now: Optional[float] = None) -> None:
         current_time = now if now is not None else time.time()
+        if (
+            self._pvt_fix_active
+            and self._last_valid_pvt_ts is not None
+            and current_time - self._last_valid_pvt_ts >= self._pvt_fix_timeout_s
+        ):
+            self._lose_pvt_fix("No valid GNSS PVT update received recently")
+
         with self.stats_lock:
             packets_total = int(self.stats.get("udp_packets_total", 0))
             monitor_packets = int(self.stats.get("udp_packets_monitor", 0))
@@ -1134,7 +1185,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
         packets_per_sec = packets_delta / elapsed
         monitor_obs_per_sec = monitor_obs_delta / elapsed
         has_activity = packets_delta > 0 or monitor_obs_delta > 0
-        has_pvt = pvt_packets > 0
+        has_pvt = self._pvt_fix_active
 
         self._send_output_update(
             {
@@ -1263,6 +1314,7 @@ class GNSSSdrDecoder(BaseDecoderProcess):
     def run(self):
         setproctitle.setproctitle(f"Ground Station - GNSS Decoder (VFO {self.vfo})")
         self.telemetry_parser = TelemetryParser()
+        self._translation_phase_rad = 0.0
 
         self.stats: Dict[str, Any] = {
             "iq_chunks_in": 0,
@@ -1425,11 +1477,13 @@ class GNSSSdrDecoder(BaseDecoderProcess):
                 )
                 sdr_rate = float(iq_message.get("sample_rate") or self.sdr_sample_rate or 0.0)
                 if sdr_rate <= 0:
+                    self._translation_phase_rad = 0.0
                     continue
 
                 vfo_states = iq_message.get("vfo_states", {})
                 vfo_state_dict = vfo_states.get(self.vfo)
                 if not vfo_state_dict or not vfo_state_dict.get("active", False):
+                    self._translation_phase_rad = 0.0
                     continue
 
                 self.cached_vfo_state = vfo_state_dict
@@ -1438,6 +1492,9 @@ class GNSSSdrDecoder(BaseDecoderProcess):
 
                 in_band, _, _ = self._is_vfo_in_sdr_bandwidth(vfo_center, sdr_center, sdr_rate)
                 if not in_band:
+                    # No samples from this interval reach GNSS-SDR, so the
+                    # next admitted chunk starts a new mixer phase segment.
+                    self._translation_phase_rad = 0.0
                     with self.stats_lock:
                         self.stats["iq_chunks_in"] += 1
                         self.stats["samples_in"] += len(samples)

@@ -38,6 +38,14 @@ class TestDeriveGnssFixStatusFromOutput:
             == "NO FIX"
         )
 
+    def test_zero_quality_overrides_stale_coordinates(self):
+        assert (
+            derive_gnss_fix_status_from_output(
+                {"event": "nmea_gga", "latitude": 37.9838, "longitude": 23.7275, "fix_quality": "0"}
+            )
+            == "NO FIX"
+        )
+
     def test_detects_no_fix_from_nmea_without_fix_fields(self):
         assert derive_gnss_fix_status_from_output({"event": "nmea"}) == "NO FIX"
 
