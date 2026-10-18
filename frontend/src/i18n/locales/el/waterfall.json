@@ -49,6 +49,7 @@
     "title": "SDR",
     "sdr_label": "SDR",
     "no_sdr_selected": "[δεν επιλέχθηκε SDR]",
+    "sdr_required": "Επιλέξτε SDR πριν από την έναρξη της ροής",
     "local_sdrs": "Τοπικα SDR",
     "remote_sdrs": "Απομακρυσμενα SDR",
     "other_sdrs": "Αλλα SDR",
@@ -157,7 +158,8 @@
     "locked_to_transmitter_info": "Παρακολουθηση συχνότητας διορθωμένης κατά Doppler"
   },
   "error_dialog": {
-    "title": "Παρουσιαστηκε Σφαλμα",
+    "title": "Πρόβλημα SDR",
+    "technical_details": "Τεχνικές λεπτομέρειες",
     "close": "ΚΛΕΙΣΙΜΟ"
   },
   "statusbar": {

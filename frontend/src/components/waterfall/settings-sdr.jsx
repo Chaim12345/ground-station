@@ -376,6 +376,7 @@ const SdrAccordion = ({
         return options;
     };
 
+    const sdrRequiredError = Boolean(startStreamValidationErrors?.sdr);
     const gainRequiredError = Boolean(startStreamValidationErrors?.gain);
     const sampleRateRequiredError = Boolean(startStreamValidationErrors?.sampleRate);
     const antennaRequiredError = Boolean(startStreamValidationErrors?.antenna);
@@ -434,7 +435,7 @@ const SdrAccordion = ({
                 <LoadingOverlay loading={gettingSDRParameters}>
                     <Box sx={{mb: 2}}>
 
-                        <FormControl disabled={isStreaming} margin="normal"
+                        <FormControl disabled={isStreaming} error={sdrRequiredError} margin="normal"
                                      sx={{minWidth: 200, marginTop: 0, marginBottom: 1}} fullWidth
                                      variant="outlined"
                                      size="small">
@@ -454,6 +455,11 @@ const SdrAccordion = ({
                                 </MenuItem>
                                 {sdrMenuItems}
                             </Select>
+                            {sdrRequiredError && (
+                                <FormHelperText>
+                                    {t('sdr.sdr_required', { defaultValue: 'Select an SDR before starting stream' })}
+                                </FormHelperText>
+                            )}
                         </FormControl>
                         {isSigmfPlaybackSelected && (
                             <FormControl

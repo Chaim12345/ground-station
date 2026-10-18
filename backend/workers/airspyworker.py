@@ -410,8 +410,7 @@ def airspy_worker_process(
 
     except Exception as exc:
         message = f"Error in native Airspy worker process: {exc}"
-        logger.error(message)
-        logger.exception(exc)
+        logger.exception(message)
         data_queue.put(
             {
                 "type": "error",

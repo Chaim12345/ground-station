@@ -50,15 +50,19 @@
     "title": "SDR",
     "sdr_label": "SDR",
     "no_sdr_selected": "[no SDR selected]",
+    "sdr_required": "Select an SDR before starting stream",
     "local_sdrs": "Local SDRs",
     "remote_sdrs": "Remote SDRs",
     "other_sdrs": "Other SDRs",
     "gain_db": "Gain (dB)",
     "no_gain_selected": "[no gain selected]",
+    "gain_required": "Select gain before starting stream",
     "sample_rate": "Sample Rate",
     "no_rate_selected": "[no rate selected]",
+    "sample_rate_required": "Select sample rate before starting stream",
     "antenna": "Antenna",
     "no_antenna_selected": "[no antenna selected]",
+    "antenna_required": "Select antenna before starting stream",
     "enable_bias_t": "Enable Bias T",
     "enable_tuner_agc": "Enable tuner AGC",
     "enable_agc": "Enable AGC",
@@ -142,7 +146,8 @@
     }
   },
   "error_dialog": {
-    "title": "Error Occurred",
+    "title": "SDR issue",
+    "technical_details": "Technical details",
     "close": "Close"
   },
   "statusbar": {

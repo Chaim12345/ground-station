@@ -212,6 +212,7 @@ const initialState = {
     hasSoapyAgc: false,
     selectedAntenna: 'none',
     startStreamValidationErrors: {
+        sdr: false,
         gain: false,
         sampleRate: false,
         antenna: false,
@@ -492,6 +493,7 @@ export const waterfallSlice = createSlice({
         setStartStreamValidationErrors(state, action) {
             const payload = action.payload || {};
             state.startStreamValidationErrors = {
+                sdr: Boolean(payload.sdr),
                 gain: Boolean(payload.gain),
                 sampleRate: Boolean(payload.sampleRate),
                 antenna: Boolean(payload.antenna),
@@ -499,6 +501,7 @@ export const waterfallSlice = createSlice({
         },
         clearStartStreamValidationErrors(state) {
             state.startStreamValidationErrors = {
+                sdr: false,
                 gain: false,
                 sampleRate: false,
                 antenna: false,
@@ -506,7 +509,7 @@ export const waterfallSlice = createSlice({
         },
         clearStartStreamValidationError(state, action) {
             const field = action.payload;
-            if (!['gain', 'sampleRate', 'antenna'].includes(field)) {
+            if (!['sdr', 'gain', 'sampleRate', 'antenna'].includes(field)) {
                 return;
             }
             state.startStreamValidationErrors[field] = false;

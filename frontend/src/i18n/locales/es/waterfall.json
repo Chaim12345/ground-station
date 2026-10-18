@@ -49,6 +49,7 @@
     "title": "SDR",
     "sdr_label": "SDR",
     "no_sdr_selected": "[ningún SDR seleccionado]",
+    "sdr_required": "Seleccione un SDR antes de iniciar el flujo",
     "local_sdrs": "SDRs Locales",
     "remote_sdrs": "SDRs Remotos",
     "other_sdrs": "Otros SDRs",
@@ -157,7 +158,8 @@
     "locked_to_transmitter_info": "Rastreo de frecuencia corregida por doppler"
   },
   "error_dialog": {
-    "title": "Ocurrió un Error",
+    "title": "Problema de SDR",
+    "technical_details": "Detalles técnicos",
     "close": "Cerrar"
   },
   "statusbar": {

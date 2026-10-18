@@ -127,6 +127,8 @@ def _extract_samplerates(
 
 
 def _configure_airspy_signatures(lib: ctypes.CDLL) -> None:
+    lib.airspy_error_name.argtypes = [ctypes.c_int]
+    lib.airspy_error_name.restype = ctypes.c_char_p
     lib.airspy_list_devices.argtypes = [ctypes.POINTER(ctypes.c_uint64), ctypes.c_int]
     lib.airspy_list_devices.restype = ctypes.c_int
     lib.airspy_open.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
@@ -264,10 +266,15 @@ class AirspyDevice:
             return cls(handle=handle, serial=None)
 
         serial_value = _normalize_serial(serial)
-        _raise_if_not_success(
-            lib.airspy_open_sn(ctypes.byref(handle), ctypes.c_uint64(serial_value)),
-            "open Airspy device by serial",
-        )
+        code = lib.airspy_open_sn(ctypes.byref(handle), ctypes.c_uint64(serial_value))
+        if code != 0:
+            # libairspy exposes the error category, but no further USB failure detail.
+            native_name = lib.airspy_error_name(code)
+            error_name = native_name.decode("utf-8", errors="replace") if native_name else "UNKNOWN"
+            raise AirspyNativeError(
+                f"open Airspy device by serial {format_serial(serial_value)} failed: "
+                f"{error_name} (code {code})"
+            )
         return cls(handle=handle, serial=serial_value)
 
     def close(self) -> None:

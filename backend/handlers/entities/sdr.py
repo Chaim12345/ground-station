@@ -604,14 +604,9 @@ async def sdr_command_routing(
                 reply["data"] = conflict
                 return reply
             except Exception as e:
-                logger.error(f"Error starting SDR stream: {str(e)}")
-                logger.exception(e)
-                await sio.emit(
-                    "sdr-error",
-                    {"message": f"Failed to start SDR stream: {str(e)}"},
-                    room=client_id,
-                )
+                logger.exception("Error starting SDR stream")
                 reply["success"] = False
+                reply["error"] = f"Failed to start SDR stream: {e}"
 
         elif cmd == "stop-streaming":
 

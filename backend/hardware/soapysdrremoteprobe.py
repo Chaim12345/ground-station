@@ -22,6 +22,7 @@ import SoapySDR
 import yaml
 from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_TX
 
+from common.errors import format_device_error
 from common.logconfig import resolve_log_config_path
 
 # Load logger configuration
@@ -333,6 +334,7 @@ def probe_remote_soapy_sdr(sdr_details: Dict[str, Any]) -> ProbeReply:
 
         return _postprocess_caps(_normalize_value(caps))
 
+    stage = "opening remote device"
     try:
         # Build the device args string for connecting to the remote SoapySDR server
         hostname = sdr_details.get("host", "127.0.0.1")
@@ -352,6 +354,7 @@ def probe_remote_soapy_sdr(sdr_details: Dict[str, Any]) -> ProbeReply:
 
         # Create the device instance
         sdr = SoapySDR.Device(device_args)
+        stage = "probing device capabilities"
 
         # Extract device model from sdr string representation (e.g., "b200:B210")
         sdr_str = str(sdr)
@@ -561,10 +564,17 @@ def probe_remote_soapy_sdr(sdr_details: Dict[str, Any]) -> ProbeReply:
         capabilities = _collect_capabilities(sdr, channel)
 
     except Exception as e:
-        reply["log"].append(f"ERROR: Error connecting to SoapySDR device: {str(e)}")
-        reply["log"].append(f"EXCEPTION: {str(e)}\n{e.__class__.__name__}: {str(e)}")
+        error_message = format_device_error(
+            "SoapySDR",
+            stage,
+            e,
+            endpoint=f"{sdr_details.get('host', '127.0.0.1')}:{sdr_details.get('port', 55132)}",
+            driver=sdr_details.get("driver"),
+            serial=sdr_details.get("serial"),
+        )
+        reply["log"].append(f"ERROR: {error_message}")
         reply["success"] = False
-        reply["error"] = str(e)
+        reply["error"] = error_message
 
     finally:
         reply["data"] = {

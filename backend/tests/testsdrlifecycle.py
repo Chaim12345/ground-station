@@ -12,8 +12,11 @@ from pipeline.orchestration.processlifecycle import ProcessLifecycleManager
 
 
 class _SocketServer:
+    def __init__(self):
+        self.emitted = []
+
     async def emit(self, *_args, **_kwargs):
-        return None
+        self.emitted.append((_args, _kwargs))
 
     async def leave_room(self, *_args, **_kwargs):
         return None
@@ -121,6 +124,61 @@ async def test_sdr_readiness_propagates_worker_error():
 
     with pytest.raises(RuntimeError, match="device open failed"):
         await manager._wait_until_sdr_ready("sdr-1", process_info, ready)
+
+
+@pytest.mark.asyncio
+async def test_sdr_readiness_timeout_reports_last_native_receiver_error():
+    manager = _new_manager()
+    manager.sdr_ready_timeout_seconds = 0.001
+    process_info = {
+        "worker_stats": {
+            "samples_read": 0,
+            "last_read_error": "SoapySDR readStream: STREAM_ERROR (code -2)",
+        },
+        "ready_waiters": [],
+    }
+    ready = manager._create_ready_waiter(process_info)
+
+    with pytest.raises(
+        RuntimeError, match=r"last receiver error: SoapySDR readStream: STREAM_ERROR \(code -2\)"
+    ):
+        await manager._wait_until_sdr_ready("sdr-1", process_info, ready)
+
+
+@pytest.mark.asyncio
+async def test_worker_error_uses_pending_start_reply_and_notifies_other_viewers():
+    messages = queue.Queue()
+    messages.put({"type": "error", "message": "AIRSPY_ERROR_NOT_FOUND (code -5)"})
+    messages.put({"type": "terminated"})
+    process_info = {
+        "process": _StoppedProcess(),
+        "fft_process": None,
+        "data_queue": messages,
+        "stop_event": asyncio.Event(),
+        "clients": {"starter", "viewer"},
+        "iq_broadcaster": _Broadcaster(),
+        "streaming_started": False,
+        "startup_ready": False,
+        "ready_waiters": [],
+        "worker_stats": {"samples_read": 0},
+        "failure_reported": False,
+    }
+    socket = _SocketServer()
+    manager = _new_manager({"sdr-1": process_info})
+    manager.sio = socket
+    ready = manager._create_ready_waiter(process_info, "starter")
+
+    await manager._monitor_data_queue("sdr-1", expected_process_pid=42)
+
+    with pytest.raises(RuntimeError, match="AIRSPY_ERROR_NOT_FOUND"):
+        await manager._wait_until_sdr_ready("sdr-1", process_info, ready)
+    errors = [(args, kwargs) for args, kwargs in socket.emitted if args[0] == "sdr-error"]
+    assert errors == [
+        (
+            ("sdr-error", {"message": "SDR error: AIRSPY_ERROR_NOT_FOUND (code -5)"}),
+            {"room": "viewer"},
+        )
+    ]
 
 
 def test_decoder_error_status_is_logged(caplog):

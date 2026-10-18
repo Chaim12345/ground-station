@@ -105,10 +105,9 @@ class RtlSdrTcpClient:
             magic, self._tuner_type_id, self._tuner_gain_count = struct.unpack("!4sII", dongle_info)
 
             if magic != b"RTL0":
-                self._logger.warning(
-                    f"Received unexpected magic bytes: {magic!r}. Expected b'RTL0'."
+                raise ValueError(
+                    f"Invalid rtl_tcp dongle header: expected b'RTL0', received {magic!r}"
                 )
-                # Continue anyway, but log the warning
 
             if self._tuner_type_id is not None:
                 self._tuner_type_name = self._TUNER_TYPES.get(

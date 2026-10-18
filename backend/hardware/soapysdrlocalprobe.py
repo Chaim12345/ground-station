@@ -21,6 +21,7 @@ import SoapySDR
 import yaml
 from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_TX
 
+from common.errors import format_device_error
 from common.logconfig import resolve_log_config_path
 
 # Load logger configuration
@@ -332,6 +333,7 @@ def probe_local_soapy_sdr(sdr_details: Dict[str, Any]) -> ProbeReply:
 
     reply["log"].append(f"INFO: Connecting to local SoapySDR device with details: {sdr_details}")
 
+    stage = "opening device"
     try:
         # Get device parameters
         driver = sdr_details.get("driver", "")
@@ -346,6 +348,7 @@ def probe_local_soapy_sdr(sdr_details: Dict[str, Any]) -> ProbeReply:
 
         # Create the device instance
         sdr = SoapySDR.Device(device_args)
+        stage = "probing device capabilities"
 
         reply["log"].append(f"INFO: device args: {device_args}")
 
@@ -542,9 +545,16 @@ def probe_local_soapy_sdr(sdr_details: Dict[str, Any]) -> ProbeReply:
         capabilities = _collect_capabilities(sdr, channel)
 
     except Exception as e:
-        reply["log"].append(f"ERROR: Error connecting to local SoapySDR device: {str(e)}")
+        error_message = format_device_error(
+            "SoapySDR",
+            stage,
+            e,
+            driver=sdr_details.get("driver"),
+            serial=sdr_details.get("serial"),
+        )
+        reply["log"].append(f"ERROR: {error_message}")
         reply["success"] = False
-        reply["error"] = str(e)
+        reply["error"] = error_message
 
     finally:
         reply["data"] = {

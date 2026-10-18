@@ -488,7 +488,6 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
             store.dispatch(setErrorMessage(error.message));
             store.dispatch(setErrorDialogOpen(true));
             store.dispatch(setStartStreamingLoading(false));
-            toast.error(t('notifications.sdr.configure_failed', { error: error.message }));
         });
 
         // SDR error events

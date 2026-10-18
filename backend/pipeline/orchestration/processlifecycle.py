@@ -162,13 +162,16 @@ class ProcessLifecycleManager:
         except (TypeError, ValueError):
             return 0
 
-    def _create_ready_waiter(self, process_info: Dict[str, Any]) -> asyncio.Future:
+    def _create_ready_waiter(
+        self, process_info: Dict[str, Any], client_id: Optional[str] = None
+    ) -> asyncio.Future:
         """Wait for sample activity newer than the state visible to the caller."""
         future = asyncio.get_running_loop().create_future()
         process_info.setdefault("ready_waiters", []).append(
             {
                 "future": future,
                 "baseline_samples": self._sample_count(process_info),
+                "client_id": client_id,
             }
         )
         return future
@@ -253,6 +256,23 @@ class ProcessLifecycleManager:
                 future.set_result({"success": False, "error": message})
         process_info["ready_waiters"] = []
 
+    async def _emit_worker_error(
+        self,
+        sdr_id: str,
+        process_info: Dict[str, Any],
+        event: str,
+        message: str,
+        pending_clients: set[str],
+    ) -> None:
+        """Pending callers get their error in the command reply; notify other viewers."""
+        payload = {DictKeys.MESSAGE: f"SDR error: {message}"}
+        if not pending_clients:
+            await self.sio.emit(event, payload, room=sdr_id)
+            return
+        for client_id in set(process_info["clients"]) - pending_clients:
+            if not VFOManager.is_internal_session(client_id):
+                await self.sio.emit(event, payload, room=client_id)
+
     async def _wait_until_sdr_ready(
         self,
         sdr_id: str,
@@ -262,9 +282,11 @@ class ProcessLifecycleManager:
         try:
             result = await asyncio.wait_for(future, timeout=self.sdr_ready_timeout_seconds)
         except asyncio.TimeoutError as exc:
+            last_read_error = (process_info.get("worker_stats") or {}).get("last_read_error")
+            detail = f"; last receiver error: {last_read_error}" if last_read_error else ""
             raise RuntimeError(
                 f"SDR {sdr_id} did not deliver samples within "
-                f"{self.sdr_ready_timeout_seconds:g} seconds"
+                f"{self.sdr_ready_timeout_seconds:g} seconds{detail}"
             ) from exc
         finally:
             process_info["ready_waiters"] = [
@@ -543,7 +565,7 @@ class ProcessLifecycleManager:
 
             # A running process is not enough: the new configuration must be
             # followed by fresh IQ samples before the caller may start consumers.
-            ready_future = self._create_ready_waiter(process_info)
+            ready_future = self._create_ready_waiter(process_info, client_id)
 
             # Update the configuration if needed
             config = {"client_id": client_id}
@@ -739,7 +761,7 @@ class ProcessLifecycleManager:
             }
 
             process_info = self.processes[sdr_id]
-            ready_future = self._create_ready_waiter(process_info)
+            ready_future = self._create_ready_waiter(process_info, client_id)
 
             # Send initial configuration
             config_queue.put(config)
@@ -1290,12 +1312,18 @@ class ProcessLifecycleManager:
                                 data.get(DictKeys.MESSAGE) or "SDR configuration failed"
                             )
                             process_info["last_worker_error"] = error_message
+                            pending_clients = {
+                                waiter["client_id"]
+                                for waiter in process_info.get("ready_waiters", [])
+                                if waiter.get("client_id")
+                            }
                             self._fail_ready_waiters(process_info, error_message)
-                            # Send config error to all clients connected to this SDR
-                            await self.sio.emit(
+                            await self._emit_worker_error(
+                                sdr_id,
+                                process_info,
                                 SocketEvents.SDR_CONFIG_ERROR,
-                                {DictKeys.MESSAGE: f"SDR error: {error_message}"},
-                                room=sdr_id,
+                                error_message,
+                                pending_clients,
                             )
                             self.logger.error(f"Config error from SDR process: {error_message}")
                             if process_info.get("startup_ready") and not process_info.get(
@@ -1311,12 +1339,18 @@ class ProcessLifecycleManager:
                         elif data_type == QueueMessageTypes.ERROR:
                             error_message = str(data.get(DictKeys.MESSAGE) or "SDR worker failed")
                             process_info["last_worker_error"] = error_message
+                            pending_clients = {
+                                waiter["client_id"]
+                                for waiter in process_info.get("ready_waiters", [])
+                                if waiter.get("client_id")
+                            }
                             self._fail_ready_waiters(process_info, error_message)
-                            # Send error to all clients connected to this SDR
-                            await self.sio.emit(
+                            await self._emit_worker_error(
+                                sdr_id,
+                                process_info,
                                 SocketEvents.SDR_ERROR,
-                                {DictKeys.MESSAGE: f"SDR error: {error_message}"},
-                                room=sdr_id,
+                                error_message,
+                                pending_clients,
                             )
                             self.logger.error(f"Error from SDR process: {error_message}")
                             if process_info.get("startup_ready") and not process_info.get(

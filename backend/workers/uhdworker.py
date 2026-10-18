@@ -9,6 +9,7 @@ from typing import Any, Dict
 import numpy as np
 import psutil
 
+from common.errors import format_device_error
 from common.iqsamples import require_complex64
 
 # Configure logging for the worker process
@@ -61,6 +62,8 @@ def uhd_worker_process(
     sdr_id = None
     client_id = None
     streamer = None
+    config = {}
+    stage = "reading initial configuration"
 
     logger.info(f"UHD worker process started for SDR {sdr_id} for client {client_id}")
 
@@ -101,32 +104,44 @@ def uhd_worker_process(
             logger.info(f"Looking for device with serial: {serial_number}")
 
             # Discover all USRP devices (no type filter)
+            stage = "discovering devices"
             discovered_devices = uhd.find("")
             logger.info(f"Found {len(discovered_devices)} USRP device(s)")
 
             # Find the device matching the serial
+            stage = "selecting device"
             device_args = None
+            discovered_serials = []
             for dev in discovered_devices:
                 dev_string = dev.to_string()
                 logger.info(f"Discovered: {dev_string}")
 
-                # Parse to check serial
-                if f"serial={serial_number}" in dev_string:
+                # Compare the whole serial so a shorter prefix cannot select another USRP.
+                parts = [part.strip() for part in dev_string.split(",")]
+                device_serials = [
+                    part.split("=", 1)[1] for part in parts if part.startswith("serial=")
+                ]
+                discovered_serials.extend(device_serials)
+                if str(serial_number) in device_serials:
                     # Use the discovery string but remove the serial key to avoid lookup failure
                     # Keep other identifiers like type, name, product, addr (for network devices)
-                    parts = dev_string.split(",")
                     filtered_parts = [p for p in parts if not p.startswith("serial=")]
                     device_args = ",".join(filtered_parts)
                     logger.info(f"Matched device, using args: {device_args}")
                     break
 
             if not device_args:
-                raise Exception(f"Device with serial {serial_number} not found")
+                available = ", ".join(discovered_serials) if discovered_serials else "none reported"
+                raise LookupError(
+                    f"No matching USRP among {len(discovered_devices)} discovered device(s); "
+                    f"available serials: {available}"
+                )
         else:
             device_args = ""
             logger.info(f"No serial specified, will connect to first available device")
 
         # Create UHD device
+        stage = "opening device"
         UHD = uhd.usrp.MultiUSRP(device_args)
 
         # Get device info
@@ -134,6 +149,7 @@ def uhd_worker_process(
         logger.info(f"Connected to UHD: {device_info}")
 
         # Configure the device
+        stage = "configuring receiver"
         channel = config.get("channel", 0)
         antenna = config.get("antenna", "RX2")
 
@@ -197,6 +213,7 @@ def uhd_worker_process(
         )
 
         # Setup streaming with smaller buffer sizes to prevent overflow
+        stage = "setting up RX stream"
         stream_args = uhd.usrp.StreamArgs("fc32", "sc16")
         stream_args.channels = [channel]
         # Set smaller buffer sizes to reduce latency and prevent overflow
@@ -224,6 +241,7 @@ def uhd_worker_process(
                 "timestamp": time.time(),
             }
         )
+        stage = "streaming samples"
 
         # Performance monitoring stats
         stats: Dict[str, Any] = {
@@ -467,6 +485,9 @@ def uhd_worker_process(
 
                     if metadata.error_code != uhd.types.RXMetadataErrorCode.none:
                         stats["read_errors"] += 1
+                        stats["last_read_error"] = (
+                            f"UHD receiver: {metadata.strerror()} (code {metadata.error_code})"
+                        )
                         if metadata.error_code == uhd.types.RXMetadataErrorCode.overflow:
                             logger.warning("Receiver overflow - skipping frame")
                             continue
@@ -476,6 +497,7 @@ def uhd_worker_process(
 
                     if num_rx_samples < 256:
                         continue
+                    stats.pop("last_read_error", None)
 
                     samples_remaining = num_samples - buffer_position
                     samples_to_add = min(num_rx_samples, samples_remaining)
@@ -572,8 +594,10 @@ def uhd_worker_process(
                         logger.debug(f"Could not queue IQ data: {str(e)}")
 
             except Exception as e:
-                logger.error(f"Error processing SDR data: {str(e)}")
-                logger.exception(e)
+                error_msg = format_device_error(
+                    "UHD", "receiving samples", e, serial=config.get("serial_number")
+                )
+                logger.exception(error_msg)
                 stats["errors"] += 1
 
                 # Send error back to the main process
@@ -581,7 +605,7 @@ def uhd_worker_process(
                     {
                         "type": "error",
                         "client_id": client_id,
-                        "message": str(e),
+                        "message": error_msg,
                         "timestamp": time.time(),
                     }
                 )
@@ -590,9 +614,8 @@ def uhd_worker_process(
                 time.sleep(0.1)  # Reduced from 1 second
 
     except Exception as e:
-        error_msg = f"Error in UHD worker process: {str(e)}"
-        logger.error(error_msg)
-        logger.exception(e)
+        error_msg = format_device_error("UHD", stage, e, serial=config.get("serial_number"))
+        logger.exception(error_msg)
 
         # Send error back to the main process
         data_queue.put(

@@ -764,13 +764,14 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                 const configureResponse = await applyLoadedSDRParameters(selectedValue, response, takeoverConfig);
                 if (!configureResponse?.success && !configureResponse?.joined) {
                     dispatch(restoreSdrSelection(previous));
-                    if (!configureResponse?.canceled) {
-                        toast.error(configureResponse?.error || 'Could not configure SDR');
+                    if (!configureResponse?.canceled && configureResponse?.error) {
+                        // Backend configuration failures already open the SDR error dialog.
+                        toast.error(configureResponse.error);
                     }
                 }
             } catch (error) {
                 dispatch(restoreSdrSelection(previous));
-                dispatch(setErrorMessage(error));
+                dispatch(setErrorMessage(error?.message || String(error)));
                 dispatch(setErrorDialogOpen(true));
             }
         }
@@ -787,7 +788,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                 applyLoadedSDRParameters(selectedSDRId, response);
             })
             .catch((error) => {
-                dispatch(setErrorMessage(error));
+                dispatch(setErrorMessage(error?.message || String(error)));
                 dispatch(setErrorDialogOpen(true));
             });
     }, [selectedSDRId, loadSDRParameters, applyLoadedSDRParameters, dispatch]);
@@ -1519,8 +1520,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     }));
                 } else if (!response?.joined) {
                     dispatch(restoreSdrSelection(previous));
-                    if (!response?.canceled) {
-                        toast.error(`Failed to configure playback: ${response?.error || 'Unknown error'}`);
+                    if (!response?.canceled && response?.error) {
+                        toast.error(`Failed to configure playback: ${response.error}`);
                     }
                 }
             });
@@ -1568,10 +1569,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                 recordingPath: playbackRecordingPath,
             });
             if (!configureResponse?.success) {
-                if (!configureResponse?.canceled) {
-                    toast.error(
-                        `Failed to configure playback: ${configureResponse?.error || 'Unknown error'}`
-                    );
+                if (!configureResponse?.canceled && configureResponse?.error) {
+                    toast.error(`Failed to configure playback: ${configureResponse.error}`);
                 }
                 return;
             }
@@ -1587,7 +1586,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             if (startResponse?.success) {
                 dispatch(setPlaybackStartTime(new Date().toISOString()));
             } else if (!startResponse?.canceled) {
-                toast.error(`Failed to start playback stream: ${startResponse?.error || 'Unknown error'}`);
+                dispatch(setErrorMessage(startResponse?.error || 'Failed to start playback stream'));
+                dispatch(setErrorDialogOpen(true));
             }
         } else if (!playbackRecordingPath) {
             toast.error('Please select a recording first');

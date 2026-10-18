@@ -47,15 +47,19 @@
     "title": "SDR",
     "sdr_label": "SDR",
     "no_sdr_selected": "[nessun SDR selezionato]",
+    "sdr_required": "Seleziona un SDR prima di avviare lo streaming",
     "local_sdrs": "SDR Locali",
     "remote_sdrs": "SDR Remoti",
     "other_sdrs": "Altri SDR",
     "gain_db": "Guadagno (dB)",
     "no_gain_selected": "[nessun guadagno selezionato]",
+    "gain_required": "Seleziona il guadagno prima di avviare lo streaming",
     "sample_rate": "Frequenza Campionamento",
     "no_rate_selected": "[nessuna frequenza selezionata]",
+    "sample_rate_required": "Seleziona la frequenza di campionamento prima di avviare lo streaming",
     "antenna": "Antenna",
     "no_antenna_selected": "[nessuna antenna selezionata]",
+    "antenna_required": "Seleziona l'antenna prima di avviare lo streaming",
     "enable_bias_t": "Abilita Bias T",
     "enable_tuner_agc": "Abilita AGC tuner",
     "enable_agc": "Abilita AGC",
@@ -114,7 +118,8 @@
     }
   },
   "error_dialog": {
-    "title": "Errore Verificato",
+    "title": "Problema SDR",
+    "technical_details": "Dettagli tecnici",
     "close": "Chiudi"
   },
   "statusbar": {

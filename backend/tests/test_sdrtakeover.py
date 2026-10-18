@@ -22,6 +22,7 @@ class _SocketServer:
     def __init__(self):
         self.entered = []
         self.left = []
+        self.emitted = []
 
     async def enter_room(self, session_id, room):
         self.entered.append((session_id, room))
@@ -30,7 +31,36 @@ class _SocketServer:
         self.left.append((session_id, room))
 
     async def emit(self, *_args, **_kwargs):
-        pass
+        self.emitted.append((_args, _kwargs))
+
+
+@pytest.mark.asyncio
+async def test_start_failure_returns_error_without_emitting_second_event(monkeypatch):
+    monkeypatch.setattr(sdrhandlers, "AsyncSessionLocal", _DbSession)
+    monkeypatch.setattr(sdrhandlers.process_manager, "processes", {})
+    monkeypatch.setattr(
+        sdrhandlers.crud.hardware,
+        "fetch_sdr",
+        AsyncMock(return_value={"success": True, "data": {"id": "sdr-a", "type": "airspy"}}),
+    )
+    monkeypatch.setattr(sdrhandlers.session_service, "session_exists", lambda _sid: True)
+    monkeypatch.setattr(
+        sdrhandlers.session_service, "get_session_config", lambda _sid: {"sdr_id": "sdr-a"}
+    )
+    monkeypatch.setattr(
+        sdrhandlers.session_service,
+        "start_streaming",
+        AsyncMock(side_effect=RuntimeError("AIRSPY_ERROR_NOT_FOUND (code -5)")),
+    )
+    sio = _SocketServer()
+
+    response = await sdrhandlers.sdr_command_routing(
+        sio, "start-streaming", {"selectedSDRId": "sdr-a"}, logging.getLogger(__name__), "viewer"
+    )
+
+    assert response["success"] is False
+    assert response["error"] == "Failed to start SDR stream: AIRSPY_ERROR_NOT_FOUND (code -5)"
+    assert sio.emitted == []
 
 
 def _set_active_sdr(monkeypatch):

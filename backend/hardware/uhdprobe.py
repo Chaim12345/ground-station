@@ -9,6 +9,7 @@ import sys
 
 import yaml
 
+from common.errors import format_device_error
 from common.logconfig import resolve_log_config_path
 
 # Try to import UHD with path handling
@@ -99,6 +100,7 @@ def probe_local_uhd_usrp(sdr_details):
     reply["log"].append(f"INFO: Connecting to local UHD/USRP device with details: {sdr_details}")
 
     usrp = None
+    stage = "preparing device selection"
     try:
         # Get device parameters
         base_device_args = sdr_details.get("device_args", "")
@@ -114,27 +116,38 @@ def probe_local_uhd_usrp(sdr_details):
             reply["log"].append(f"INFO: Looking for device with serial: {serial_number}")
 
             # Discover all USRP devices (no type filter)
+            stage = "discovering devices"
             discovered_devices = uhd.find("")
             reply["log"].append(f"INFO: Found {len(discovered_devices)} USRP device(s)")
 
             # Find the device matching the serial
+            stage = "selecting device"
             device_args = None
+            discovered_serials = []
             for dev in discovered_devices:
                 dev_string = dev.to_string()
                 reply["log"].append(f"INFO: Discovered: {dev_string}")
 
-                # Parse to check serial
-                if f"serial={serial_number}" in dev_string:
+                # Match the whole serial and retain discovered serials for the error reply.
+                parts = [part.strip() for part in dev_string.split(",")]
+                device_serials = [
+                    part.split("=", 1)[1] for part in parts if part.startswith("serial=")
+                ]
+                discovered_serials.extend(device_serials)
+                if str(serial_number) in device_serials:
                     # Use the discovery string but remove the serial key to avoid lookup failure
                     # Keep other identifiers like type, name, product, addr (for network devices)
-                    parts = dev_string.split(",")
                     filtered_parts = [p for p in parts if not p.startswith("serial=")]
                     device_args = ",".join(filtered_parts)
                     reply["log"].append(f"INFO: Matched device, using args: {device_args}")
                     break
 
             if not device_args:
-                raise Exception(f"Device with serial {serial_number} not found")
+                available = ", ".join(discovered_serials) if discovered_serials else "none reported"
+                raise LookupError(
+                    f"No matching USRP among {len(discovered_devices)} discovered device(s); "
+                    f"available serials: {available}"
+                )
         else:
             # No serial specified, use base_device_args or discover first device
             if base_device_args:
@@ -152,7 +165,9 @@ def probe_local_uhd_usrp(sdr_details):
         reply["log"].append(f"INFO: Final device args: '{device_args}', channel: {channel}")
 
         # Create the USRP device instance
+        stage = "opening device"
         usrp = uhd.usrp.MultiUSRP(device_args)
+        stage = "probing device capabilities"
 
         # Get device information
         device_info = usrp.get_pp_string()
@@ -545,9 +560,15 @@ def probe_local_uhd_usrp(sdr_details):
         reply["success"] = True
 
     except Exception as e:
-        reply["log"].append(f"ERROR: Error connecting to UHD/USRP device: {str(e)}")
+        error_message = format_device_error(
+            "UHD",
+            stage,
+            e,
+            serial=sdr_details.get("serial"),
+        )
+        reply["log"].append(f"ERROR: {error_message}")
         reply["success"] = False
-        reply["error"] = str(e)
+        reply["error"] = error_message
 
     finally:
         # Clean up - UHD handles device cleanup automatically

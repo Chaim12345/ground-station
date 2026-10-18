@@ -50,6 +50,7 @@
     "title": "SDR",
     "sdr_label": "SDR",
     "no_sdr_selected": "[未选择 SDR]",
+    "sdr_required": "开始接收前请先选择 SDR",
     "local_sdrs": "本地 SDR",
     "remote_sdrs": "远程 SDR",
     "other_sdrs": "其他 SDR",
@@ -158,7 +159,8 @@
     }
   },
   "error_dialog": {
-    "title": "发生错误",
+    "title": "SDR 问题",
+    "technical_details": "技术详情",
     "close": "关闭"
   },
   "statusbar": {

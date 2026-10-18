@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useTranslation } from 'react-i18next';
 import { useSocket } from '../common/socket.jsx';
 import { useWaterfallEngine } from './waterfall-engine-provider.jsx';
 import {
@@ -7,6 +8,7 @@ import {
     setJoinedSdrId,
     updateSDRConfig,
     setErrorMessage,
+    setErrorDialogOpen,
     setStartStreamingLoading,
     setFFTdataOverflow,
     setExpandedPanels,
@@ -30,12 +32,14 @@ const useWaterfallStream = ({
     initializeAudio
 }) => {
     const dispatch = useDispatch();
+    const { t } = useTranslation('waterfall');
     const { socket } = useSocket();
     const { subscribeToFftData } = useWaterfallEngine();
     const {
         selectedSDRId,
         centerFrequency,
         sampleRate,
+        sampleRateValues,
         gain,
         fftSize,
         sdrSettingsById,
@@ -43,6 +47,7 @@ const useWaterfallStream = ({
         fftOverlapPercent,
         fftOverlapDepth,
         selectedAntenna,
+        antennasList,
         selectedOffsetValue,
         fftAveraging,
         isStreaming,
@@ -256,6 +261,17 @@ const useWaterfallStream = ({
 
     const startStreaming = useCallback(async () => {
         if (!isStreaming) {
+            if (isUnsetSelection(selectedSDRId)) {
+                // Mark only the SDR selector; its dependent controls are not usable yet.
+                dispatch(setStartStreamValidationErrors({ sdr: true }));
+                if (!expandedPanels.includes('sdr')) {
+                    dispatch(setExpandedPanels([...expandedPanels, 'sdr']));
+                }
+                dispatch(setErrorMessage(t('sdr.sdr_required', { defaultValue: 'Select an SDR before starting stream' })));
+                dispatch(setErrorDialogOpen(true));
+                return;
+            }
+
             const isSigmfPlayback = selectedSDRId === "sigmf-playback";
             if (isSigmfPlayback && !playbackRecordingPath) {
                 toast.error('Please select a recording first');
@@ -265,15 +281,27 @@ const useWaterfallStream = ({
             if (!isSigmfPlayback) {
                 const validationErrors = {
                     gain: isUnsetSelection(gain),
-                    sampleRate: isUnsetSelection(sampleRate),
-                    antenna: isUnsetSelection(selectedAntenna),
+                    // The menu shows "no rate selected" when a stale rate is
+                    // absent from this device's current options.
+                    sampleRate: isUnsetSelection(sampleRate)
+                        || !sampleRateValues.includes(sampleRate)
+                        || !Number.isFinite(Number(sampleRate))
+                        || Number(sampleRate) <= 0,
+                    antenna: isUnsetSelection(selectedAntenna)
+                        || !antennasList?.rx?.includes(selectedAntenna),
                 };
                 if (validationErrors.gain || validationErrors.sampleRate || validationErrors.antenna) {
                     dispatch(setStartStreamValidationErrors(validationErrors));
                     if (!expandedPanels.includes('sdr')) {
                         dispatch(setExpandedPanels([...expandedPanels, 'sdr']));
                     }
-                    toast.error('Select gain, sample rate, and antenna before starting stream');
+                    const messages = [
+                        validationErrors.gain && t('sdr.gain_required', { defaultValue: 'Select gain before starting stream' }),
+                        validationErrors.sampleRate && t('sdr.sample_rate_required', { defaultValue: 'Select sample rate before starting stream' }),
+                        validationErrors.antenna && t('sdr.antenna_required', { defaultValue: 'Select antenna before starting stream' }),
+                    ].filter(Boolean);
+                    dispatch(setErrorMessage(messages.join('\n')));
+                    dispatch(setErrorDialogOpen(true));
                     return;
                 }
             }
@@ -340,9 +368,13 @@ const useWaterfallStream = ({
             );
             if (!startResult.success) {
                 dispatch(setStartStreamingLoading(false));
+                if (!startResult.canceled) {
+                    dispatch(setErrorMessage(startResult.response?.error || 'Failed to start SDR stream'));
+                    dispatch(setErrorDialogOpen(true));
+                }
             }
         }
-    }, [isStreaming, dispatch, selectedSDRId, centerFrequency, sampleRate, gain, fftSize, biasT, tunerAgc, rtlAgc, fftWindow, fftOverlapPercent, fftOverlapDepth, selectedAntenna, selectedOffsetValue, playbackRecordingPath, soapyAgc, fftAveraging, getAudioState, initializeAudio, isUnsetSelection, expandedPanels, sdrSettingsById, callWithTakeoverConfirmation]);
+    }, [isStreaming, dispatch, t, selectedSDRId, centerFrequency, sampleRate, sampleRateValues, gain, fftSize, biasT, tunerAgc, rtlAgc, fftWindow, fftOverlapPercent, fftOverlapDepth, selectedAntenna, antennasList, selectedOffsetValue, playbackRecordingPath, soapyAgc, fftAveraging, getAudioState, initializeAudio, isUnsetSelection, expandedPanels, sdrSettingsById, callWithTakeoverConfirmation]);
 
     const stopStreaming = useCallback(async () => {
         if (isStreaming) {
@@ -397,11 +429,10 @@ const useWaterfallStream = ({
 
     const playButtonEnabledOrNot = useCallback(() => {
         const isStreamingActive = isStreaming;
-        const noSDRSelected = selectedSDRId === 'none';
         const isSigmfPlayback = selectedSDRId === 'sigmf-playback';
         const isLoadingParameters = gettingSDRParameters;
         const missingPlaybackRecording = isSigmfPlayback && !playbackRecordingPath;
-        return isStreamingActive || noSDRSelected || isLoadingParameters || missingPlaybackRecording;
+        return isStreamingActive || isLoadingParameters || missingPlaybackRecording;
     }, [isStreaming, selectedSDRId, gettingSDRParameters, playbackRecordingPath]);
 
     return { startStreaming, stopStreaming, seekPlayback, playButtonEnabledOrNot, takeoverDialog };

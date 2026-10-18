@@ -14,7 +14,6 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import json
 import logging
 import time
 import warnings
@@ -23,6 +22,7 @@ from typing import Any, Dict
 import numpy as np
 import psutil
 
+from common.errors import format_device_error
 from common.iqsamples import require_complex64
 
 # Suppress a very specific third-party warning emitted at import-time by pyrtlsdr
@@ -41,6 +41,22 @@ from workers.rtlsdrtcpclient import RtlSdrTcpClient  # noqa: E402 - follows filt
 
 # Configure logging for the worker process
 logger = logging.getLogger("rtlsdr-worker")
+
+
+def _format_worker_error(stage: str, error: Exception, config: Dict[str, Any]) -> str:
+    """Add the attempted USB serial or rtl_tcp endpoint to the native error."""
+    backend = "RTL-SDR"
+    context: Dict[str, Any] = {}
+    if isinstance(config, dict) and config:
+        if config.get("connection_type") == "tcp":
+            backend = "RTL-SDR TCP"
+            host = config.get("host", "127.0.0.1")
+            port = config.get("port", 1234)
+            context["endpoint"] = f"{host}:{port}"
+        else:
+            backend = "RTL-SDR USB"
+            context["serial"] = config.get("serial_number")
+    return str(format_device_error(backend, stage, error, **context))
 
 
 def rtlsdr_worker_process(
@@ -65,6 +81,8 @@ def rtlsdr_worker_process(
     sdr = None
     sdr_id = None
     client_id = None
+    config: Dict[str, Any] = {}
+    stage = "reading initial configuration"
 
     logger.info(f"RTL-SDR worker process started for SDR {sdr_id} for client {client_id}")
 
@@ -93,6 +111,7 @@ def rtlsdr_worker_process(
         has_iq_consumers = iq_queue_fft is not None or iq_queue_demod is not None
 
         # Connect to the RTL-SDR device
+        stage = "opening device"
         if config.get("connection_type") == "tcp":
             hostname = config.get("host", "127.0.0.1")
             port = config.get("port", 1234)
@@ -106,6 +125,7 @@ def rtlsdr_worker_process(
             sdr = rtlsdr.RtlSdr(serial_number=serial_number)
 
         # Configure the device
+        stage = "configuring receiver"
         offset_freq = config.get("offset_freq", 0)
         # Frequency contract:
         # - logical_center_freq: user-facing "true RF" center used by demod/decoders
@@ -134,6 +154,7 @@ def rtlsdr_worker_process(
                 "timestamp": time.time(),
             }
         )
+        stage = "streaming samples"
 
         # Performance monitoring stats
         stats: Dict[str, Any] = {
@@ -270,9 +291,8 @@ def rtlsdr_worker_process(
                     old_config = new_config
 
             except Exception as e:
-                error_msg = f"Error processing configuration: {str(e)}"
-                logger.error(error_msg)
-                logger.exception(e)
+                error_msg = _format_worker_error("updating configuration", e, config)
+                logger.exception(error_msg)
 
                 # Send error back to the main process
                 if data_queue:
@@ -366,9 +386,8 @@ def rtlsdr_worker_process(
                             stats["queue_drops"] += 1
 
             except Exception as e:
-                logger.error(f"Error processing SDR data: {str(e)}")
-
-                logger.exception(e)
+                error_msg = _format_worker_error("reading samples", e, config)
+                logger.exception(error_msg)
 
                 stats["errors"] += 1
 
@@ -377,7 +396,7 @@ def rtlsdr_worker_process(
                     {
                         "type": "error",
                         "client_id": client_id,
-                        "message": str(e),
+                        "message": error_msg,
                         "timestamp": time.time(),
                     }
                 )
@@ -385,40 +404,9 @@ def rtlsdr_worker_process(
                 # Pause before retrying
                 time.sleep(1)
 
-    except ConnectionRefusedError as e:
-        error_msg = f"Connection refused to RTL-SDR TCP server at {hostname}:{port}: {str(e)}"
-        logger.error(error_msg)
-        logger.exception(e)
-
-        # Send error back to the main process
-        data_queue.put(
-            {
-                "type": "error",
-                "client_id": client_id,
-                "message": error_msg,
-                "timestamp": time.time(),
-            }
-        )
-
-    except json.decoder.JSONDecodeError as e:
-        error_msg = f"Invalid response from RTL-SDR TCP server at {hostname}:{port}: {str(e)}"
-        logger.error(error_msg)
-        logger.exception(e)
-
-        # Send error back to the main process
-        data_queue.put(
-            {
-                "type": "error",
-                "client_id": client_id,
-                "message": error_msg,
-                "timestamp": time.time(),
-            }
-        )
-
     except Exception as e:
-        error_msg = f"Error in RTL-SDR worker process: {str(e)}"
-        logger.error(error_msg)
-        logger.exception(e)
+        error_msg = _format_worker_error(stage, e, config)
+        logger.exception(error_msg)
 
         # Send error back to the main process
         data_queue.put(

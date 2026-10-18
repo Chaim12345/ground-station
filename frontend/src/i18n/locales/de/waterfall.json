@@ -49,6 +49,7 @@
     "title": "SDR",
     "sdr_label": "SDR",
     "no_sdr_selected": "[kein SDR ausgewählt]",
+    "sdr_required": "Wählen Sie vor dem Start des Streams ein SDR aus.",
     "local_sdrs": "Lokale SDRs",
     "remote_sdrs": "Remote-SDRs",
     "other_sdrs": "Andere SDRs",
@@ -157,7 +158,8 @@
     "locked_to_transmitter_info": "Doppler-korrigierte Frequenz verfolgen"
   },
   "error_dialog": {
-    "title": "Fehler aufgetreten",
+    "title": "SDR-Problem",
+    "technical_details": "Technische Details",
     "close": "SCHLIESSEN"
   },
   "statusbar": {

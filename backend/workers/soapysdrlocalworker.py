@@ -23,6 +23,7 @@ import psutil
 import SoapySDR
 from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_RX
 
+from common.errors import format_device_error
 from common.iqsamples import require_complex64
 
 # Configure logging for the worker process
@@ -133,6 +134,7 @@ def soapysdr_local_worker_process(
     client_id = None
     rx_stream = None
     config = {}
+    stage = "reading initial configuration"
 
     logger.info(f"SoapySDR worker process started for SDR {sdr_id} for client {client_id}")
 
@@ -173,9 +175,11 @@ def soapysdr_local_worker_process(
 
         # Create the device instance
         bias_setting_keys: List[str] = []
+        stage = "opening device"
         try:
             # Attempt to connect to the specified device
             sdr = SoapySDR.Device(device_args)
+            stage = "reading device capabilities"
 
             # Get device info
             device_driver = sdr.getDriverKey()
@@ -220,13 +224,12 @@ def soapysdr_local_worker_process(
             # Number of samples required for each iteration
             num_samples = calculate_samples_per_scan(actual_sample_rate, fft_size)
 
-        except Exception as e:
-            error_msg = f"Error connecting to SoapySDR device: {str(e)}"
-            logger.error(error_msg)
-            logger.exception(e)
+        except Exception:
+            # The outer handler adds the attempted device and native error to the queue message.
             raise
 
         # Configure the device
+        stage = "configuring receiver"
         center_freq = config.get("center_freq", 100e6)
         # Frequency contract:
         # - logical_center_freq: user-facing "true RF" center for pipeline consumers
@@ -296,6 +299,7 @@ def soapysdr_local_worker_process(
             logger.debug(f"DC offset correction not available or failed: {e}")
 
         # Set up the streaming
+        stage = "setting up RX stream"
         rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
 
         # Activate the stream
@@ -311,6 +315,7 @@ def soapysdr_local_worker_process(
                 "timestamp": time.time(),
             }
         )
+        stage = "streaming samples"
 
         # Performance monitoring stats
         stats: Dict[str, Any] = {
@@ -546,8 +551,13 @@ def soapysdr_local_worker_process(
                     sr = sdr.readStream(
                         rx_stream, [buffer_view], samples_remaining, timeoutUs=1000000
                     )
+                    if sr.ret < 0:
+                        stats["last_read_error"] = (
+                            f"SoapySDR readStream: {SoapySDR.errToStr(sr.ret)} (code {sr.ret})"
+                        )
 
                     if sr.ret > 0:
+                        stats.pop("last_read_error", None)
                         # We got samples - add to our position
                         samples_read = sr.ret
                         buffer_position += samples_read
@@ -685,8 +695,14 @@ def soapysdr_local_worker_process(
                         logger.debug(f"Could not queue IQ data: {str(e)}")
 
             except Exception as e:
-                logger.error(f"Error processing SDR data: {str(e)}")
-                logger.exception(e)
+                error_msg = format_device_error(
+                    "SoapySDR",
+                    "reading samples",
+                    e,
+                    driver=config.get("driver"),
+                    serial=config.get("serial_number"),
+                )
+                logger.exception(error_msg)
                 stats["errors"] += 1
 
                 # Send error back to the main process
@@ -694,7 +710,7 @@ def soapysdr_local_worker_process(
                     {
                         "type": "error",
                         "client_id": client_id,
-                        "message": str(e),
+                        "message": error_msg,
                         "timestamp": time.time(),
                     }
                 )
@@ -703,9 +719,14 @@ def soapysdr_local_worker_process(
                 time.sleep(1)
 
     except Exception as e:
-        error_msg = f"Error in SoapySDR worker process: {str(e)}"
-        logger.error(error_msg)
-        logger.exception(e)
+        error_msg = format_device_error(
+            "SoapySDR",
+            stage,
+            e,
+            driver=config.get("driver"),
+            serial=config.get("serial_number"),
+        )
+        logger.exception(error_msg)
 
         # Send error back to the main process
         data_queue.put(
