@@ -88,7 +88,6 @@ import { setSystemInfo } from '../components/settings/system-info-slice.jsx';
 import { setRuntimeSnapshot } from '../components/settings/sessions-slice.jsx';
 import { loadAuthStatus } from '../components/auth/auth-slice.jsx';
 import { fetchSatelliteGroups } from '../components/earthview/earthview-slice.jsx';
-import { fetchOrbitalSources } from '../components/satellites/sources-slice.jsx';
 import { addTranscription } from '../components/waterfall/transcription-slice.jsx';
 import { fetchSoapySDRServers } from '../components/hardware/sdr-slice.jsx';
 import ImageIcon from '@mui/icons-material/Image';
@@ -335,15 +334,6 @@ export const useSocketEventHandlers = (socket, enabled = true) => {
                 || data.status === 'inprogress'
                 || data.status === 'started';
             store.dispatch(setSynchronizing(isSyncRunning));
-
-            if (data.status === 'complete') {
-                // Source status is persisted by the sync worker before this
-                // terminal event is emitted. Refresh it for both successful and
-                // failed runs so the Sources tab immediately explains the result.
-                if (socket && socket.connected) {
-                    store.dispatch(fetchOrbitalSources({ socket }));
-                }
-            }
 
             if (data.status === 'complete' && data.success) {
                 // Refresh satellite groups in Redux store so all components get updated.

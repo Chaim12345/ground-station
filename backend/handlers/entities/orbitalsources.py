@@ -39,7 +39,7 @@ async def submit_orbital_source(
 ) -> Dict[str, Union[bool, list]]:
     """Add a new orbital source."""
     async with AsyncSessionLocal() as dbsession:
-        logger.debug(f"Adding orbital source, data: {data}")
+        logger.debug("Adding orbital source")
         submit_reply = await orbital_sources_crud.add_orbital_source(dbsession, data)
 
         orbital_sources = await orbital_sources_crud.fetch_orbital_source(dbsession)
@@ -55,7 +55,7 @@ async def edit_orbital_source(
 ) -> Dict[str, Union[bool, list, str]]:
     """Edit an existing orbital source."""
     async with AsyncSessionLocal() as dbsession:
-        logger.debug(f"Editing orbital source, data: {data}")
+        logger.debug("Editing orbital source")
         if not data or "id" not in data:
             return {"success": False, "data": [], "error": "Missing orbital source ID"}
 

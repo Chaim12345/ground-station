@@ -35,6 +35,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { loadAuthStatus } from './components/auth/auth-slice.jsx';
 import { resetRuntimeSessionState } from './components/dashboard/dashboard-slice.jsx';
+import { clearSourceSession } from './components/satellites/sources-slice.jsx';
 import ConnectionOverlay from './components/dashboard/reconnecting-overlay.jsx';
 import { LoginScreen, SetupScreen } from './components/auth/screens.jsx';
 import TranscriptionSubtitles from './components/waterfall/transcription-subtitles.jsx';
@@ -116,6 +117,11 @@ export default function App() {
         setSessionBootstrapped(false);
         setAwaitingRuntimeReset(true);
     }, [dispatch, socketAuthEpoch]);
+
+    React.useEffect(() => {
+        // The source list and edit form can contain credentials from an admin session.
+        dispatch(clearSourceSession());
+    }, [dispatch, socketAuthEpoch, authUserRole]);
 
     React.useEffect(() => {
         handleAuthEpochChange(socketAuthEpoch);

@@ -155,6 +155,17 @@ const sourcesSlice = createSlice({
         formValues: defaultTLESource,
     },
     reducers: {
+        clearSourceSession: (state) => {
+            // Credentials from an admin session must not survive a user or role change.
+            state.tleSources = [];
+            state.formValues = defaultTLESource;
+            state.openAddDialog = false;
+            state.openDeleteConfirm = false;
+            state.selected = [];
+            state.status = 'idle';
+            state.loading = false;
+            state.error = null;
+        },
         setTleSources: (state, action) => {
             state.tleSources = action.payload;
         },
@@ -234,6 +245,7 @@ const sourcesSlice = createSlice({
 
 // Export the slice’s reducer and actions
 export const {
+    clearSourceSession,
     setTleSources,
     setLoading,
     setPageSize,

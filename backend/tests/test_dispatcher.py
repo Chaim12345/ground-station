@@ -7,8 +7,10 @@ from typing import Any
 
 import pytest
 
+from handlers.entities import orbitalsources
 from handlers.routing import dispatcher
 from handlers.routing.dispatcher import dispatch_request
+from handlers.routing.registry import HandlerRegistry
 
 
 @dataclass
@@ -26,6 +28,9 @@ class _Registry:
 
 
 class _Logger:
+    def debug(self, *args, **kwargs):
+        del args, kwargs
+
     def error(self, *args, **kwargs):
         del args, kwargs
 
@@ -169,6 +174,70 @@ async def test_dispatch_request_unknown_command_uses_canonical_error_shape():
     assert result["success"] is False
     assert result["data"] is None
     assert result["error"] == "Unknown command: unknown"
+
+
+@pytest.mark.parametrize("command", ["get-orbital-sources", "get-tle-sources"])
+async def test_orbital_source_reads_require_admin(command, monkeypatch):
+    calls = []
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    async def _fetch_sources(session):
+        del session
+        calls.append(command)
+        return {
+            "success": True,
+            "data": [
+                {
+                    "auth_type": "basic",
+                    "username": "synthetic-user",
+                    "password": "synthetic-secret",
+                },
+                {"auth_type": "token", "password": "synthetic-token"},
+            ],
+        }
+
+    monkeypatch.setattr(orbitalsources, "AsyncSessionLocal", _SessionContext)
+    monkeypatch.setattr(orbitalsources.orbital_sources_crud, "fetch_orbital_source", _fetch_sources)
+    registry = HandlerRegistry()
+    orbitalsources.register_handlers(registry)
+
+    operator_reply = await dispatch_request(
+        None,
+        command,
+        None,
+        _Logger(),
+        "operator-sid",
+        registry,
+        auth_context={"role": "operator"},
+    )
+    assert operator_reply == {
+        "success": False,
+        "data": None,
+        "error": "Not authorized for this action.",
+    }
+    assert calls == []
+
+    admin_reply = await dispatch_request(
+        None,
+        command,
+        None,
+        _Logger(),
+        "admin-sid",
+        registry,
+        auth_context={"role": "admin"},
+    )
+    assert admin_reply["success"] is True
+    assert admin_reply["data"] == [
+        {"auth_type": "basic", "username": "synthetic-user", "password": "synthetic-secret"},
+        {"auth_type": "token", "password": "synthetic-token"},
+    ]
+    assert calls == [command]
 
 
 async def test_dispatch_request_handler_exception_uses_canonical_error_shape():

@@ -49,6 +49,8 @@ import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined';
 import { useTranslation } from 'react-i18next';
 import {useDispatch, useSelector} from 'react-redux';
 import {
+    clearSourceSession,
+    fetchOrbitalSources,
     submitOrEditOrbitalSource,
     deleteOrbitalSources,
     setFormValues,
@@ -538,9 +540,40 @@ export function validateSourceForm(formValues, t) {
     };
 }
 
+export function useAdminOrbitalSources(socket) {
+    const dispatch = useDispatch();
+    const isAdmin = useSelector((state) => state.auth?.authenticated && state.auth?.user?.role === 'admin');
+    const connected = useSelector((state) => state.dashboard?.connected);
+
+    React.useEffect(() => {
+        if (!isAdmin || !connected || !socket?.connected) return;
+
+        let request;
+        const refresh = () => {
+            // Abort an older read so a late reply cannot replace newer source state.
+            request?.abort();
+            request = dispatch(fetchOrbitalSources({socket}));
+        };
+        const handleSync = (data) => {
+            // The worker persists source status before announcing completion.
+            if (data?.status === 'complete' && socket.connected) refresh();
+        };
+
+        socket.on('sat-sync-events', handleSync);
+        refresh();
+        return () => {
+            socket.off('sat-sync-events', handleSync);
+            request?.abort();
+            // Source credentials are needed only while this admin page is active.
+            dispatch(clearSourceSession());
+        };
+    }, [dispatch, isAdmin, connected, socket]);
+}
+
 export default function SourcesTable({ showTabs = true }) {
     const dispatch = useDispatch();
     const {socket} = useSocket();
+    useAdminOrbitalSources(socket);
     const { t } = useTranslation('satellites');
     const {tleSources, loading, formValues, openDeleteConfirm, openAddDialog, pageSize, selected} = useSelector((state) => state.tleSources);
     const rowSelectionModel = useMemo(() => toRowSelectionModel(selected), [selected]);
