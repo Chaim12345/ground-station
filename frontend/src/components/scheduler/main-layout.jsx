@@ -51,10 +51,8 @@ export default function ScheduledObservationsLayout() {
                     gap: 2,
                     minHeight: 0,
                     minWidth: 0,
-                    gridTemplateRows: {
-                        xs: 'auto minmax(0, 1fr)',
-                        lg: 'auto minmax(0, 1fr)',
-                    },
+                    // Allow the observations card to grow with its rows so the page handles vertical scrolling.
+                    gridTemplateRows: 'auto minmax(min-content, 1fr)',
                     flex: 1,
                 }}
             >
@@ -64,7 +62,7 @@ export default function ScheduledObservationsLayout() {
                 </Box>
 
                 {/* Scheduled Observations - Bottom Section */}
-                <Box sx={{ minHeight: 0, minWidth: 0, overflow: 'auto' }}>
+                <Box sx={{ minHeight: 0, minWidth: 0 }}>
                     <ObservationsTable />
                 </Box>
             </Box>

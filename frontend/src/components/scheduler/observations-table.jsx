@@ -644,8 +644,9 @@ const ObservationsTable = () => {
                 </Alert>
             )}
 
-            <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0, minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <Box sx={{ flexGrow: 1, width: '100%', minHeight: 0, minWidth: 0 }}>
                 <DataGrid
+                    autoHeight
                     rows={observations}
                     columns={columns}
                     loading={loading}
