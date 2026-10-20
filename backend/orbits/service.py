@@ -319,8 +319,10 @@ def build_satellite_ephemeris_payload(
         "tle2": propagation_input.tle2,
     }
     if propagation_input.model_kind == OrbitModelKind.OMM:
-        payload["model_kind"] = OrbitModelKind.OMM.value
-        payload["omm_payload"] = orbit_service.get_orbit_state_from_satellite_record(
+        # Use the satellite record field names: the worker feeds this payload
+        # back through get_propagation_input() on every tracking iteration.
+        payload["orbit_format"] = OrbitModelKind.OMM.value
+        payload["orbit_payload"] = orbit_service.get_orbit_state_from_satellite_record(
             satellite, central_body
         ).omm_payload
     return payload

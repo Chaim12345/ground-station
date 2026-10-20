@@ -135,8 +135,8 @@ def test_six_digit_omm_ephemeris_payload_keeps_canonical_data_without_tle():
     assert payload["norad_id"] == 100000
     assert payload["tle1"] is None
     assert payload["tle2"] is None
-    assert payload["model_kind"] == "omm"
-    assert payload["omm_payload"]["NORAD_CAT_ID"] == "100000"
+    assert payload["orbit_format"] == "omm"
+    assert payload["orbit_payload"]["NORAD_CAT_ID"] == "100000"
 
 
 def test_get_propagation_input_rejects_missing_tle_lines():

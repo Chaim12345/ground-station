@@ -1,8 +1,12 @@
 """Six-digit OMM coverage at the tracking boundary."""
 
+import math
 from datetime import datetime, timezone
+from queue import Queue
 
-from orbits import CentralBody, get_propagation_input
+from orbits import CentralBody, build_satellite_ephemeris_payload, get_propagation_input
+from tracker.ipc import TRACKER_MSG_SET_SATELLITE_EPHEMERIS
+from tracker.logic import SatelliteTracker
 from tracking.satellite import get_satellite_az_el_from_propagation
 
 OMM_PAYLOAD = {
@@ -44,3 +48,31 @@ def test_tracking_azimuth_and_elevation_accept_omm_without_tle():
 
     assert isinstance(azimuth, float)
     assert isinstance(elevation, float)
+
+
+def test_tracker_compiles_six_digit_omm_ephemeris_without_tle():
+    satellite = {
+        "norad_id": 100000,
+        "name": "New catalogue object",
+        "orbit_format": "omm",
+        "orbit_payload": OMM_PAYLOAD,
+    }
+    # The manager sends this payload to the worker, which must be able to
+    # propagate it without TLE lines before commanding the rotator.
+    payload = build_satellite_ephemeris_payload(satellite)
+
+    tracker = SatelliteTracker(Queue(), Queue(), tracker_id="target-1")
+    tracker.apply_input_message({"type": TRACKER_MSG_SET_SATELLITE_EPHEMERIS, "payload": payload})
+    location = {"lat": 37.9838, "lon": 23.7275, "alt": 0}
+    tracker.input_location = location
+    tracker.input_map_settings = {"orbitProjectionDuration": 1}
+    context = tracker._resolve_target_context(
+        {"target_type": "satellite", "norad_id": 100000}, location
+    )
+
+    assert context is not None
+    assert context["satellite_data"]["error"] is False
+    assert context["satellite_data"]["details"]["norad_id"] == 100000
+    assert context["satellite_tles"] is None
+    assert all(math.isfinite(value) for value in context["skypoint"])
+    assert all(math.isfinite(value) for value in context["command_skypoint"])
