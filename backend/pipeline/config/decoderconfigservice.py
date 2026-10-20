@@ -18,6 +18,7 @@ import logging
 from typing import Dict, Optional
 
 from constants import FramingType
+from constants.framing import FSK_DECODER_FRAMINGS
 from pipeline.config.decoderconfig import DecoderConfig
 from satconfig.config import SatelliteConfigService
 
@@ -33,10 +34,11 @@ class DecoderConfigService:
 
     Resolution priority (highest to lowest):
     1. Manual overrides (passed via overrides parameter)
-    2. Satellite-specific configuration (gr-satellites database via SatelliteConfigService)
-    3. Transmitter metadata detection (SatNOGS DB description/mode fields)
-    4. Smart defaults (based on decoder type and baudrate)
-    5. Fallback defaults (conservative values that work for most cases)
+    2. Explicit settings on the selected transmitter record
+    3. Satellite-specific configuration (gr-satellites database via SatelliteConfigService)
+    4. Transmitter metadata detection (SatNOGS DB description/mode fields)
+    5. Smart defaults (based on decoder type and baudrate)
+    6. Fallback defaults (conservative values that work for most cases)
 
     Usage:
         config_service = DecoderConfigService()
@@ -140,7 +142,9 @@ class DecoderConfigService:
             except (TypeError, ValueError):
                 config.baudrate = 9600
             try:
-                config.deviation = max(1, int(config.deviation))
+                config.deviation = (
+                    max(1, int(config.deviation)) if config.deviation is not None else 5000
+                )
             except (TypeError, ValueError):
                 config.deviation = 5000
             params = config.framing_params or {}
@@ -287,6 +291,19 @@ class DecoderConfigService:
             deviation = sat_params.get("deviation")
             config_source = "satellite_config"
 
+        # A saved transmitter definition is more specific than satellite-wide
+        # metadata, which may describe a different downlink on the same craft.
+        stored_framing = str(transmitter.get("framing") or "").strip().lower()
+        if decoder_type in {"fsk", "gmsk", "gfsk"} and stored_framing in FSK_DECODER_FRAMINGS:
+            framing = stored_framing
+            config_source = "transmitter_metadata"
+        if (
+            decoder_type in {"fsk", "gmsk", "gfsk", "aprs"}
+            and transmitter.get("deviation") is not None
+        ):
+            deviation = self._detect_deviation(decoder_type, transmitter, baudrate)
+            config_source = "transmitter_metadata"
+
         if decoder_type == "aprs":
             framing = FramingType.APRS
 
@@ -323,13 +340,16 @@ class DecoderConfigService:
         self, decoder_type: str, transmitter: Dict, baudrate: int
     ) -> DecoderConfig:
         """Detect configuration from transmitter metadata (mode, description fields)"""
-        mode = transmitter.get("mode", "").upper()
-        description = transmitter.get("description", "").upper()
+        mode = str(transmitter.get("mode") or "").upper()
+        description = str(transmitter.get("description") or "").upper()
 
         # Detect framing protocol
         framing = (
             FramingType.APRS if decoder_type == "aprs" else self._detect_framing(mode, description)
         )
+        stored_framing = str(transmitter.get("framing") or "").strip().lower()
+        if decoder_type in {"fsk", "gmsk", "gfsk"} and stored_framing in FSK_DECODER_FRAMINGS:
+            framing = stored_framing
 
         # Detect deviation (FSK modes)
         deviation = self._detect_deviation(decoder_type, transmitter, baudrate)
@@ -340,7 +360,16 @@ class DecoderConfigService:
         config = DecoderConfig(
             baudrate=baudrate,
             framing=framing,
-            config_source="transmitter_metadata" if (mode or description) else "smart_default",
+            config_source=(
+                "transmitter_metadata"
+                if (
+                    mode
+                    or description
+                    or stored_framing
+                    or transmitter.get("deviation") is not None
+                )
+                else "smart_default"
+            ),
             deviation=deviation,
             differential=differential,
         )
@@ -394,13 +423,13 @@ class DecoderConfigService:
 
     def _detect_deviation(
         self, decoder_type: str, transmitter: Dict, baudrate: int
-    ) -> Optional[int]:
+    ) -> Optional[float]:
         """Detect frequency deviation for FSK modes"""
         # Explicit deviation in transmitter dict (highest priority)
         if "deviation" in transmitter:
             deviation = transmitter["deviation"]
             if deviation is not None:
-                return int(deviation)
+                return float(deviation)
             return None
 
         # Smart defaults based on decoder type and baudrate

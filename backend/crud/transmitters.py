@@ -14,6 +14,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import math
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.common import logger, serialize_object
 from common.targetkey import normalize_target_key
+from constants.framing import FSK_DECODER_FRAMINGS
 from db.models import CelestialTargets, Transmitters
 
 NULL_MARKERS = {"", "-", None}
@@ -77,6 +79,29 @@ def _coerce_optional_int(value: Any, field_name: str) -> int | None:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{field_name} must be an integer") from exc
+
+
+def _coerce_optional_deviation(value: Any) -> float | None:
+    if _is_null_marker(value):
+        return None
+    if isinstance(value, bool):
+        raise ValueError("deviation must be a nonzero number of Hz")
+    try:
+        deviation = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("deviation must be a nonzero number of Hz") from exc
+    if not math.isfinite(deviation) or deviation == 0:
+        raise ValueError("deviation must be a finite, nonzero number of Hz")
+    return deviation
+
+
+def _coerce_optional_framing(value: Any) -> str | None:
+    if _is_null_marker(value):
+        return None
+    framing = str(value).strip().lower()
+    if framing not in FSK_DECODER_FRAMINGS:
+        raise ValueError(f"unsupported FSK framing: {framing}")
+    return framing
 
 
 def _coerce_optional_bool(value: Any, field_name: str) -> bool | None:
@@ -177,6 +202,16 @@ def _normalize_transmitter_payload(data: dict, for_edit: bool = False) -> dict:
             payload[target_key] = _coerce_optional_int(payload.pop(source_key), source_key)
         elif not for_edit:
             payload[target_key] = None
+
+    if "deviation" in payload:
+        payload["deviation"] = _coerce_optional_deviation(payload["deviation"])
+    elif not for_edit:
+        payload["deviation"] = None
+
+    if "framing" in payload:
+        payload["framing"] = _coerce_optional_framing(payload["framing"])
+    elif not for_edit:
+        payload["framing"] = None
 
     optional_bool_fields = {"alive": "alive", "invert": "invert"}
     for source_key, target_key in optional_bool_fields.items():

@@ -22,6 +22,17 @@ class FramingType:
     AO40_FEC_SHORT = "ao40_fec_short"
 
 
+# Only these framing values have implementations in create_fsk_deframer.
+FSK_DECODER_FRAMINGS = {
+    FramingType.AX25,
+    FramingType.USP,
+    FramingType.GEOSCAN,
+    FramingType.DOKA,
+    FramingType.AX100_ASM,
+    FramingType.AX100_RS,
+}
+
+
 # APRS uses AX.25 UI frames, but its 1200-baud Bell 202 modem does not use
 # the G3RUH scrambler used by the existing generic AX.25 decoder setting.
 AX25_FRAMINGS = {FramingType.AX25, FramingType.APRS, FramingType.USP}

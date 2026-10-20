@@ -26,9 +26,8 @@ import { useTranslation } from 'react-i18next';
 /**
  * DecoderConfigSuggestion component
  *
- * Displays suggested decoder configuration retrieved from gr-satellites database
- * when a transmitter is selected. Shows a summary of the recommended parameters
- * with attribution to Daniel Estévez's gr-satellites project.
+ * Displays the resolved decoder configuration for a selected transmitter.
+ * Satellite catalog settings are attributed when they supplied the values.
  *
  * @param {Object} props
  * @param {string} props.decoderType - The decoder type (gmsk, bpsk, aprs, etc.)
@@ -48,6 +47,11 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
     // Use stable IDs instead of full objects in dependencies
     const satelliteId = satellite?.norad_id;
     const transmitterId = transmitter?.id;
+    const transmitterBaud = transmitter?.baud;
+    const transmitterDeviation = transmitter?.deviation;
+    const transmitterFraming = transmitter?.framing;
+    const transmitterMode = transmitter?.mode;
+    const transmitterDescription = transmitter?.description;
 
     useEffect(() => {
         // Only fetch if we should show and have required data
@@ -82,7 +86,8 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
         };
 
         fetchConfig();
-    }, [socket, decoderType, satelliteId, transmitterId, show]);
+    }, [socket, decoderType, satelliteId, transmitterId, transmitterBaud,
+        transmitterDeviation, transmitterFraming, transmitterMode, transmitterDescription, show]);
 
     const handleApply = () => {
         if (config && onApply) {
@@ -182,7 +187,7 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
             case 'satellite_config':
                 return 'Configuration from satellite database';
             case 'transmitter_metadata':
-                return 'Configuration detected from transmitter metadata (mode, description, baud rate)';
+                return 'Configuration from transmitter settings and metadata';
             case 'smart_default':
                 return 'Configuration estimated using smart defaults based on decoder type and baud rate';
             case 'manual':

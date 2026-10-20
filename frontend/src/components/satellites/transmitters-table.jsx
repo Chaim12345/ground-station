@@ -111,6 +111,8 @@ const mapTransmittersToRows = (transmitters = []) => (
         uplinkMode: displayValue(transmitter.uplink_mode),
         invert: displayValue(transmitter.invert),
         baud: displayValue(transmitter.baud),
+        deviation: displayValue(transmitter.deviation),
+        framing: displayValue(transmitter.framing),
         _original: transmitter,
     }))
 );
@@ -327,6 +329,8 @@ const TransmittersTable = ({ satelliteData, inDialog = false, actionsPortalTarge
         {field: "uplinkMode", headerName: t('satellite_info.transmitters.columns.uplink_mode'), flex: 0.75, minWidth: 92},
         {field: "invert", headerName: t('satellite_info.transmitters.columns.invert'), flex: 0.6, minWidth: 70},
         {field: "baud", headerName: t('satellite_info.transmitters.columns.baud'), flex: 0.8, minWidth: 80},
+        {field: "deviation", headerName: t('transmitters_table.deviation_hz', { defaultValue: 'Deviation (Hz)' }), flex: 0.9, minWidth: 115},
+        {field: "framing", headerName: t('transmitters_table.framing', { defaultValue: 'Framing' }), flex: 0.8, minWidth: 100},
         {
             field: "actions",
             headerName: "",

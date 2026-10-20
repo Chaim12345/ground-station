@@ -260,6 +260,8 @@ class Transmitters(Base):
     uplink_mode = Column(String, nullable=True)
     invert = Column(Boolean, nullable=True)
     baud = Column(Integer, nullable=True)
+    deviation = Column(Float, nullable=True)
+    framing = Column(String, nullable=True)
     sat_id = Column(String, nullable=True)
     norad_cat_id = Column(Integer, ForeignKey("satellites.norad_id"), nullable=True, index=True)
     target_key = Column(

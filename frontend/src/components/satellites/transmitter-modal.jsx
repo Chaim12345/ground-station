@@ -94,6 +94,14 @@ const MODE_OPTIONS = [
     {name: "GGAK", value: "GGAK"},
     {name: "PGS", value: "PGS"},
 ];
+const FSK_FRAMING_OPTIONS = [
+    {value: 'ax25', label: 'AX.25 (G3RUH)'},
+    {value: 'usp', label: 'USP'},
+    {value: 'geoscan', label: 'GEOSCAN'},
+    {value: 'doka', label: 'DOKA (CCSDS)'},
+    {value: 'ax100_asm', label: 'AX100 (ASM + Golay)'},
+    {value: 'ax100_rs', label: 'AX100 (Reed-Solomon)'},
+];
 
 
 // Transmitter Edit/Add Modal Component
@@ -126,6 +134,8 @@ const TransmitterModal = ({
         uplinkMode: "",
         invert: "",
         baud: "",
+        deviation: "",
+        framing: "",
     });
 
     const [validationErrors, setValidationErrors] = useState({});
@@ -170,6 +180,8 @@ const TransmitterModal = ({
                 uplinkMode: fromNullableField(transmitter.uplinkMode),
                 invert: fromNullableField(transmitter.invert),
                 baud: fromNullableField(transmitter.baud),
+                deviation: fromNullableField(transmitter.deviation),
+                framing: fromNullableField(transmitter.framing),
             });
         } else {
             // Reset form for new transmitter
@@ -188,6 +200,8 @@ const TransmitterModal = ({
                 uplinkMode: "",
                 invert: "",
                 baud: "",
+                deviation: "",
+                framing: "",
             });
         }
         // Clear validation errors when modal opens/closes
@@ -237,6 +251,11 @@ const TransmitterModal = ({
             errors.downlinkHigh = true;
         }
 
+        if (hasValue(formData.deviation) &&
+            (!Number.isFinite(Number(formData.deviation)) || Number(formData.deviation) === 0)) {
+            errors.deviation = true;
+        }
+
         setValidationErrors(errors);
         return Object.keys(errors).length === 0;
     };
@@ -263,6 +282,8 @@ const TransmitterModal = ({
             uplinkMode: toNullableField(formData.uplinkMode),
             invert: formData.invert === "" ? null : formData.invert,
             baud: toNullableField(formData.baud),
+            deviation: toNullableField(formData.deviation),
+            framing: toNullableField(formData.framing),
         };
 
         // Keep satellite payloads unchanged while enabling mission/body ownership via target_key.
@@ -632,6 +653,35 @@ const TransmitterModal = ({
                             placeholder="e.g., 9600"
                             disabled={loading}
                         />
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 2, mt: 2.5 }}>
+                        <TextField
+                            size="small"
+                            fullWidth
+                            label={t('transmitter_modal.deviation_hz', { defaultValue: 'FSK deviation (Hz)' })}
+                            value={formData.deviation}
+                            onChange={handleChange('deviation')}
+                            type="number"
+                            inputProps={{ step: 'any' }}
+                            placeholder="e.g., 562.5"
+                            helperText={t('transmitter_modal.deviation_help', { defaultValue: 'Half the spacing between FSK tones; a negative value reverses polarity.' })}
+                            disabled={loading}
+                            error={validationErrors.deviation}
+                        />
+                        <FormControl fullWidth variant="outlined" size="small">
+                            <InputLabel>{t('transmitter_modal.framing', { defaultValue: 'FSK framing' })}</InputLabel>
+                            <Select
+                                value={formData.framing}
+                                onChange={handleChange('framing')}
+                                label={t('transmitter_modal.framing', { defaultValue: 'FSK framing' })}
+                                disabled={loading}
+                            >
+                                <MenuItem value="">{t('transmitter_modal.framing_auto', { defaultValue: 'Auto' })}</MenuItem>
+                                {FSK_FRAMING_OPTIONS.map((option) => (
+                                    <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
                     </Box>
                 </Box>
                 </Box>

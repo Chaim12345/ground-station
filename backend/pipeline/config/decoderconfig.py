@@ -41,7 +41,7 @@ class DecoderConfig:
     config_source: str  # 'satellite_config', 'smart_default', 'transmitter_metadata', 'manual'
 
     # FSK/APRS-specific parameters
-    deviation: Optional[int] = None  # Frequency deviation in Hz
+    deviation: Optional[float] = None  # Frequency deviation in Hz; may be fractional
 
     # APRS Bell 202-specific parameters
     af_carrier: Optional[int] = None  # Audio frequency carrier in Hz (1700 for APRS)
