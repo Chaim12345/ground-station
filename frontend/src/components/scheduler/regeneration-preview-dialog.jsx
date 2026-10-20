@@ -24,6 +24,7 @@ import {
     DialogContent,
     DialogActions,
     Button,
+    ButtonBase,
     Alert,
     AlertTitle,
     Box,
@@ -233,6 +234,7 @@ const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) =>
                                 new Set(blockers.flatMap((blocker) => blocker.reasons || []))
                             );
                             const isReplace = effectiveAction === 'replace_blockers';
+                            const isKeepExisting = effectiveAction === 'keep_existing';
 
                             return (
                                 <Box
@@ -295,20 +297,40 @@ const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) =>
                                             mb: 1.4,
                                         }}
                                     >
-                                        <Box
+                                        <ButtonBase
+                                            type="button"
+                                            aria-pressed={isReplace}
+                                            onClick={() => handleConflictChoice(passId, 'replace_blockers')}
                                             sx={{
+                                                display: 'block',
+                                                width: '100%',
+                                                textAlign: 'left',
+                                                color: 'text.primary',
                                                 p: 1.2,
-                                                border: '1px solid',
-                                                borderColor: 'primary.main',
+                                                border: '2px solid',
+                                                borderColor: isReplace ? 'primary.main' : 'divider',
                                                 borderRadius: 1,
                                                 bgcolor: (theme) => theme.palette.mode === 'dark'
-                                                    ? 'rgba(25, 118, 210, 0.12)'
-                                                    : 'rgba(25, 118, 210, 0.05)',
+                                                    ? `rgba(25, 118, 210, ${isReplace ? 0.2 : 0.12})`
+                                                    : `rgba(25, 118, 210, ${isReplace ? 0.12 : 0.05})`,
+                                                '&:hover': { borderColor: 'primary.main' },
+                                                '&:focus-visible': {
+                                                    outline: '2px solid',
+                                                    outlineColor: 'primary.main',
+                                                    outlineOffset: 2,
+                                                },
                                             }}
                                         >
-                                            <Typography variant="caption" color="text.secondary">
-                                                {t('regeneration_preview_dialog.candidate_pass', { defaultValue: 'Candidate Pass' })}
-                                            </Typography>
+                                            <Stack direction="row" alignItems="center" justifyContent="space-between">
+                                                <Typography variant="caption" color="text.secondary">
+                                                    {t('regeneration_preview_dialog.candidate_pass', { defaultValue: 'Candidate Pass' })}
+                                                </Typography>
+                                                <CheckCircleIcon
+                                                    color="primary"
+                                                    fontSize="small"
+                                                    sx={{ visibility: isReplace ? 'visible' : 'hidden' }}
+                                                />
+                                            </Stack>
                                             <Typography variant="subtitle2" sx={{ mt: 0.3 }}>
                                                 {conflict.new_pass.satellite}
                                             </Typography>
@@ -323,22 +345,42 @@ const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) =>
                                                     {formatRange(conflict.new_pass.start, conflict.new_pass.end)}
                                                 </Typography>
                                             </Stack>
-                                        </Box>
+                                        </ButtonBase>
 
-                                        <Box
+                                        <ButtonBase
+                                            type="button"
+                                            aria-pressed={isKeepExisting}
+                                            onClick={() => handleConflictChoice(passId, 'keep_existing')}
                                             sx={{
+                                                display: 'block',
+                                                width: '100%',
+                                                textAlign: 'left',
+                                                color: 'text.primary',
                                                 p: 1.2,
-                                                border: '1px solid',
-                                                borderColor: 'warning.main',
+                                                border: '2px solid',
+                                                borderColor: isKeepExisting ? 'warning.main' : 'divider',
                                                 borderRadius: 1,
                                                 bgcolor: (theme) => theme.palette.mode === 'dark'
-                                                    ? 'rgba(237, 108, 2, 0.12)'
-                                                    : 'rgba(237, 108, 2, 0.06)',
+                                                    ? `rgba(237, 108, 2, ${isKeepExisting ? 0.2 : 0.12})`
+                                                    : `rgba(237, 108, 2, ${isKeepExisting ? 0.14 : 0.06})`,
+                                                '&:hover': { borderColor: 'warning.main' },
+                                                '&:focus-visible': {
+                                                    outline: '2px solid',
+                                                    outlineColor: 'warning.main',
+                                                    outlineOffset: 2,
+                                                },
                                             }}
                                         >
-                                            <Typography variant="caption" color="text.secondary">
-                                                {t('regeneration_preview_dialog.conflicts_with_existing', { defaultValue: 'Conflicts With Existing' })}
-                                            </Typography>
+                                            <Stack direction="row" alignItems="center" justifyContent="space-between">
+                                                <Typography variant="caption" color="text.secondary">
+                                                    {t('regeneration_preview_dialog.conflicts_with_existing', { defaultValue: 'Conflicts With Existing' })}
+                                                </Typography>
+                                                <CheckCircleIcon
+                                                    color="warning"
+                                                    fontSize="small"
+                                                    sx={{ visibility: isKeepExisting ? 'visible' : 'hidden' }}
+                                                />
+                                            </Stack>
                                             <Stack spacing={0.8} sx={{ mt: 0.5 }}>
                                                 {blockers.map((blocker) => (
                                                     <Box key={blocker.id}>
@@ -358,7 +400,7 @@ const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) =>
                                                     </Box>
                                                 ))}
                                             </Stack>
-                                        </Box>
+                                        </ButtonBase>
                                     </Box>
 
                                     <Divider sx={{ my: 1.2 }} />
