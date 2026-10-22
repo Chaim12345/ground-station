@@ -34,6 +34,7 @@ import {
     FormControlLabel,
     Divider,
     Chip,
+    CircularProgress,
     Stack,
 } from '@mui/material';
 import { Warning as WarningIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
@@ -41,7 +42,7 @@ import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatTime } from '../../utils/date-time.js';
 import { useTranslation } from 'react-i18next';
 
-const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) => {
+const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm, isGenerating = false }) => {
     const { t } = useTranslation('common');
     const [conflictChoices, setConflictChoices] = useState({});
     const { timezone, locale } = useUserTimeSettings();
@@ -91,7 +92,7 @@ const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) =>
     return (
         <Dialog
             open={open}
-            onClose={onClose}
+            onClose={isGenerating ? undefined : onClose}
             maxWidth="md"
             fullWidth
         >
@@ -460,15 +461,21 @@ const RegenerationPreviewDialog = ({ open, onClose, previewData, onConfirm }) =>
             </DialogContent>
 
             <DialogActions>
-                <Button onClick={onClose} variant="outlined">
+                <Button onClick={onClose} variant="outlined" disabled={isGenerating}>
                     {t('regeneration_preview_dialog.cancel', { defaultValue: 'Cancel' })}
                 </Button>
                 {hasConflicts && (
-                    <Button onClick={handleApplyStrategy} variant="outlined" color="info">
+                    <Button onClick={handleApplyStrategy} variant="outlined" color="info" disabled={isGenerating}>
                         {t('regeneration_preview_dialog.reset_to_strategy_defaults', { defaultValue: 'Reset to Strategy Defaults' })}
                     </Button>
                 )}
-                <Button onClick={handleConfirm} variant="contained" color="primary">
+                <Button
+                    onClick={handleConfirm}
+                    variant="contained"
+                    color="primary"
+                    disabled={isGenerating}
+                    startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : null}
+                >
                     {t('regeneration_preview_dialog.confirm_generate', { defaultValue: 'Confirm & Generate' })}
                 </Button>
             </DialogActions>

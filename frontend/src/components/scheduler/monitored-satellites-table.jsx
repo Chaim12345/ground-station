@@ -72,6 +72,7 @@ const MonitoredSatellitesTable = () => {
     const [openPreviewDialog, setOpenPreviewDialog] = useState(false);
     const [previewData, setPreviewData] = useState(null);
     const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false);
     const [regenerationTargetId, setRegenerationTargetId] = useState(null);
     const [openNoEnabledDialog, setOpenNoEnabledDialog] = useState(false);
 
@@ -175,24 +176,27 @@ const MonitoredSatellitesTable = () => {
     };
 
     const handlePreviewConfirm = (conflictChoices) => {
-        if (socket) {
+        if (socket && !isGenerating) {
+            setIsGenerating(true);
             socket.emit("api.call", {
-  cmd: 'regenerate-observations',
-  data: {
-    monitored_satellite_id: regenerationTargetId,
-    dry_run: false,
-    user_conflict_overrides: conflictChoices
-  }
-}, response => {
-  if (response.success) {
-    console.log('Regeneration successful:', response.data);
-    setOpenPreviewDialog(false);
-    setPreviewData(null);
-    setRegenerationTargetId(null);
-  } else {
-    console.error('Regeneration failed:', response.error);
-  }
-});
+                cmd: 'regenerate-observations',
+                data: {
+                    monitored_satellite_id: regenerationTargetId,
+                    dry_run: false,
+                    user_conflict_overrides: conflictChoices
+                }
+            }, response => {
+                // Keep the dialog busy until the server acknowledges the generation result.
+                setIsGenerating(false);
+                if (response.success) {
+                    console.log('Regeneration successful:', response.data);
+                    setOpenPreviewDialog(false);
+                    setPreviewData(null);
+                    setRegenerationTargetId(null);
+                } else {
+                    console.error('Regeneration failed:', response.error);
+                }
+            });
         }
     };
 
@@ -794,6 +798,7 @@ const MonitoredSatellitesTable = () => {
                 }}
                 previewData={previewData}
                 onConfirm={handlePreviewConfirm}
+                isGenerating={isGenerating}
             />
 
             {/* No Enabled Monitors Dialog */}

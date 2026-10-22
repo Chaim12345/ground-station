@@ -57,3 +57,23 @@ it('selects the corresponding resolution when either satellite card is activated
     await user.click(screen.getByRole('button', { name: /Confirm & Generate/ }));
     expect(onConfirm).toHaveBeenCalledWith({ 'candidate-1': 'keep_existing' });
 });
+
+it('shows generation progress and prevents another confirmation while the request is pending', async () => {
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+    const props = { open: true, onClose, previewData, onConfirm };
+    const { rerender } = render(<RegenerationPreviewDialog {...props} />);
+
+    rerender(<RegenerationPreviewDialog {...props} isGenerating />);
+
+    const confirmButton = screen.getByRole('button', { name: 'Confirm & Generate' });
+    expect(confirmButton).toBeDisabled();
+    expect(confirmButton).toContainElement(screen.getByRole('progressbar'));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+
+    rerender(<RegenerationPreviewDialog {...props} />);
+    expect(confirmButton).toBeEnabled();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    await userEvent.setup().click(confirmButton);
+    expect(onConfirm).toHaveBeenCalledOnce();
+});
