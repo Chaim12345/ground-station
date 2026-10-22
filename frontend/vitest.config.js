@@ -7,6 +7,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    // Running many DOM-heavy suites at once can exceed their 5-second timeouts.
+    maxWorkers: 2,
     setupFiles: './src/test/setup.js',
     css: true,
     exclude: [
