@@ -9,6 +9,8 @@ import reducer, {
     purgeFinished,
     clearPurgeState,
     setPageSize,
+    setPage,
+    setAllFilters,
     toggleFilter,
     reconcileFileBrowserPersistedState,
 } from '../filebrowser-slice.jsx';
@@ -27,6 +29,18 @@ test('rehydrates the new observation filter from the former decoded choice', () 
     const changed = reducer(restored, toggleFilter('showObservations'));
     expect(changed.filters).toMatchObject({ showDecoded: false, showObservations: true });
     expect(changed.page).toBe(1);
+});
+
+test('selecting or clearing every type updates filters in one action', () => {
+    const store = createStore();
+    store.dispatch(setPage(3));
+    store.dispatch(setAllFilters(false));
+
+    expect(Object.values(store.getState().filebrowser.filters).every((enabled) => !enabled)).toBe(true);
+    expect(store.getState().filebrowser.page).toBe(1);
+
+    store.dispatch(setAllFilters(true));
+    expect(Object.values(store.getState().filebrowser.filters).every(Boolean)).toBe(true);
 });
 
 test('queries one server-side page and stores its total', async () => {

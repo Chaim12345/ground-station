@@ -397,6 +397,13 @@ const fileBrowserSlice = createSlice({
             state.filters[filter] = !state.filters[filter];
             state.page = 1; // Reset to first page when filter changes
         },
+        setAllFilters: (state, action) => {
+            const enabled = Boolean(action.payload);
+            Object.keys(state.filters).forEach((filter) => {
+                state.filters[filter] = enabled;
+            });
+            state.page = 1;
+        },
         // Legacy action for backward compatibility - triggers refetch
         handleFileChange: (state, action) => {
             // This is called when backend emits file change events
@@ -642,6 +649,7 @@ export const {
     setPageSize,
     setFilter,
     toggleFilter,
+    setAllFilters,
     handleFileChange,
     toggleItemSelection,
     selectAllItems,

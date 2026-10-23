@@ -43,10 +43,8 @@ import {
     DialogTitle,
     DialogContent,
     DialogActions,
-    Checkbox,
     ListItemText,
     ListItemIcon,
-    OutlinedInput,
     Pagination,
     LinearProgress,
     TextField,
@@ -62,7 +60,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import InfoIcon from '@mui/icons-material/Info';
 import SortIcon from '@mui/icons-material/Sort';
-import FilterListIcon from '@mui/icons-material/FilterList';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import RadioIcon from '@mui/icons-material/Radio';
@@ -93,6 +90,7 @@ import {
     setSortBy,
     toggleSortOrder,
     toggleFilter,
+    setAllFilters,
     setPage,
     setPageSize,
     toggleItemSelection,
@@ -117,6 +115,7 @@ import PurgeDialog from './purge-dialog.jsx';
 import ZoomableImage from '../common/zoomable-image.jsx';
 import DecodedFolderThumbnail from './decoded-folder-thumbnail.jsx';
 import { buildFileBrowserDisplayItem } from './filebrowser-display-item.js';
+import FileTypeFilter from './file-type-filter.jsx';
 import { getWaterfallRecordingPath } from './waterfall-recording-path.js';
 import { getRunningWaterfallPaths, isWaterfallRunningForItem } from './waterfall-task-status.js';
 import WaterfallGenerationOverlay from './waterfall-generation-overlay.jsx';
@@ -953,51 +952,11 @@ export default function FileBrowserMain() {
                         </Select>
                     </FormControl>
 
-                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 150 } }}>
-                        <InputLabel>{t('filter', 'Filter')}</InputLabel>
-                        <Select
-                            multiple
-                            value={Object.keys(filters).filter(key => filters[key])}
-                            input={<OutlinedInput label={t('filter', 'Filter')} />}
-                            renderValue={(selected) => {
-                                const labels = {
-                                    showRecordings: t('filters.recordings', 'Recordings'),
-                                    showSnapshots: t('filters.snapshots', 'Snapshots'),
-                                    showDecoded: t('filters.decoded', 'Decoded'),
-                                    showObservations: t('filters.observations', 'Observations'),
-                                    showAudio: t('filters.audio', 'Audio'),
-                                    showTranscriptions: t('filters.transcriptions', 'Transcriptions'),
-                                };
-                                return selected.map(s => labels[s]).join(', ');
-                            }}
-                            startAdornment={<FilterListIcon sx={{ mr: 1, color: 'action.active' }} />}
-                        >
-                            <MenuItem value="showRecordings" onClick={() => dispatch(toggleFilter('showRecordings'))}>
-                                <Checkbox checked={filters.showRecordings} />
-                                <ListItemText primary={t('filters.recordings', 'Recordings')} />
-                            </MenuItem>
-                            <MenuItem value="showSnapshots" onClick={() => dispatch(toggleFilter('showSnapshots'))}>
-                                <Checkbox checked={filters.showSnapshots} />
-                                <ListItemText primary={t('filters.snapshots', 'Snapshots')} />
-                            </MenuItem>
-                            <MenuItem value="showDecoded" onClick={() => dispatch(toggleFilter('showDecoded'))}>
-                                <Checkbox checked={filters.showDecoded} />
-                                <ListItemText primary={t('filters.decoded', 'Decoded')} />
-                            </MenuItem>
-                            <MenuItem value="showObservations" onClick={() => dispatch(toggleFilter('showObservations'))}>
-                                <Checkbox checked={filters.showObservations} />
-                                <ListItemText primary={t('filters.observations', 'Observations')} />
-                            </MenuItem>
-                            <MenuItem value="showAudio" onClick={() => dispatch(toggleFilter('showAudio'))}>
-                                <Checkbox checked={filters.showAudio} />
-                                <ListItemText primary={t('filters.audio', 'Audio')} />
-                            </MenuItem>
-                            <MenuItem value="showTranscriptions" onClick={() => dispatch(toggleFilter('showTranscriptions'))}>
-                                <Checkbox checked={filters.showTranscriptions} />
-                                <ListItemText primary={t('filters.transcriptions', 'Transcriptions')} />
-                            </MenuItem>
-                        </Select>
-                    </FormControl>
+                    <FileTypeFilter
+                        filters={filters}
+                        onToggle={(filter) => dispatch(toggleFilter(filter))}
+                        onSetAll={(enabled) => dispatch(setAllFilters(enabled))}
+                    />
                 </Box>
 
                 <Box sx={{
