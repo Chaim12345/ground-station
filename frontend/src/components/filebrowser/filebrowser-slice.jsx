@@ -302,7 +302,7 @@ export const startBackgroundTask = createAsyncThunk(
 );
 
 const initialState = {
-    // All files (recordings, snapshots, decoded, audio, and transcriptions)
+    // All library items, including observation bundles.
     files: [],
     filesLoading: false,
     filesError: null,
@@ -318,6 +318,7 @@ const initialState = {
         showRecordings: true,
         showSnapshots: true,
         showDecoded: true,
+        showObservations: true,
         showAudio: true,
         showTranscriptions: true,
     },
@@ -345,6 +346,24 @@ const initialState = {
         done: null, // latest library_purge_done event
     },
 };
+
+export function reconcileFileBrowserPersistedState(inboundState, currentState) {
+    if (!inboundState) return currentState;
+    const savedFilters = inboundState.filters || {};
+    return {
+        ...currentState,
+        ...inboundState,
+        filters: {
+            ...currentState.filters,
+            ...savedFilters,
+            // Before Observations had its own switch, the Decoded switch
+            // controlled both. Preserve that choice on first rehydration.
+            showObservations: savedFilters.showObservations
+                ?? savedFilters.showDecoded
+                ?? currentState.filters.showObservations,
+        },
+    };
+}
 
 const fileBrowserSlice = createSlice({
     name: 'filebrowser',

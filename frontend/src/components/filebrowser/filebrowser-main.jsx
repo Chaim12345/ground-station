@@ -964,6 +964,7 @@ export default function FileBrowserMain() {
                                     showRecordings: t('filters.recordings', 'Recordings'),
                                     showSnapshots: t('filters.snapshots', 'Snapshots'),
                                     showDecoded: t('filters.decoded', 'Decoded'),
+                                    showObservations: t('filters.observations', 'Observations'),
                                     showAudio: t('filters.audio', 'Audio'),
                                     showTranscriptions: t('filters.transcriptions', 'Transcriptions'),
                                 };
@@ -982,6 +983,10 @@ export default function FileBrowserMain() {
                             <MenuItem value="showDecoded" onClick={() => dispatch(toggleFilter('showDecoded'))}>
                                 <Checkbox checked={filters.showDecoded} />
                                 <ListItemText primary={t('filters.decoded', 'Decoded')} />
+                            </MenuItem>
+                            <MenuItem value="showObservations" onClick={() => dispatch(toggleFilter('showObservations'))}>
+                                <Checkbox checked={filters.showObservations} />
+                                <ListItemText primary={t('filters.observations', 'Observations')} />
                             </MenuItem>
                             <MenuItem value="showAudio" onClick={() => dispatch(toggleFilter('showAudio'))}>
                                 <Checkbox checked={filters.showAudio} />
@@ -1192,7 +1197,7 @@ export default function FileBrowserMain() {
                             {t('no_files.title', 'No files found')}
                         </Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                            {!filters.showRecordings && !filters.showSnapshots && !filters.showDecoded && !filters.showAudio && !filters.showTranscriptions
+                            {!filters.showRecordings && !filters.showSnapshots && !filters.showDecoded && !filters.showObservations && !filters.showAudio && !filters.showTranscriptions
                                 ? t('no_files.message_filter', 'Enable at least one filter to see files')
                                 : t('no_files.message_empty', 'Take snapshots or record IQ data from the waterfall view')}
                         </Typography>

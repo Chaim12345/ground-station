@@ -40,7 +40,7 @@ import vfoReducer from '../waterfall/vfo-marker/vfo-slice.jsx';
 import sdrsReducer from '../hardware/sdr-slice.jsx';
 import versionReducer from "../dashboard/version-slice.jsx";
 import updateCheckReducer from "../dashboard/update-slice.jsx";
-import fileBrowserReducer from '../filebrowser/filebrowser-slice.jsx';
+import fileBrowserReducer, { reconcileFileBrowserPersistedState } from '../filebrowser/filebrowser-slice.jsx';
 import decodersReducer from '../decoders/decoders-slice.jsx';
 import libraryVersionsReducer from '../settings/library-versions-slice.jsx';
 import performanceReducer from '../performance/performance-slice.jsx';
@@ -252,6 +252,7 @@ const updateCheckConfig = {
 const fileBrowserPersistConfig = {
     key: 'filebrowser',
     storage,
+    stateReconciler: reconcileFileBrowserPersistedState,
     whitelist: ['sortBy', 'sortOrder', 'viewMode', 'pageSize', 'filters']
 };
 

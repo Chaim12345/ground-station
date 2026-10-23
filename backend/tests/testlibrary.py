@@ -121,6 +121,32 @@ def test_inventory_filters_without_rescanning_filesystem(inventory):
     assert page["items"][0]["id"] == "audio:voice.wav"
 
 
+def test_observation_filter_is_independent_of_decoded_products(inventory):
+    decoded_folder = inventory.roots.decoded / "METEOR_M2.satdump_meteor_m2-x_lrpt"
+    _write(decoded_folder / "dataset.json", b"{}")
+    _write(decoded_folder / "image.png", b"image")
+    inventory.rebuild()
+    other_types_off = {
+        "showRecordings": False,
+        "showSnapshots": False,
+        "showAudio": False,
+        "showTranscriptions": False,
+    }
+
+    observations = inventory.query(
+        filters={**other_types_off, "showDecoded": False, "showObservations": True}
+    )
+    decoded = inventory.query(
+        filters={**other_types_off, "showDecoded": True, "showObservations": False}
+    )
+
+    assert {item["id"] for item in observations["items"]} == {"observation:NOAA.gsobs"}
+    assert {item["id"] for item in decoded["items"]} == {
+        "decoded:packet.bin",
+        "decoded_folder:METEOR_M2.satdump_meteor_m2-x_lrpt",
+    }
+
+
 def test_inventory_filters_a_single_observation_session(inventory):
     page = inventory.query(session_id="session-1")
 

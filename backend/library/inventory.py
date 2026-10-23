@@ -576,7 +576,13 @@ class LibraryInventory:
             "recording": filters.get("showRecordings", True),
             "snapshot": filters.get("showSnapshots", True),
             "decoded": filters.get("showDecoded", True),
-            "decoded_folder": filters.get("showDecoded", True),
+            # Older clients only sent showDecoded, which also covered
+            # observation bundles before they had their own filter.
+            "decoded_folder": (
+                filters.get("showObservations", filters.get("showDecoded", True))
+                if item.get("folder_kind") == "observation"
+                else filters.get("showDecoded", True)
+            ),
             "audio": filters.get("showAudio", True),
             "transcription": filters.get("showTranscriptions", True),
         }

@@ -9,11 +9,25 @@ import reducer, {
     purgeFinished,
     clearPurgeState,
     setPageSize,
+    toggleFilter,
+    reconcileFileBrowserPersistedState,
 } from '../filebrowser-slice.jsx';
 
 function createStore() {
     return configureStore({ reducer: { filebrowser: reducer } });
 }
+
+test('rehydrates the new observation filter from the former decoded choice', () => {
+    const current = reducer(undefined, { type: '@@INIT' });
+    const restored = reconcileFileBrowserPersistedState({
+        filters: { showDecoded: false, showAudio: true },
+    }, current);
+
+    expect(restored.filters).toMatchObject({ showDecoded: false, showObservations: false });
+    const changed = reducer(restored, toggleFilter('showObservations'));
+    expect(changed.filters).toMatchObject({ showDecoded: false, showObservations: true });
+    expect(changed.page).toBe(1);
+});
 
 test('queries one server-side page and stores its total', async () => {
     const socket = {
