@@ -79,7 +79,7 @@ def test_build_recording_snapshot_info_includes_thumbnail_file_metadata(tmp_path
 
     assert snapshot_info is not None
     assert snapshot_info["filename"] == "recording.png"
-    assert snapshot_info["url"] == "/recordings/recording.png"
+    assert snapshot_info["url"].startswith("/recordings/recording.png?v=")
     assert snapshot_info["size"] == source.stat().st_size
     assert snapshot_info["width"] == 800
     assert snapshot_info["height"] == 400

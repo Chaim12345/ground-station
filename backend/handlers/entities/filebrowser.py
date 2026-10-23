@@ -171,9 +171,10 @@ def build_recording_snapshot_info(
     # waterfall. Prefer it for cards instead of deriving another thumbnail from
     # the full image on every first browser visit.
     waterfall_thumbnail_path = snapshot_file.with_name(f"{snapshot_file.stem}_waterfall_thumb.png")
+    thumbnail_url: Optional[str]
     if waterfall_thumbnail_path.exists() and waterfall_thumbnail_path.is_file():
         thumbnail_path = waterfall_thumbnail_path
-        thumbnail_version = int(thumbnail_path.stat().st_mtime)
+        thumbnail_version = thumbnail_path.stat().st_mtime_ns
         thumbnail_url = f"{mount_path}/{quote(thumbnail_path.name)}?v={thumbnail_version}"
     else:
         # Recordings created before waterfall thumbnails were introduced retain
@@ -192,9 +193,10 @@ def build_recording_snapshot_info(
             "height": thumbnail_height,
         }
 
+    snapshot_version = snapshot_file.stat().st_mtime_ns
     return {
         "filename": snapshot_file.name,
-        "url": f"{mount_path}/{quote(snapshot_file.name)}",
+        "url": f"{mount_path}/{quote(snapshot_file.name)}?v={snapshot_version}",
         "thumbnail_url": thumbnail_url,
         "thumbnail": thumbnail_info,
         "size": snapshot_file.stat().st_size,

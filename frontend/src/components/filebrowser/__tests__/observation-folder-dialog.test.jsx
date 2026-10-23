@@ -211,6 +211,27 @@ describe('ObservationFolderDialog', () => {
         expect(screen.getByAltText(BASE)).toHaveAttribute('src', recording.snapshot.thumbnail_url);
     });
 
+    it('shows generation progress over the matching recording thumbnail', () => {
+        const props = {
+            open: true,
+            onClose: vi.fn(),
+            folder,
+            onOpenArtifact: vi.fn(),
+        };
+        const { rerender } = renderWithProviders(
+            <ObservationFolderDialog
+                {...props}
+                runningWaterfallPaths={new Set([`observations/${BUNDLE}/recordings/${BASE}`])}
+            />
+        );
+
+        expect(screen.getByRole('status', { name: 'Generating waterfall' })).toBeInTheDocument();
+        expect(screen.getByAltText(BASE)).toHaveAttribute('src', recording.snapshot.thumbnail_url);
+
+        rerender(<ObservationFolderDialog {...props} runningWaterfallPaths={new Set()} />);
+        expect(screen.queryByRole('status', { name: 'Generating waterfall' })).not.toBeInTheDocument();
+    });
+
     it('hands the recording payload to the artifact opener when clicked', async () => {
         const onOpenArtifact = vi.fn();
         renderWithProviders(
@@ -221,6 +242,27 @@ describe('ObservationFolderDialog', () => {
 
         expect(onOpenArtifact).toHaveBeenCalledTimes(1);
         expect(onOpenArtifact).toHaveBeenCalledWith(recording);
+    });
+
+    it('opens waterfall generation from the IQ card menu without opening recording details', async () => {
+        const onOpenArtifact = vi.fn();
+        const onGenerateWaterfall = vi.fn();
+        renderWithProviders(
+            <ObservationFolderDialog
+                open
+                onClose={vi.fn()}
+                folder={folder}
+                onOpenArtifact={onOpenArtifact}
+                onGenerateWaterfall={onGenerateWaterfall}
+            />
+        );
+
+        await userEvent.click(screen.getByRole('button', { name: 'Recording actions' }));
+        expect(onOpenArtifact).not.toHaveBeenCalled();
+        await userEvent.click(screen.getByRole('menuitem', { name: 'Generate Waterfall Image' }));
+
+        expect(onGenerateWaterfall).toHaveBeenCalledExactlyOnceWith(recording);
+        expect(onOpenArtifact).not.toHaveBeenCalled();
     });
 
     it('offers deletion from the observation dialog footer', async () => {

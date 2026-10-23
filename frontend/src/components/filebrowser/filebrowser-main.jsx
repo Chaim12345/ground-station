@@ -117,6 +117,9 @@ import PurgeDialog from './purge-dialog.jsx';
 import ZoomableImage from '../common/zoomable-image.jsx';
 import DecodedFolderThumbnail from './decoded-folder-thumbnail.jsx';
 import { buildFileBrowserDisplayItem } from './filebrowser-display-item.js';
+import { getWaterfallRecordingPath } from './waterfall-recording-path.js';
+import { getRunningWaterfallPaths, isWaterfallRunningForItem } from './waterfall-task-status.js';
+import WaterfallGenerationOverlay from './waterfall-generation-overlay.jsx';
 import { getAvailableColorMaps } from '../waterfall/worker-modules/color-maps.js';
 
 function formatBytes(bytes) {
@@ -154,17 +157,6 @@ function formatDuration(startTime, endTime) {
 
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
-
-const getRecordingBaseName = (recordingName) => {
-    if (!recordingName) return '';
-    if (recordingName.endsWith('.sigmf-data')) {
-        return recordingName.slice(0, -12);
-    }
-    if (recordingName.endsWith('.sigmf-meta')) {
-        return recordingName.slice(0, -12);
-    }
-    return recordingName;
-};
 
 function getLanguageFlag(langCode) {
     // Map language codes to country flag emojis
@@ -334,6 +326,11 @@ export default function FileBrowserMain() {
         selectionMode,
         viewMode,
     } = useSelector((state) => state.filebrowser);
+    const backgroundTasks = useSelector((state) => state.backgroundTasks);
+    const runningWaterfallPaths = useMemo(
+        () => getRunningWaterfallPaths(backgroundTasks),
+        [backgroundTasks]
+    );
 
     const pageSize = useMemo(() => {
         if (viewMode !== 'card') return 12;
@@ -375,6 +372,7 @@ export default function FileBrowserMain() {
     const [processingMenuRecording, setProcessingMenuRecording] = useState(null);
     const [waterfallDialogOpen, setWaterfallDialogOpen] = useState(false);
     const [waterfallDialogRecording, setWaterfallDialogRecording] = useState(null);
+    const [returnToObservationAfterWaterfall, setReturnToObservationAfterWaterfall] = useState(false);
     const [waterfallTaskOptions, setWaterfallTaskOptions] = useState(() =>
         buildWaterfallDialogDefaults()
     );
@@ -419,12 +417,14 @@ export default function FileBrowserMain() {
         }
     }, [socket, dispatch, filters, sortBy, sortOrder, page, pageSize]);
 
-    // Listen for file browser state updates for local-only actions (global handler in useSocketEventHandlers.jsx handles file list refresh)
+    // The global listener refreshes the library page, while an open dialog
+    // needs its own fresh detail payload after a waterfall is replaced.
     useEffect(() => {
         if (!socket) return;
 
+        let active = true;
+        let refreshSequence = 0;
         const handleFileBrowserState = (state) => {
-            // Only handle actions that need local component-specific logic
             switch (state.action) {
                 case 'delete-batch':
                     // Show toast for batch delete
@@ -435,15 +435,52 @@ export default function FileBrowserMain() {
                         toast.warning(t('toast.batch_delete_partial', 'Some items could not be deleted'));
                     }
                     break;
+                case 'waterfall-generated': {
+                    const sequence = ++refreshSequence;
+                    const refreshOpenDetails = async () => {
+                        const observationId = observationFolder?.id;
+                        const observationVisible = observationFolderDialogOpen || returnToObservationFolder || returnToObservationAfterWaterfall;
+                        if (observationId && observationVisible) {
+                            const folder = await dispatch(fetchFileDetails({ socket, id: observationId })).unwrap();
+                            if (!active || sequence !== refreshSequence) return;
+                            setObservationFolder((current) => current?.id === folder.id ? folder : current);
+                            // A recording viewer opened from this bundle can be
+                            // on top of the folder dialog when generation ends.
+                            setSelectedItem((current) => {
+                                if (current?.type === 'recording' && current.observation_bundle === folder.foldername) {
+                                    const updated = folder.recordings?.find((recording) => recording.name === current.name);
+                                    return updated ? { ...current, ...updated } : current;
+                                }
+                                if (current?.type === 'snapshot' && current.url?.startsWith(`${folder.url}/`)) {
+                                    const updated = folder.images?.find((image) => image.path === current.path);
+                                    return updated ? { ...current, ...updated } : current;
+                                }
+                                return current;
+                            });
+                        }
+                        if (detailsOpen && selectedItem?.type === 'recording' && selectedItem.id) {
+                            const recording = await dispatch(fetchFileDetails({ socket, id: selectedItem.id })).unwrap();
+                            if (!active || sequence !== refreshSequence) return;
+                            setSelectedItem((current) => current?.id === recording.id ? recording : current);
+                        }
+                    };
+                    // A background refresh should not interrupt the viewer if
+                    // the item was deleted or became unavailable meanwhile.
+                    refreshOpenDetails().catch(() => {});
+                    break;
+                }
             }
         };
 
         socket.on('file_browser_state', handleFileBrowserState);
 
         return () => {
+            active = false;
             socket.off('file_browser_state', handleFileBrowserState);
         };
-    }, [socket, t]);
+    }, [socket, t, dispatch, observationFolder?.id, observationFolderDialogOpen,
+        returnToObservationFolder, returnToObservationAfterWaterfall,
+        detailsOpen, selectedItem?.id, selectedItem?.type]);
 
     // The inventory already sorted and paged this response.  Formatting stays
     // local because it is purely presentational.
@@ -779,6 +816,11 @@ export default function FileBrowserMain() {
 
     const handleOpenWaterfallDialog = (item) => {
         if (item.type !== 'recording') return;
+        if (observationFolderDialogOpen) {
+            // The observation dialog is rendered above the generation dialog.
+            setObservationFolderDialogOpen(false);
+            setReturnToObservationAfterWaterfall(true);
+        }
         setWaterfallDialogRecording(item);
         setWaterfallTaskOptions(buildWaterfallDialogDefaults());
         setWaterfallDialogOpen(true);
@@ -788,6 +830,10 @@ export default function FileBrowserMain() {
         setWaterfallDialogOpen(false);
         setWaterfallDialogRecording(null);
         setWaterfallTaskOptions(buildWaterfallDialogDefaults());
+        if (returnToObservationAfterWaterfall) {
+            setReturnToObservationAfterWaterfall(false);
+            setObservationFolderDialogOpen(true);
+        }
     };
 
     const handleWaterfallOptionChange = (key, value) => {
@@ -806,8 +852,7 @@ export default function FileBrowserMain() {
         }
 
         try {
-            const baseName = getRecordingBaseName(item.name);
-            const recordingPath = `/recordings/${baseName}`;
+            const recordingPath = getWaterfallRecordingPath(item);
             const kwargs = optionsOverride ? { options: optionsOverride } : {};
 
             const response = await dispatch(startBackgroundTask({
@@ -1190,6 +1235,7 @@ export default function FileBrowserMain() {
                             && String(item.decoder_type || '').toLowerCase() === 'aprs';
                         const key = item.id;
                         const isSelected = selectedItems.includes(item.id);
+                        const isGeneratingWaterfall = isWaterfallRunningForItem(item, runningWaterfallPaths);
 
                         return (
                             <Card
@@ -1225,6 +1271,7 @@ export default function FileBrowserMain() {
                                                     }}
                                                 />
                                             )}
+                                            {isGeneratingWaterfall && <WaterfallGenerationOverlay />}
                                             {/* Selection checkbox overlay (top-left when in selection mode) */}
                                             {selectionMode && (
                                                 <Box
@@ -2835,7 +2882,9 @@ export default function FileBrowserMain() {
                 open={observationFolderDialogOpen}
                 onClose={() => setObservationFolderDialogOpen(false)}
                 folder={observationFolder}
+                runningWaterfallPaths={runningWaterfallPaths}
                 onOpenArtifact={handleObservationArtifact}
+                onGenerateWaterfall={handleOpenWaterfallDialog}
                 onDelete={handleDeleteObservation}
             />
 

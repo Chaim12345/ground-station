@@ -39,6 +39,11 @@ def _iso(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
 
 
+def _versioned_image_url(path: Path, url: str) -> str:
+    """Change an image URL whenever its on-disk content is replaced."""
+    return f"{url}?v={path.stat().st_mtime_ns}"
+
+
 def _parse_cutoff(value: Any) -> datetime:
     """Parse a purge cutoff ISO string; naive timestamps are read as UTC."""
     try:
@@ -932,7 +937,10 @@ class LibraryInventory:
                     "url": f"/observations/{quote(folder.name)}",
                     "download_url": f"/api/observations/{quote(folder.name)}/download",
                     "thumbnail_url": (
-                        f"/observations/{quote(folder.name)}/recordings/{quote(thumbnail.name)}"
+                        _versioned_image_url(
+                            thumbnail,
+                            f"/observations/{quote(folder.name)}/recordings/{quote(thumbnail.name)}",
+                        )
                         if thumbnail
                         else None
                     ),
@@ -955,15 +963,19 @@ class LibraryInventory:
         # decode the original multi-megapixel PNG just to fill a small card.
         waterfall_thumbnail = path.with_name(f"{path.stem}_waterfall_thumb.png")
         if waterfall_thumbnail.is_file():
-            thumbnail_url = f"{mount}/{quote(waterfall_thumbnail.name)}"
+            thumbnail_url = _versioned_image_url(
+                waterfall_thumbnail, f"{mount}/{quote(waterfall_thumbnail.name)}"
+            )
         elif thumbnail.is_file():
-            thumbnail_url = f"{mount}/thumbnails/{quote(thumbnail.name)}"
+            thumbnail_url = _versioned_image_url(
+                thumbnail, f"{mount}/thumbnails/{quote(thumbnail.name)}"
+            )
         else:
             thumbnail_url = None
 
         return {
             "filename": path.name,
-            "url": f"{mount}/{quote(path.name)}",
+            "url": _versioned_image_url(path, f"{mount}/{quote(path.name)}"),
             "thumbnail_url": thumbnail_url,
             "size": path.stat().st_size,
         }
@@ -1043,7 +1055,13 @@ class LibraryInventory:
             artifact = {
                 "name": path.name,
                 "path": relative_path,
-                "url": f"/observations/{quote(folder.name)}/{quote(relative_path)}",
+                "url": (
+                    _versioned_image_url(
+                        path, f"/observations/{quote(folder.name)}/{quote(relative_path)}"
+                    )
+                    if path.suffix.lower() in IMAGE_EXTENSIONS
+                    else f"/observations/{quote(folder.name)}/{quote(relative_path)}"
+                ),
                 "size": stat.st_size,
                 "kind": relative.parts[0] if relative.parts else "file",
                 "file_type": path.suffix.lower(),
@@ -1051,8 +1069,9 @@ class LibraryInventory:
             }
             if path.suffix.lower() in IMAGE_EXTENSIONS and generated_thumbnail.is_file():
                 thumbnail_relative = generated_thumbnail.relative_to(folder).as_posix()
-                artifact["thumbnail_url"] = (
-                    f"/observations/{quote(folder.name)}/{quote(thumbnail_relative)}"
+                artifact["thumbnail_url"] = _versioned_image_url(
+                    generated_thumbnail,
+                    f"/observations/{quote(folder.name)}/{quote(thumbnail_relative)}",
                 )
             artifacts.append(artifact)
             total_size += stat.st_size
@@ -1072,6 +1091,7 @@ class LibraryInventory:
                     {
                         "type": "recording",
                         "name": name,
+                        "observation_bundle": folder.name,
                         "data_file": data.name,
                         "meta_file": meta.name,
                         "data_size": stat.st_size,

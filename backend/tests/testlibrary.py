@@ -187,13 +187,59 @@ def test_observation_detail_uses_waterfall_previews_and_groups_recording_files(i
     artifacts = {artifact["path"]: artifact for artifact in detail["artifacts"]}
     product = next(image for image in detail["images"] if image["path"] == "decoded/product.png")
 
-    assert recording["snapshot"]["thumbnail_url"].endswith(
-        "/recordings/capture_waterfall_thumb.png"
+    assert recording["observation_bundle"] == "NOAA.gsobs"
+    assert recording["download_urls"]["data"] == (
+        "/observations/NOAA.gsobs/recordings/capture.sigmf-data"
+    )
+    assert recording["snapshot"]["url"].startswith(
+        "/observations/NOAA.gsobs/recordings/capture.png?v="
+    )
+    assert recording["snapshot"]["thumbnail_url"].startswith(
+        "/observations/NOAA.gsobs/recordings/capture_waterfall_thumb.png?v="
     )
     assert artifacts["recordings/capture.png"]["recording_name"] == "capture"
     assert artifacts["recordings/capture_waterfall_thumb.png"]["recording_name"] == "capture"
     assert artifacts["recordings/capture.sigmf-data"]["recording_name"] == "capture"
-    assert product["thumbnail_url"].endswith("/decoded/thumbnails/product.jpg")
+    assert product["thumbnail_url"].startswith(
+        "/observations/NOAA.gsobs/decoded/thumbnails/product.jpg?v="
+    )
+
+
+def test_regenerated_waterfall_changes_all_observation_image_urls(inventory):
+    folder = inventory.roots.observations / "NOAA.gsobs"
+    recording_root = folder / "recordings"
+    _write(recording_root / "capture.sigmf-data", b"iq")
+    _write(recording_root / "capture.sigmf-meta", json.dumps({"global": {}}))
+    image = _write(recording_root / "capture.png", b"old waterfall")
+    thumbnail = _write(recording_root / "capture_waterfall_thumb.png", b"old preview")
+    inventory.rebuild()
+
+    before_summary = inventory.get("observation:NOAA.gsobs")
+    before_detail = inventory.detail("observation:NOAA.gsobs")
+    before_snapshot = before_detail["recordings"][0]["snapshot"]
+    before_image = next(
+        artifact for artifact in before_detail["images"] if artifact["name"] == "capture.png"
+    )
+
+    # Regeneration can replace both files in one second. Use nanosecond mtimes
+    # so the browser always requests the new image instead of its cached copy.
+    for path, content in ((image, b"new waterfall"), (thumbnail, b"new preview")):
+        previous_mtime = path.stat().st_mtime_ns
+        path.write_bytes(content)
+        os.utime(path, ns=(previous_mtime + 1_000_000, previous_mtime + 1_000_000))
+    inventory.rebuild()
+
+    after_summary = inventory.get("observation:NOAA.gsobs")
+    after_detail = inventory.detail("observation:NOAA.gsobs")
+    after_snapshot = after_detail["recordings"][0]["snapshot"]
+    after_image = next(
+        artifact for artifact in after_detail["images"] if artifact["name"] == "capture.png"
+    )
+
+    assert after_snapshot["url"] != before_snapshot["url"]
+    assert after_snapshot["thumbnail_url"] != before_snapshot["thumbnail_url"]
+    assert after_summary["thumbnail_url"] != before_summary["thumbnail_url"]
+    assert after_image["url"] != before_image["url"]
 
 
 def test_rebuild_only_advances_revision_when_filesystem_changes(inventory):

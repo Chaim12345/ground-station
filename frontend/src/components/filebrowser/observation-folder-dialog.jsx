@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Box,
     Button,
@@ -14,6 +14,8 @@ import {
     ListItemButton,
     ListItemIcon,
     ListItemText,
+    Menu,
+    MenuItem,
     Paper,
     Tooltip,
     Typography,
@@ -23,9 +25,12 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import ImageIcon from '@mui/icons-material/Image';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RadioIcon from '@mui/icons-material/Radio';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import { useTranslation } from 'react-i18next';
+import { isWaterfallRunningForItem } from './waterfall-task-status.js';
+import WaterfallGenerationOverlay from './waterfall-generation-overlay.jsx';
 
 const IMAGE_FILE_TYPES = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
 
@@ -91,9 +96,17 @@ export default function ObservationFolderDialog({
     onClose,
     folder,
     onOpenArtifact,
+    onGenerateWaterfall,
     onDelete,
+    runningWaterfallPaths,
 }) {
     const { t } = useTranslation('filebrowser');
+    const [recordingMenu, setRecordingMenu] = useState(null);
+
+    useEffect(() => {
+        if (!open) setRecordingMenu(null);
+    }, [open]);
+
     if (!folder) return null;
 
     const artifacts = folder.artifacts || [];
@@ -364,6 +377,7 @@ export default function ObservationFolderDialog({
                         <Grid container spacing={1.5} sx={{ mb: 3 }}>
                             {recordings.map((recording) => {
                                 const previewUrl = recording.snapshot?.thumbnail_url || recording.snapshot?.url;
+                                const isGeneratingWaterfall = isWaterfallRunningForItem(recording, runningWaterfallPaths);
                                 return (
                                     <Grid item xs={12} sm={6} md={4} key={recording.name}>
                                         <Paper
@@ -378,12 +392,34 @@ export default function ObservationFolderDialog({
                                                 ) : (
                                                     <RadioIcon sx={{ fontSize: 48, color: 'grey.600' }} />
                                                 )}
+                                                {isGeneratingWaterfall && <WaterfallGenerationOverlay />}
                                                 <Chip
                                                     label={recording.recording_in_progress ? 'Recording' : 'IQ recording'}
                                                     size="small"
                                                     color={recording.recording_in_progress ? 'warning' : 'error'}
                                                     sx={{ position: 'absolute', top: 8, left: 8 }}
                                                 />
+                                                {onGenerateWaterfall && (
+                                                    <IconButton
+                                                        size="small"
+                                                        aria-label={t('observation_folder_dialog.recording_actions', { defaultValue: 'Recording actions' })}
+                                                        onClick={(event) => {
+                                                            // The card opens recording details; its menu must stay independent.
+                                                            event.stopPropagation();
+                                                            setRecordingMenu({ anchorEl: event.currentTarget, recording });
+                                                        }}
+                                                        sx={{
+                                                            position: 'absolute',
+                                                            top: 6,
+                                                            right: 6,
+                                                            color: 'common.white',
+                                                            bgcolor: 'rgba(0, 0, 0, 0.6)',
+                                                            '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.8)' },
+                                                        }}
+                                                    >
+                                                        <MoreVertIcon fontSize="small" />
+                                                    </IconButton>
+                                                )}
                                             </Box>
                                             <Box sx={{ p: 1.25 }}>
                                                 <Tooltip title={recording.name}>
@@ -469,6 +505,22 @@ export default function ObservationFolderDialog({
                 </Button>
                 <Button onClick={onClose} variant="outlined">{t('observation_folder_dialog.close', { defaultValue: 'Close' })}</Button>
             </DialogActions>
+            <Menu
+                anchorEl={recordingMenu?.anchorEl ?? null}
+                open={Boolean(recordingMenu)}
+                onClose={() => setRecordingMenu(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            >
+                <MenuItem onClick={() => {
+                    const recording = recordingMenu?.recording;
+                    setRecordingMenu(null);
+                    if (recording) onGenerateWaterfall?.(recording);
+                }}>
+                    <ListItemIcon><ImageIcon fontSize="small" /></ListItemIcon>
+                    <ListItemText primary={t('observation_folder_dialog.generate_waterfall_image', { defaultValue: 'Generate Waterfall Image' })} />
+                </MenuItem>
+            </Menu>
         </Dialog>
     );
 }
