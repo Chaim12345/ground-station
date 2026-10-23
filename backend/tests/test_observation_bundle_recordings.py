@@ -60,8 +60,10 @@ def test_bundle_recording_groups_every_capture_file(tmp_path):
         "data": f"/observations/{bundle.name}/recordings/capture_iq_1.sigmf-data",
         "meta": f"/observations/{bundle.name}/recordings/capture_iq_1.sigmf-meta",
     }
+    snapshot_file = bundle / "recordings" / "capture_iq_1.png"
     assert recording["snapshot"]["url"] == (
-        f"/observations/{bundle.name}/recordings/capture_iq_1.png"
+        f"/observations/{bundle.name}/recordings/{snapshot_file.name}"
+        f"?v={snapshot_file.stat().st_mtime_ns}"
     )
     assert recording["snapshot"]["thumbnail_url"].startswith(
         f"/observations/{bundle.name}/recordings/capture_iq_1_waterfall_thumb.png?v="
