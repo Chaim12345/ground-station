@@ -18,12 +18,13 @@
  */
 
 import * as satellite from 'satellite.js';
+import {createSatelliteRecord} from '../hooks/liveorbit.js';
 
 /**
  * Calculate elevation curve for a single satellite pass with adaptive sampling.
  * This mirrors the backend implementation but runs in the browser using satellite.js.
  *
- * @param {Object} satelliteData - Object containing TLE data (tle1, tle2, norad_id)
+ * @param {Object} satelliteData - Satellite with TLE or canonical OMM elements
  * @param {Object} homeLocation - Object with lat and lon keys (in degrees)
  * @param {string} eventStart - ISO format start time string
  * @param {string} eventEnd - ISO format end time string
@@ -38,12 +39,12 @@ export function calculateElevationCurve(
     extendStartMinutes = 0
 ) {
     try {
-        // Parse TLE
-        const satrec = satellite.twoline2satrec(satelliteData.tle1, satelliteData.tle2);
+        const {record: satrec} = createSatelliteRecord(satelliteData);
+        if (!satrec) return [];
 
-        // Check if TLE parsing failed
+        // Propagation can still report an error after creating the record.
         if (satrec.error) {
-            console.error(`TLE parsing error for satellite ${satelliteData.norad_id}: error code ${satrec.error}`);
+            console.error(`Orbit parsing error for satellite ${satelliteData.norad_id}: error code ${satrec.error}`);
             return [];
         }
 
@@ -191,7 +192,7 @@ export function calculateElevationCurve(
  *
  * @param {Array} passes - Array of pass objects
  * @param {Object} homeLocation - Object with lat and lon keys (in degrees)
- * @param {Object} satelliteLookup - Object mapping norad_id to satellite data (tle1, tle2)
+ * @param {Object} satelliteLookup - Object mapping norad_id to satellite orbit data
  * @returns {Array} Array of passes with elevation_curve data added
  */
 export function calculateElevationCurvesForPasses(passes, homeLocation, satelliteLookup) {

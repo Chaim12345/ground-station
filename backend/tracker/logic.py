@@ -44,7 +44,10 @@ from tracker.ipc import (
 from tracker.righandler import RigHandler
 from tracker.rotatorhandler import RotatorHandler
 from tracker.statemanager import StateManager
-from tracking.doppler import calculate_range_rate_from_heliocentric_vectors
+from tracking.doppler import (
+    calculate_range_rate_from_heliocentric_vectors,
+    calculate_range_rate_from_propagation,
+)
 from tracking.satellite import get_satellite_az_el_from_propagation
 
 logger = logging.getLogger("tracker-worker")
@@ -618,13 +621,26 @@ class SatelliteTracker:
                 logger.warning("Invalid satellite ephemeris payload for tracker loop: %s", e)
                 return None
 
-            # Hardware Doppler interfaces still consume TLE, so do not pass an
-            # invalid [None, None] placeholder for OMM-only catalogue entries.
+            # Rotator overlap planning still uses TLE lines. Doppler below uses
+            # the canonical orbit, which also supports six-digit OMM objects.
             satellite_tles = (
                 [propagation_input.tle1, propagation_input.tle2]
                 if propagation_input.tle1 and propagation_input.tle2
                 else None
             )
+            try:
+                range_rate_km_s = calculate_range_rate_from_propagation(
+                    propagation_input,
+                    observer_lat=observer_lat,
+                    observer_lon=observer_lon,
+                    observer_elevation=observer_alt_m,
+                    epoch=now_epoch,
+                )
+            except Exception as exc:
+                # Position tracking can continue if Doppler propagation fails.
+                # The runtime loop publishes an explicit unavailable status.
+                logger.debug("Satellite Doppler unavailable for %s: %s", norad_id, exc)
+                range_rate_km_s = None
             satellite_name = str(input_payload.get("name") or norad_id)
             skypoint = (
                 float(satellite_data["position"]["az"]),
@@ -657,6 +673,7 @@ class SatelliteTracker:
                 "tracking_lead_seconds": tracking_lead_seconds,
                 "satellite_data": satellite_data,
                 "satellite_tles": satellite_tles,
+                "range_rate_km_s": range_rate_km_s,
             }
 
         target_key = normalize_target_key(tracking_state.get("target_key"))
@@ -1017,7 +1034,7 @@ class SatelliteTracker:
                     tracker["target_type"] = target_type
 
                 self.satellite_data = target_context["satellite_data"]
-                satellite_tles = target_context.get("satellite_tles")
+                range_rate_km_s = target_context.get("range_rate_km_s")
                 satellite_name = target_context["target_name"]
                 skypoint = target_context["skypoint"]
                 command_skypoint = target_context.get("command_skypoint", skypoint)
@@ -1027,34 +1044,32 @@ class SatelliteTracker:
                 self.rotator_data["command_az"] = float(command_skypoint[0])
                 self.rotator_data["command_el"] = float(command_skypoint[1])
 
-                if target_type == "satellite" and not satellite_tles:
-                    # Six-digit OMM records propagate normally, but the rig
-                    # Doppler APIs consume a TLE pair. Publish the boundary so
-                    # clients do not mistake missing corrections for a fault.
+                if target_type == "satellite" and range_rate_km_s is None:
+                    self.rig_data["doppler_status"] = "unavailable"
                     self.rig_data["orbit_compatibility_notice"] = (
-                        "Hardware Doppler and rig control require TLE-compatible orbit lines; "
-                        "this OMM-only object will not receive rig corrections."
+                        "Doppler correction is unavailable for the current satellite orbit."
                     )
+                elif target_type == "satellite":
+                    self.rig_data["doppler_status"] = "tracking"
+                    self.rig_data.pop("orbit_compatibility_notice", None)
                 else:
+                    self.rig_data.pop("doppler_status", None)
                     self.rig_data.pop("orbit_compatibility_notice", None)
 
                 # Check position limits
                 self.rotator_handler.check_position_limits(skypoint, satellite_name)
 
-                if target_type == "satellite" and satellite_tles:
+                if target_type == "satellite":
                     # Select the 0_450 lane from the pass geometry before issuing
                     # movement commands. The handler caches one decision per target.
                     self.rotator_handler.plan_overlap_lane(
                         self.input_target_ephemeris or {}, location, skypoint
                     )
 
-                if target_type == "satellite" and satellite_tles:
-                    # Handle transmitter tracking
-                    await self.rig_handler.handle_transmitter_tracking(satellite_tles, location)
-
-                    # Calculate doppler shift for all active transmitters
-                    await self.rig_handler.calculate_all_transmitters_doppler(
-                        satellite_tles, location
+                if target_type == "satellite" and range_rate_km_s is not None:
+                    # One range rate drives every transmitter, rig, and OBS VFO.
+                    await self.rig_handler.update_transmitter_doppler(
+                        range_rate_km_s=range_rate_km_s
                     )
                     transmitters = self.rig_data.get("transmitters") or []
                     transmitter_count = len(transmitters) if isinstance(transmitters, list) else 0
@@ -1073,9 +1088,9 @@ class SatelliteTracker:
                         await self.rig_handler.control_rig_frequency()
                     except Exception as error:
                         await self.rig_handler.handle_rig_error(error)
-                else:
-                    await self.rig_handler.handle_non_satellite_transmitter_tracking(
-                        range_rate_km_s=target_context.get("range_rate_km_s")
+                elif target_type != "satellite":
+                    await self.rig_handler.update_transmitter_doppler(
+                        range_rate_km_s=range_rate_km_s
                     )
                     try:
                         await self.rig_handler.control_rig_frequency()
@@ -1088,6 +1103,10 @@ class SatelliteTracker:
                         skypoint[0],
                         skypoint[1],
                     )
+                else:
+                    # Never feed an uncorrected nominal frequency to a rig or
+                    # internal VFO when satellite Doppler cannot be calculated.
+                    self.rig_handler.clear_transmitter_doppler()
 
                 # Control rotator position
                 if self.current_rotator_state == "tracking":

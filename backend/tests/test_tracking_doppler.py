@@ -22,11 +22,13 @@ from datetime import datetime, timezone
 import pytest
 from skyfield.api import load
 
+from orbits import CentralBody, get_propagation_input
 from tracking.doppler import (
     calculate_doppler_shift,
     calculate_doppler_shift_from_range_rate,
     calculate_observer_velocity_due_to_earth_rotation,
     calculate_range_rate_from_heliocentric_vectors,
+    calculate_range_rate_from_propagation,
 )
 
 
@@ -59,6 +61,35 @@ def san_francisco_location():
 def london_location():
     """London observer location."""
     return {"lat": 51.5074, "lon": -0.1278, "elevation": 11.0}
+
+
+def test_tle_propagation_range_rate_matches_existing_doppler(iss_tle):
+    epoch = datetime(2023, 4, 19, 12, tzinfo=timezone.utc)
+    propagation_input = get_propagation_input(
+        {
+            "norad_id": 25544,
+            "name": "ISS",
+            "tle1": iss_tle["line1"],
+            "tle2": iss_tle["line2"],
+        },
+        central_body=CentralBody.EARTH,
+    )
+    range_rate = calculate_range_rate_from_propagation(
+        propagation_input, 37.7749, -122.4194, 52, epoch
+    )
+    new_observed, new_shift = calculate_doppler_shift_from_range_rate(range_rate, 437_800_000)
+    old_observed, old_shift = calculate_doppler_shift(
+        iss_tle["line1"],
+        iss_tle["line2"],
+        37.7749,
+        -122.4194,
+        52,
+        437_800_000,
+        time=load.timescale().from_datetime(epoch),
+    )
+
+    assert new_observed == pytest.approx(old_observed, abs=1)
+    assert new_shift == pytest.approx(old_shift, abs=1)
 
 
 class TestCalculateDopplerShift:

@@ -38,20 +38,35 @@ async def handle_vfo_updates_for_tracking(sockio, tracking_data):
         tracking_data: Dictionary containing rig_data with transmitters doppler data
                       Format: {"rig_data": {"transmitters": [...]}, ...}
     """
-    # Extract transmitter doppler data
-    rig_data = tracking_data.get("rig_data", {})
-    transmitters = rig_data.get("transmitters", [])
-
-    if not transmitters:
+    tracker_id = tracking_data.get("tracker_id")
+    doppler_status = (tracking_data.get("rig_data") or {}).get("doppler_status")
+    if not tracker_id or doppler_status not in {"tracking", "unavailable"}:
         return
+
+    # Extract transmitter doppler data
+    rig_data = tracking_data.get("rig_data") or {}
+    transmitters = rig_data.get("transmitters") or []
 
     # Get VFO manager instance
     vfo_manager = VFOManager()
 
     # Get all internal observation sessions
     # Internal sessions have IDs like "internal:observation-uuid"
-    all_sessions = vfo_manager.get_all_session_ids()
-    internal_sessions = [s for s in all_sessions if VFOManager.is_internal_session(s)]
+    all_internal_sessions = vfo_manager.get_all_internal_sessions()
+
+    def sessions_for_observation(observation_id: str) -> list[str]:
+        prefix = VFOManager.make_internal_session_id(observation_id)
+        return [
+            session_id
+            for session_id in all_internal_sessions
+            if session_id == prefix or session_id.startswith(f"{prefix}:")
+        ]
+
+    # OBS slot IDs use the observation ID directly when it starts with "obs-";
+    # otherwise the slot adds that prefix. Prefer the exact ID when both exist.
+    internal_sessions = sessions_for_observation(str(tracker_id))
+    if not internal_sessions and str(tracker_id).startswith("obs-"):
+        internal_sessions = sessions_for_observation(str(tracker_id)[4:])
 
     if not internal_sessions:
         return
@@ -68,35 +83,41 @@ async def handle_vfo_updates_for_tracking(sockio, tracking_data):
 
             # Skip if VFO is not locked to a transmitter
             locked_tx_id = vfo_state.locked_transmitter_id
-            if locked_tx_id == "none":
+            if not locked_tx_id or locked_tx_id == "none":
                 continue
 
-            # Find matching transmitter in doppler data
-            for transmitter in transmitters:
-                if transmitter.get("id") == locked_tx_id:
-                    # Get doppler-corrected downlink frequency
-                    doppler_freq = transmitter.get("downlink_observed_freq", 0)
+            transmitter = next(
+                (item for item in transmitters if item.get("id") == locked_tx_id), None
+            )
+            doppler_freq = transmitter.get("downlink_observed_freq", 0) if transmitter else 0
+            if doppler_status == "unavailable" or not doppler_freq or doppler_freq <= 0:
+                if vfo_state.doppler_status != "unavailable":
+                    vfo_manager.update_vfo_state(
+                        session_id=session_id, vfo_id=vfo_num, doppler_status="unavailable"
+                    )
+                continue
 
-                    if doppler_freq > 0:
-                        # Only update if frequency changed by more than 10 Hz
-                        # This prevents unnecessary updates and log spam
-                        freq_diff = abs(doppler_freq - vfo_state.center_freq)
-                        if freq_diff > 10:
-                            # Update VFO frequency with doppler-corrected value
-                            vfo_manager.update_vfo_state(
-                                session_id=session_id,
-                                vfo_id=vfo_num,
-                                center_freq=int(doppler_freq),
-                            )
-
-                            updates_applied += 1
-                            logger.debug(
-                                f"Applied doppler correction to internal VFO: "
-                                f"session={session_id}, vfo={vfo_num}, "
-                                f"tx={locked_tx_id}, freq={doppler_freq/1e6:.6f} MHz "
-                                f"(diff={freq_diff/1e3:.2f} kHz)"
-                            )
-                    break
+            # Only publish a new frequency after 10 Hz of movement, but retain
+            # tracking status even during the slower part of a pass.
+            freq_diff = abs(doppler_freq - vfo_state.center_freq)
+            if freq_diff > 10 or vfo_state.doppler_status != "tracking":
+                vfo_manager.update_vfo_state(
+                    session_id=session_id,
+                    vfo_id=vfo_num,
+                    center_freq=int(doppler_freq) if freq_diff > 10 else None,
+                    doppler_status="tracking",
+                )
+                if freq_diff > 10:
+                    updates_applied += 1
+                    logger.debug(
+                        "Applied doppler correction to internal VFO: "
+                        "session=%s, vfo=%s, tx=%s, freq=%.6f MHz (diff=%.2f kHz)",
+                        session_id,
+                        vfo_num,
+                        locked_tx_id,
+                        doppler_freq / 1e6,
+                        freq_diff / 1e3,
+                    )
 
     # Log summary if updates were applied (debug level to reduce log spam)
     if updates_applied > 0:

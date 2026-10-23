@@ -187,8 +187,8 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
         name: !String(formValues.name || '').trim(),
         norad_id: !formValues.id
             && (formValues.norad_id === '' || formValues.norad_id === null || formValues.norad_id === undefined),
-        tle1: !tle1Trimmed,
-        tle2: !tle2Trimmed,
+        tle1: !requiresOmmPayload && !tle1Trimmed,
+        tle2: !requiresOmmPayload && !tle2Trimmed,
         orbit_model_kind: !supportedModelKinds.includes(normalizedModelKind),
         orbit_central_body: !supportedCentralBodies.includes(normalizedCentralBody),
         orbit_omm_payload: requiresOmmPayload ? Boolean(parsedOmmPayload.error) : false,
@@ -496,7 +496,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 value={formValues.tle1 || ''}
                                 onChange={handleInputChange}
                                 fullWidth
-                                required
+                                required={!requiresOmmPayload}
                                 multiline
                                 minRows={2}
                                 size="small"
@@ -510,7 +510,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 value={formValues.tle2 || ''}
                                 onChange={handleInputChange}
                                 fullWidth
-                                required
+                                required={!requiresOmmPayload}
                                 multiline
                                 minRows={2}
                                 size="small"

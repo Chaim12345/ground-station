@@ -18,6 +18,7 @@
  */
 
 import * as satellite from 'satellite.js';
+import {createSatelliteRecord} from '../hooks/liveorbit.js';
 
 const normalizeSource = (source) => {
     if (typeof source !== 'string') {
@@ -54,13 +55,27 @@ export function calculateDopplerShift(
     time = null
 ) {
     try {
+        const record = satellite.twoline2satrec(tleLine1, tleLine2);
+        return calculateDopplerShiftForRecord(
+            record, observerLat, observerLon, observerElevation, transmittedFreqHz, time,
+        );
+    } catch {
+        return {observedFreqHz: transmittedFreqHz, dopplerShiftHz: 0};
+    }
+}
+
+export function calculateDopplerShiftForRecord(
+    satrec, observerLat, observerLon, observerElevation, transmittedFreqHz, time = null,
+) {
+    try {
         // Use current time if not specified
         if (!time) {
             time = new Date();
         }
 
-        // Parse TLE
-        const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+        if (!satrec || satrec.error) {
+            return {observedFreqHz: transmittedFreqHz, dopplerShiftHz: 0};
+        }
 
         // Calculate satellite position at the given time
         const positionAndVelocity = satellite.propagate(satrec, time);
@@ -83,7 +98,7 @@ export function calculateDopplerShift(
         const observerGd = {
             latitude: satellite.degreesToRadians(observerLat),
             longitude: satellite.degreesToRadians(observerLon),
-            height: observerElevation / 1000 // Convert meters to km
+            height: Number(observerElevation || 0) / 1000 // Convert meters to km
         };
 
         // Calculate GMST for the given time
@@ -92,6 +107,14 @@ export function calculateDopplerShift(
         // Convert observer position to ECI coordinates
         const observerEcf = satellite.geodeticToEcf(observerGd);
         const observerEci = satellite.ecfToEci(observerEcf, gmst);
+        // The ground station rotates with Earth. Subtract its inertial velocity
+        // from the satellite's velocity before projecting onto the line of sight.
+        const earthRotationRadPerSecond = 7.2921150e-5;
+        const relativeVelocity = {
+            x: velocityEci.x + earthRotationRadPerSecond * observerEci.y,
+            y: velocityEci.y - earthRotationRadPerSecond * observerEci.x,
+            z: velocityEci.z,
+        };
 
         // Calculate relative position (satellite - observer) in ECI
         const relativePosition = {
@@ -116,9 +139,9 @@ export function calculateDopplerShift(
 
         // Calculate radial velocity (dot product of unit position vector and velocity vector)
         const rangeRate =
-            positionUnit.x * velocityEci.x +
-            positionUnit.y * velocityEci.y +
-            positionUnit.z * velocityEci.z;
+            positionUnit.x * relativeVelocity.x +
+            positionUnit.y * relativeVelocity.y +
+            positionUnit.z * relativeVelocity.z;
 
         // Speed of light in km/s
         const c = 299792.458;
@@ -145,7 +168,7 @@ export function calculateDopplerShift(
 /**
  * Calculate doppler-shifted frequencies for transmitters within a given bandwidth.
  *
- * @param {Array} groupOfSats - Array of satellite objects with TLEs and transmitters
+ * @param {Array} groupOfSats - Array of satellites with TLE or OMM elements and transmitters
  * @param {number} centerFrequency - SDR center frequency in Hz
  * @param {number} sampleRate - SDR sample rate (bandwidth) in Hz
  * @param {number} observerLat - Observer's latitude in degrees
@@ -178,9 +201,11 @@ export function calculateNeighboringTransmitters(
     const neighboringTransmitters = [];
 
     groupOfSats.forEach(sat => {
-        if (!sat.tle1 || !sat.tle2 || !sat.transmitters || !Array.isArray(sat.transmitters)) {
+        if (!sat.transmitters || !Array.isArray(sat.transmitters)) {
             return;
         }
+        const {record} = createSatelliteRecord(sat);
+        if (!record) return;
 
         sat.transmitters.forEach(tx => {
             // Only process alive transmitters with downlink frequencies
@@ -190,9 +215,8 @@ export function calculateNeighboringTransmitters(
 
             try {
                 // Calculate doppler shift
-                const { observedFreqHz, dopplerShiftHz } = calculateDopplerShift(
-                    sat.tle1,
-                    sat.tle2,
+                const { observedFreqHz, dopplerShiftHz } = calculateDopplerShiftForRecord(
+                    record,
                     observerLat,
                     observerLon,
                     observerElevation,

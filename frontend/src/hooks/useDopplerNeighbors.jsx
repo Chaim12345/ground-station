@@ -21,7 +21,7 @@ import { useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { setNeighboringTransmitters } from '../components/waterfall/waterfall-slice.jsx';
 import { calculateNeighboringTransmitters, groupNeighboringTransmitters } from '../utils/doppler-calculator.js';
-import { isSatelliteVisible } from '../components/common/tracking-logic.jsx';
+import { createSatelliteRecord, propagateSatelliteRecord } from './liveorbit.js';
 
 /**
  * Custom hook to calculate doppler-shifted neighboring transmitters.
@@ -62,22 +62,14 @@ export function useDopplerNeighbors() {
                 // This dramatically reduces the number of doppler calculations needed
                 // Also exclude the currently targeted satellite
                 const visibleSatellites = groupOfSats.filter(sat => {
-                    if (!sat.tle1 || !sat.tle2) {
-                        return false;
-                    }
-
                     // Exclude the currently targeted satellite
                     if (satelliteId && sat.norad_id === satelliteId) {
                         return false;
                     }
 
-                    return isSatelliteVisible(
-                        sat.tle1,
-                        sat.tle2,
-                        now,
-                        { lat: location.lat, lon: location.lon, alt: location.alt },
-                        0 // minimum elevation: 0 degrees (above horizon)
-                    );
+                    const {record} = createSatelliteRecord(sat);
+                    const position = propagateSatelliteRecord(record, now, location);
+                    return position && position.el >= 0;
                 });
 
                 // Calculate doppler shift only for visible satellites

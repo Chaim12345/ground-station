@@ -899,7 +899,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
             clearTimeout(curveCalcTimeoutRef.current);
             curveCalcTimeoutRef.current = null;
         }
-    }, [satelliteId, isSatelliteTarget]);
+    }, [satelliteId, isSatelliteTarget, satelliteData?.details?.orbit_payload]);
 
     const handleRefreshPasses = () => {
         if (isSatelliteTarget && satelliteId) {
@@ -933,7 +933,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         if (!isLocationValid) {
             return undefined;
         }
-        if (!satelliteData?.details?.norad_id || !satelliteData?.details?.tle1 || !satelliteData?.details?.tle2) {
+        if (!satelliteData?.details?.norad_id) {
             return undefined;
         }
         if (!Array.isArray(satellitePasses) || satellitePasses.length === 0) {
@@ -958,11 +958,7 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
 
         const pendingPassKeys = pendingPasses.map((pass) => getPassCurveKey(pass)).filter(Boolean);
         const satelliteLookup = {
-            [satelliteData.details.norad_id]: {
-                norad_id: satelliteData.details.norad_id,
-                tle1: satelliteData.details.tle1,
-                tle2: satelliteData.details.tle2,
-            },
+            [satelliteData.details.norad_id]: satelliteData.details,
         };
         let cancelled = false;
 
@@ -1036,6 +1032,9 @@ const NextPassesIsland = React.memo(function NextPassesIsland() {
         satelliteData?.details?.norad_id,
         satelliteData?.details?.tle1,
         satelliteData?.details?.tle2,
+        satelliteData?.details?.orbit_model_kind,
+        satelliteData?.details?.orbit_format,
+        satelliteData?.details?.orbit_payload,
         satellitePasses,
     ]);
 

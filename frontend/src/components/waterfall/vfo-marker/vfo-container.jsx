@@ -20,6 +20,7 @@
 
 
 import React, {useState, useEffect, useCallback, useRef, useMemo} from "react";
+import { useTranslation } from 'react-i18next';
 import { useDispatch, useSelector } from "react-redux";
 import { Box, IconButton } from '@mui/material';
 import { useVfoSquelchState } from '../vfo-squelch-state.js';
@@ -75,6 +76,7 @@ const VFOMarkersContainer = ({
     // leaving enough main-thread time for input and the waterfall itself.
     const DRAG_VISUAL_UPDATE_INTERVAL_MS = 33;
     const dispatch = useDispatch();
+    const { t } = useTranslation('waterfall');
     const { vfoSquelchOpen } = useVfoSquelchState();
     const {
         vfoMarkers,
@@ -578,7 +580,9 @@ const VFOMarkersContainer = ({
             // Create a marker-like object to use with generateVFOLabelText
             // Use a name like "OBS 1" to match the VFO naming pattern
             const internalMarker = {
-                name: `OBS ${vfoNumber}`,
+                name: vfoData.doppler_status === 'unavailable'
+                    ? `OBS ${vfoNumber} (${t('vfo.doppler_unavailable')})`
+                    : `OBS ${vfoNumber}`,
                 frequency: frequency,
                 decoder: vfoData.decoder
             };

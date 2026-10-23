@@ -127,6 +127,7 @@
     "lock_to_transmitter": "Lock to Transmitter",
     "none": "None",
     "locked_to_transmitter_info": "Tracking doppler-corrected frequency",
+    "doppler_unavailable": "Doppler unavailable",
     "languages": {
       "none": "No Translation",
       "auto": "Auto-detect",

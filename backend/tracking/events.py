@@ -56,6 +56,14 @@ def _generate_cache_key(tle_groups, homelat, homelon, hours, above_el, step_minu
     return hashlib.md5(params_str.encode()).hexdigest()
 
 
+def _orbit_cache_identity(satellite, propagation_input):
+    """Use canonical OMM elements even when a compatibility TLE also exists."""
+    identity = [satellite["norad_id"], propagation_input.tle1, propagation_input.tle2]
+    if propagation_input.model_kind.value == "omm":
+        identity.append(satellite.get("orbit_payload"))
+    return identity
+
+
 def _named_worker_init():
     """Initialize worker process with a descriptive name"""
     # Set process title for system monitoring tools
@@ -311,9 +319,7 @@ async def fetch_next_events_for_group(
             tle_groups_for_cache = []
             for sat in satellites:
                 propagation_input = get_propagation_input(sat, central_body=CentralBody.EARTH)
-                tle_groups_for_cache.append(
-                    [sat["norad_id"], propagation_input.tle1, propagation_input.tle2]
-                )
+                tle_groups_for_cache.append(_orbit_cache_identity(sat, propagation_input))
             cache_key = _generate_cache_key(
                 tle_groups_for_cache, homelat, homelon, hours, above_el, step_minutes
             )
@@ -511,9 +517,7 @@ async def fetch_next_events_for_satellite(
 
             # Generate cache key for this request
             propagation_input = get_propagation_input(satellite, central_body=CentralBody.EARTH)
-            tle_groups_for_cache = [
-                [satellite["norad_id"], propagation_input.tle1, propagation_input.tle2]
-            ]
+            tle_groups_for_cache = [_orbit_cache_identity(satellite, propagation_input)]
             cache_key = _generate_cache_key(
                 tle_groups_for_cache, homelat, homelon, hours, above_el, step_minutes
             )

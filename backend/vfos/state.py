@@ -32,6 +32,7 @@ class VFOState:
     transcription_translation_backend: str = "none"
     decoder: str = "none"  # Decoder type: none, sstv, aprs, fsk, gmsk, gfsk, bpsk, morse, gnss
     locked_transmitter_id: str = "none"
+    doppler_status: str = "idle"  # idle, waiting, tracking, unavailable
     parameters_enabled: bool = True  # Enable/disable custom decoder parameters
 
 
@@ -94,6 +95,7 @@ class VFOManager:
         transcription_translation_backend: Optional[str] = None,
         decoder: Optional[str] = None,
         locked_transmitter_id: Optional[str] = None,
+        doppler_status: Optional[str] = None,
         parameters_enabled: Optional[bool] = None,
     ) -> None:
 
@@ -210,6 +212,9 @@ class VFOManager:
         # check locked transmitter ID
         if locked_transmitter_id is not None:
             vfo_state.locked_transmitter_id = locked_transmitter_id
+
+        if doppler_status in {"idle", "waiting", "tracking", "unavailable"}:
+            vfo_state.doppler_status = doppler_status
 
         # check parameters enabled
         if parameters_enabled is not None:
@@ -453,6 +458,9 @@ class VFOManager:
             vad_close_delay_ms=vad_close_delay_ms,
             decoder=decoder,
             locked_transmitter_id=locked_transmitter_id,
+            doppler_status=(
+                "waiting" if locked_transmitter_id and locked_transmitter_id != "none" else "idle"
+            ),
             parameters_enabled=True,
             transcription_enabled=False,  # Disable transcription by default
         )

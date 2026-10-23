@@ -17,7 +17,9 @@ import math
 from datetime import datetime, timezone
 
 import numpy as np
-from skyfield.api import EarthSatellite, Topos, load
+from skyfield.api import EarthSatellite, Topos, load, wgs84
+
+from orbits import PropagationInput, build_skyfield_satellite
 
 AU_IN_KM = 149597870.7
 SECONDS_PER_DAY = 86400.0
@@ -27,6 +29,38 @@ EARTH_EQUATORIAL_RADIUS_KM = 6378.137
 EARTH_FLATTENING = 1 / 298.257223563
 J2000_JD = 2451545.0
 EARTH_OBLIQUITY_DEG = 23.439291
+
+
+def calculate_range_rate_from_propagation(
+    propagation_input: PropagationInput,
+    observer_lat: float,
+    observer_lon: float,
+    observer_elevation: float,
+    epoch: datetime,
+) -> float:
+    """Return the topocentric radial speed for either an OMM or TLE orbit.
+
+    Skyfield evaluates the satellite and the rotating ground station in the
+    same frame. Reuse the tracker's observation time so the displayed position
+    and the Doppler correction describe the same instant.
+    """
+    timescale = load.timescale()
+    satellite = build_skyfield_satellite(propagation_input, timescale)
+    observer = wgs84.latlon(
+        latitude_degrees=observer_lat,
+        longitude_degrees=observer_lon,
+        elevation_m=observer_elevation,
+    )
+    topocentric = (satellite - observer).at(timescale.from_datetime(epoch))
+    position = topocentric.position.km
+    velocity = topocentric.velocity.km_per_s
+    distance = float(np.linalg.norm(position))
+    if not math.isfinite(distance) or distance <= 0:
+        raise ValueError("Invalid topocentric distance for Doppler calculation")
+    range_rate = float(np.dot(position, velocity) / distance)
+    if not math.isfinite(range_rate):
+        raise ValueError("Invalid topocentric range rate for Doppler calculation")
+    return range_rate
 
 
 def _normalize_degrees(value: float) -> float:

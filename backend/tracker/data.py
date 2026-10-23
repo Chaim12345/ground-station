@@ -166,14 +166,29 @@ SATELLITE_PATHS_MIN_REMAINING_STEPS = 2
 
 def _orbit_cache_keys(propagation_input: PropagationInput) -> tuple[str, str]:
     """Produce stable cache keys without requiring a TLE compatibility cache."""
-    if propagation_input.tle1 and propagation_input.tle2:
+    if propagation_input.satrec is None and propagation_input.tle1 and propagation_input.tle2:
         return propagation_input.tle1, propagation_input.tle2
     if propagation_input.satrec is None:
         raise ValueError("Orbit has neither TLE nor initialized OMM propagation data")
     satrec = propagation_input.satrec
     return (
         f"omm:{satrec.satnum}",
-        f"{satrec.jdsatepoch:.12f}:{satrec.jdsatepochF:.12f}:{satrec.no_kozai:.16f}",
+        ":".join(
+            f"{getattr(satrec, field):.16g}"
+            for field in (
+                "jdsatepoch",
+                "jdsatepochF",
+                "no_kozai",
+                "ecco",
+                "inclo",
+                "nodeo",
+                "argpo",
+                "mo",
+                "bstar",
+                "ndot",
+                "nddot",
+            )
+        ),
     )
 
 

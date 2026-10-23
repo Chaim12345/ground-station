@@ -407,6 +407,47 @@ def test_overlap_mode_replans_when_tle_changes(monkeypatch):
     assert len(calls) == 2
 
 
+def test_overlap_mode_plans_omm_only_pass_and_replans_on_element_change(monkeypatch):
+    tracker = _DummyTracker("0_450")
+    tracker.current_norad_id = 100000
+    handler = RotatorHandler(tracker)
+    calls = []
+    now = datetime.now(timezone.utc)
+
+    def _predicted_passes(**kwargs):
+        calls.append(kwargs)
+        return {
+            "success": True,
+            "data": [
+                {
+                    "event_start": (now - timedelta(minutes=1)).isoformat(),
+                    "event_end": (now + timedelta(minutes=4)).isoformat(),
+                    "crosses_north": True,
+                    "start_azimuth": 50.0,
+                    "end_azimuth": 355.0,
+                }
+            ],
+        }
+
+    monkeypatch.setattr("tracker.rotatorhandler.calculate_next_events", _predicted_passes)
+    satellite = {
+        "norad_id": 100000,
+        "orbit_format": "omm",
+        "orbit_payload": {"EPOCH": "2026-10-23T00:00:00", "INCLINATION": "51.6"},
+    }
+    location = {"lat": 52.0, "lon": 13.0}
+
+    handler.plan_overlap_lane(satellite, location, (50.0, 5.0))
+    handler.plan_overlap_lane(satellite, location, (50.0, 5.0))
+    assert len(calls) == 1
+    assert calls[0]["satellite_data"] == satellite
+    assert tracker.rotator_command_state["overlap_lane"] == 1
+
+    changed = {**satellite, "orbit_payload": {**satellite["orbit_payload"], "INCLINATION": "52.0"}}
+    handler.plan_overlap_lane(changed, location, (50.0, 5.0))
+    assert len(calls) == 2
+
+
 def test_overlap_mode_throttles_retry_when_no_pass_is_forecast(monkeypatch):
     tracker = _DummyTracker("0_450")
     tracker.current_norad_id = 12345

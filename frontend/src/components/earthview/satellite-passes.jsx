@@ -22,6 +22,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {useSocket} from "../common/socket.jsx";
 import { toast } from '../../utils/toast-with-timestamp.jsx';
 import {calculateElevationCurvesForPasses} from '../../utils/elevation-curve-calculator.js';
+import {orbitIdentity} from './earthview-orbit.js';
 import {
     formatWithZeros,
     getClassNamesBasedOnGridEditing,
@@ -1315,8 +1316,13 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
         const isLocationValid = location && location.lat != null && location.lon != null;
 
         if (passes && passes.length > 0 && isLocationValid && selectedSatellites && selectedSatellites.length > 0) {
-            // Create hash of pass IDs to detect if these are actually NEW passes
-            const currentPassesHash = passes?.map(p => `${p.norad_id}-${p.event_start}`).sort().join('|') || '';
+            // Refresh curves when passes, orbit elements, or the observer change.
+            const currentPassesHash = JSON.stringify([
+                passes.map(p => [p.norad_id, p.event_start]).sort(),
+                selectedSatellites.map(orbitIdentity).sort(),
+                location.lat,
+                location.lon,
+            ]);
 
             // If we already attempted calculation for this hash, skip
             // (even if some passes still have empty curves - those are likely defensive BSTAR rejections)
@@ -1332,11 +1338,7 @@ const NextPassesGroupIsland = React.memo(function NextPassesGroupIsland() {
                 // Create satellite lookup from selectedSatellites
                 const satelliteLookup = {};
                 selectedSatellites.forEach(sat => {
-                    satelliteLookup[sat.norad_id] = {
-                        norad_id: sat.norad_id,
-                        tle1: sat.tle1,
-                        tle2: sat.tle2
-                    };
+                    satelliteLookup[sat.norad_id] = sat;
                 });
 
                 // Verify all passes have corresponding satellites in the lookup

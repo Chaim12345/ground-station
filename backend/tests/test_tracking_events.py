@@ -23,7 +23,8 @@ import multiprocessing
 
 import pytest
 
-from tracking.events import _generate_cache_key, _named_worker_init
+from orbits import CentralBody, get_propagation_input
+from tracking.events import _generate_cache_key, _named_worker_init, _orbit_cache_identity
 
 
 # Module-level functions for multiprocessing tests (must be picklable)
@@ -36,6 +37,27 @@ def _worker_test_func():
 def _dummy_task_func(x):
     """Simple task for testing."""
     return x * 2
+
+
+def test_omm_forecast_cache_key_changes_with_canonical_elements():
+    from tests.testommtracking import OMM_PAYLOAD
+
+    satellite = {
+        "norad_id": 100000,
+        "orbit_format": "omm",
+        "orbit_payload": OMM_PAYLOAD,
+    }
+    changed = {
+        **satellite,
+        "orbit_payload": {**OMM_PAYLOAD, "INCLINATION": "52.0"},
+    }
+
+    def forecast_key(record):
+        propagation = get_propagation_input(record, central_body=CentralBody.EARTH)
+        identity = _orbit_cache_identity(record, propagation)
+        return _generate_cache_key([identity], 37.98, 23.72, 24, 0, 1)
+
+    assert forecast_key(satellite) != forecast_key(changed)
 
 
 class TestGenerateCacheKey:

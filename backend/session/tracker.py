@@ -431,6 +431,7 @@ class SessionTracker:
                         "vad_close_delay_ms": vfo_state.vad_close_delay_ms,
                         "decoder": vfo_state.decoder,
                         "locked_transmitter_id": vfo_state.locked_transmitter_id,
+                        "doppler_status": vfo_state.doppler_status,
                         "transcription_enabled": vfo_state.transcription_enabled,
                         "transcription_provider": vfo_state.transcription_provider,
                         "transcription_language": vfo_state.transcription_language,

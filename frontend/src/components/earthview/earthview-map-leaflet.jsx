@@ -61,12 +61,14 @@ import MapSettingsIslandDialog from './map-settings-dialog.jsx';
 import CoordinateGrid from '../common/mercator-grid.jsx';
 import SatelliteTrackSuggestion from './map-target-button.jsx';
 import {
-    calculateSatelliteAzEl,
-    calculateTimeToMaxElevation,
     getSatelliteCoverageCircle,
-    getSatelliteLatLon,
-    getSatellitePaths,
 } from '../common/tracking-logic.jsx';
+import {
+    getEarthViewPaths,
+    getEarthViewTimeToPeak,
+    orbitIdentity,
+    propagateEarthViewSatellite,
+} from './earthview-orbit.js';
 
 import {setSatelliteData} from './earthview-slice.jsx';
 
@@ -200,9 +202,7 @@ function areSatellitesEquivalent(prev = [], next = []) {
     if (!Array.isArray(prev) || !Array.isArray(next)) return false;
     if (prev.length !== next.length) return false;
     for (let i = 0; i < prev.length; i += 1) {
-        if (prev[i]?.norad_id !== next[i]?.norad_id) return false;
-        if (prev[i]?.tle1 !== next[i]?.tle1) return false;
-        if (prev[i]?.tle2 !== next[i]?.tle2) return false;
+        if (orbitIdentity(prev[i]) !== orbitIdentity(next[i])) return false;
     }
     return true;
 }
@@ -400,13 +400,11 @@ const LeafletEarthViewMapRenderer = ({
                 }
 
                 let noradId = satellite['norad_id'];
-                let [lat, lon, altitude, velocity] = getSatelliteLatLon(
-                    satellite['norad_id'],
-                    satellite['tle1'],
-                    satellite['tle2'],
-                    now,
-                    satellite['name']
-                );
+                const observer = {lat: location.lat, lon: location.lon, alt: location.alt};
+                const {record, position} = propagateEarthViewSatellite(satellite, now, observer);
+                if (!position || !Number.isFinite(position.az) || !Number.isFinite(position.el)) return;
+                const {lat, lon, vel: velocity, az, el, range} = position;
+                const altitude = position.alt / 1000;
 
                 // Validate satellite position - skip if invalid
                 if (!isFinite(lat) || !isFinite(lon) || !isFinite(altitude) ||
@@ -414,18 +412,6 @@ const LeafletEarthViewMapRenderer = ({
                     // Skip silently - likely a satellite with extreme BSTAR that can't be propagated
                     return;
                 }
-
-                // Let's also update the satellite info island with the new position data we have
-                let [az, el, range] = calculateSatelliteAzEl(
-                    satellite['tle1'],
-                    satellite['tle2'],
-                    {
-                        lat: location['lat'],
-                        lon: location['lon'],
-                        alt: location['alt'],
-                    },
-                    now
-                ) || [0, 0, 0];
 
                 // Validate AzEl data
                 if (!isFinite(az) || !isFinite(el) || !isFinite(range)) {
@@ -490,8 +476,7 @@ const LeafletEarthViewMapRenderer = ({
                 if (el > 0 && (trend === 'rising_slow' || trend === 'rising_fast')) {
                     const cacheKey = [
                         noradId,
-                        satellite.tle1,
-                        satellite.tle2,
+                        orbitIdentity(satellite),
                         location.lat,
                         location.lon,
                         location.alt,
@@ -504,16 +489,7 @@ const LeafletEarthViewMapRenderer = ({
                             ? null
                             : Math.max(0, cachedPeak.timeToMaxEl - (elapsedMs / 1000));
                     } else {
-                        timeToMaxEl = calculateTimeToMaxElevation(
-                            satellite.tle1,
-                            satellite.tle2,
-                            {
-                                lat: location.lat,
-                                lon: location.lon,
-                                alt: location.alt,
-                            },
-                            now,
-                        );
+                        timeToMaxEl = getEarthViewTimeToPeak(record, observer, now);
                         timeToMaxElevationRef.current.set(cacheKey, {
                             calculatedAt: now.getTime(),
                             timeToMaxEl,
@@ -557,12 +533,7 @@ const LeafletEarthViewMapRenderer = ({
                     && (showPastOrbitPath || showFutureOrbitPath)
                 ) {
                     // calculate paths
-                    let paths = getSatellitePaths(
-                        [satellite['tle1'], satellite['tle2']],
-                        orbitProjectionDuration,
-                        1,
-                        noradId
-                    );
+                    let paths = getEarthViewPaths(record, orbitProjectionDuration, 1, now);
 
                     // past path
                     currentPastPaths.push(
@@ -615,8 +586,7 @@ const LeafletEarthViewMapRenderer = ({
                     contextmenu: (event) => onMarkerContextMenu(event, satellite),
                 };
 
-                // calculateSatelliteAzEl above already propagated this satellite for
-                // the current observer and time. Its elevation is the visibility test.
+                // The current observer elevation is also the visibility test.
                 const isVisible = el >= 0;
 
                 // Crosshairs for tracking satellite - always shown when the satellite is being tracked

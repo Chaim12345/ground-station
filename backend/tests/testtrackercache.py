@@ -19,7 +19,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from orbits import CentralBody, get_propagation_input
 from tracker.data import (
+    _orbit_cache_keys,
     _resolve_min_future_buffer_seconds,
     cache_manager,
     cache_satellite_paths,
@@ -28,6 +30,19 @@ from tracker.data import (
 
 TLE_LINE_1 = "1 25544U 98067A   25001.50000000  .00012345  00000-0  21914-3 0  9999"
 TLE_LINE_2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.50000000999999"
+
+
+def test_omm_path_cache_key_changes_with_inclination():
+    from tests.testommtracking import OMM_PAYLOAD
+
+    def orbit_keys(payload):
+        propagation = get_propagation_input(
+            {"norad_id": 100000, "orbit_format": "omm", "orbit_payload": payload},
+            central_body=CentralBody.EARTH,
+        )
+        return _orbit_cache_keys(propagation)
+
+    assert orbit_keys(OMM_PAYLOAD) != orbit_keys({**OMM_PAYLOAD, "INCLINATION": "52.0"})
 
 
 @pytest.fixture(autouse=True)

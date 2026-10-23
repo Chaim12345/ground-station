@@ -55,13 +55,14 @@ import {
 } from '../common/common.jsx';
 import MapSettingsIslandDialog from './map-settings-dialog.jsx';
 import {
-    calculateSatelliteAzEl,
-    calculateTimeToMaxElevation,
     getSatelliteCoverageCircle,
-    getSatelliteLatLon,
-    getSatellitePaths,
-    isSatelliteVisible,
 } from '../common/tracking-logic.jsx';
+import {
+    getEarthViewPaths,
+    getEarthViewTimeToPeak,
+    orbitIdentity,
+    propagateEarthViewSatellite,
+} from './earthview-orbit.js';
 import TargetNumberIcon from '../common/target-number-icon.jsx';
 import createTerminatorLine from '../common/terminator-line.jsx';
 import {getSunMoonCoords} from '../common/sunmoon.jsx';
@@ -214,9 +215,7 @@ function areSatellitesEquivalent(prev = [], next = []) {
     if (!Array.isArray(prev) || !Array.isArray(next)) return false;
     if (prev.length !== next.length) return false;
     for (let i = 0; i < prev.length; i += 1) {
-        if (prev[i]?.norad_id !== next[i]?.norad_id) return false;
-        if (prev[i]?.tle1 !== next[i]?.tle1) return false;
-        if (prev[i]?.tle2 !== next[i]?.tle2) return false;
+        if (orbitIdentity(prev[i]) !== orbitIdentity(next[i])) return false;
     }
     return true;
 }
@@ -500,28 +499,15 @@ const MapLibreEarthViewMapRenderer = ({
             if (satIndex++ >= viewSatelliteLimit) return;
             try {
                 const noradId = satellite.norad_id;
-                const [lat, lon, altitude, velocity] = getSatelliteLatLon(
-                    satellite.norad_id,
-                    satellite.tle1,
-                    satellite.tle2,
-                    now,
-                    satellite.name
-                );
+                const observer = {lat: location.lat, lon: location.lon, alt: location.alt};
+                const {record, position} = propagateEarthViewSatellite(satellite, now, observer);
+                if (!position || !Number.isFinite(position.az) || !Number.isFinite(position.el)) return;
+                const {lat, lon, vel: velocity, az, el, range} = position;
+                const altitude = position.alt / 1000;
 
                 if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(altitude)) {
                     return;
                 }
-
-                const [az, el, range] = calculateSatelliteAzEl(
-                    satellite.tle1,
-                    satellite.tle2,
-                    {
-                        lat: location.lat,
-                        lon: location.lon,
-                        alt: location.alt,
-                    },
-                    now
-                ) || [0, 0, 0];
 
                 if (!Number.isFinite(az) || !Number.isFinite(el) || !Number.isFinite(range)) {
                     return;
@@ -560,16 +546,7 @@ const MapLibreEarthViewMapRenderer = ({
 
                 let timeToMaxEl = null;
                 if (el > 0 && (trend === 'rising_slow' || trend === 'rising_fast')) {
-                    timeToMaxEl = calculateTimeToMaxElevation(
-                        satellite.tle1,
-                        satellite.tle2,
-                        {
-                            lat: location.lat,
-                            lon: location.lon,
-                            alt: location.alt,
-                        },
-                        now
-                    );
+                    timeToMaxEl = getEarthViewTimeToPeak(record, observer, now);
                 }
 
                 selectedSatPos[noradId] = {
@@ -600,17 +577,12 @@ const MapLibreEarthViewMapRenderer = ({
                 }
 
                 if (selectedSatelliteId === noradId) {
-                    const paths = getSatellitePaths(
-                        [satellite.tle1, satellite.tle2],
-                        orbitProjectionDuration,
-                        1,
-                        noradId
-                    );
+                    const paths = getEarthViewPaths(record, orbitProjectionDuration, 1, now);
                     pastPath = Array.isArray(paths.past) ? paths.past : [];
                     futurePath = Array.isArray(paths.future) ? paths.future : [];
                 }
 
-                const isVisible = isSatelliteVisible(satellite.tle1, satellite.tle2, now, location);
+                const isVisible = el >= 0;
                 const isTracked = trackedSatelliteIds.has(Number(noradId));
                 const isSelected = selectedSatelliteId === noradId;
 

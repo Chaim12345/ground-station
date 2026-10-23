@@ -18,6 +18,7 @@ Rotator handler for satellite tracking.
 Handles all rotator-related operations including connection, positioning, and limit checking.
 """
 
+import json
 import logging
 import math
 import time
@@ -190,10 +191,18 @@ class RotatorHandler:
 
     def _overlap_plan_signature(self, satellite):
         """Identify the target and hardware inputs that make a lane plan valid."""
+        # OMM-only targets have no TLE lines, so the canonical payload must
+        # participate in the signature when fresh elements arrive mid-track.
+        orbit_payload = satellite.get("orbit_payload")
+        omm_signature = (
+            json.dumps(orbit_payload, sort_keys=True, default=str) if orbit_payload else ""
+        )
         return (
             str(getattr(self.tracker, "current_norad_id", "")),
             str(satellite.get("tle1") or "").strip(),
             str(satellite.get("tle2") or "").strip(),
+            str(satellite.get("orbit_format") or satellite.get("orbit_model_kind") or ""),
+            omm_signature,
             self._get_azimuth_mode(),
             tuple(float(limit) for limit in self.tracker.azimuth_limits),
         )
