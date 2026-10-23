@@ -241,7 +241,7 @@ export default function ObservationFolderDialog({
                 overflow: 'auto',
                 flex: 1,
                 px: 3,
-                pt: '32px !important',
+                pt: '24px !important',
                 pb: 3,
             }}>
                 {(metadata.observation_name || observationStatus || observationDetails.length > 0 || scheduledObservation) && (

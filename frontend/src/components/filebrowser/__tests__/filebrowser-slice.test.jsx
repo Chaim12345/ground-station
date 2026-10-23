@@ -69,6 +69,7 @@ test('queries one server-side page and stores its total', async () => {
         }),
     };
     const store = createStore();
+    store.dispatch(setPage(3));
 
     await store.dispatch(fetchFiles({
         socket,
@@ -83,6 +84,63 @@ test('queries one server-side page and stores its total', async () => {
         { id: 'audio:voice.wav', type: 'audio', filename: 'voice.wav' },
     ]);
     expect(store.getState().filebrowser.total).toBe(51);
+});
+
+test('late page replies cannot change the selected page or visible files', async () => {
+    const replies = new Map();
+    const socket = {
+        connected: true,
+        emit: vi.fn((event, payload, callback) => {
+            expect(event).toBe('api.call');
+            expect(payload.cmd).toBe('filebrowser.query');
+            replies.set(payload.data.page, callback);
+        }),
+    };
+    const store = createStore();
+    const requests = [store.dispatch(fetchFiles({ socket, page: 1, pageSize: 12 }))];
+    store.dispatch(setPage(2));
+    requests.push(store.dispatch(fetchFiles({ socket, page: 2, pageSize: 12 })));
+    store.dispatch(setPage(3));
+    requests.push(store.dispatch(fetchFiles({ socket, page: 3, pageSize: 12 })));
+
+    const reply = (page) => replies.get(page)({
+        success: true,
+        data: { page, items: [{ id: `page-${page}` }], total: 36 },
+    });
+    reply(2);
+    await requests[1];
+    expect(store.getState().filebrowser.page).toBe(3);
+    expect(store.getState().filebrowser.filesLoading).toBe(true);
+
+    reply(3);
+    await requests[2];
+    reply(1);
+    await requests[0];
+
+    expect(store.getState().filebrowser.page).toBe(3);
+    expect(store.getState().filebrowser.files).toEqual([{ id: 'page-3' }]);
+    expect(store.getState().filebrowser.filesLoading).toBe(false);
+});
+
+test('a page click invalidates the previous reply before the next request starts', async () => {
+    let reply;
+    const socket = {
+        connected: true,
+        emit: vi.fn((event, payload, callback) => {
+            expect(event).toBe('api.call');
+            expect(payload.data.page).toBe(1);
+            reply = callback;
+        }),
+    };
+    const store = createStore();
+    const request = store.dispatch(fetchFiles({ socket, page: 1 }));
+
+    store.dispatch(setPage(3));
+    reply({ success: true, data: { page: 1, items: [{ id: 'page-1' }], total: 36 } });
+    await request;
+
+    expect(store.getState().filebrowser.page).toBe(3);
+    expect(store.getState().filebrowser.files).toEqual([]);
 });
 
 test('only removes acknowledged library deletions', async () => {

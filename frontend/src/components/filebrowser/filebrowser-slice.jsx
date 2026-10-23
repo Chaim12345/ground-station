@@ -306,6 +306,7 @@ const initialState = {
     files: [],
     filesLoading: false,
     filesError: null,
+    filesRequestId: null,
     playbackRecordings: [],
     playbackRecordingsLoading: false,
     playbackRecordingsError: null,
@@ -481,11 +482,16 @@ const fileBrowserSlice = createSlice({
     },
     extraReducers: (builder) => {
         // Server-side paged query
-        builder.addCase(fetchFiles.pending, (state) => {
+        builder.addCase(fetchFiles.pending, (state, action) => {
+            state.filesRequestId = action.meta.requestId;
             state.filesLoading = true;
             state.filesError = null;
         });
         builder.addCase(fetchFiles.fulfilled, (state, action) => {
+            // Page requests may finish out of order, or after a new page was
+            // selected but before its request starts. Ignore either stale reply.
+            if (state.filesRequestId !== action.meta.requestId || state.page !== action.meta.arg.page) return;
+            state.filesRequestId = null;
             state.filesLoading = false;
             state.files = action.payload.items || [];
             state.total = action.payload.total || 0;
@@ -505,6 +511,8 @@ const fileBrowserSlice = createSlice({
             }
         });
         builder.addCase(fetchFiles.rejected, (state, action) => {
+            if (state.filesRequestId !== action.meta.requestId || state.page !== action.meta.arg.page) return;
+            state.filesRequestId = null;
             state.filesLoading = false;
             state.filesError = action.payload || 'Failed to fetch files';
         });
