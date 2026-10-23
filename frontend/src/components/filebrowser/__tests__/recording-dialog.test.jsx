@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/test-utils.jsx';
 import RecordingDialog from '../recording-dialog.jsx';
 
@@ -39,6 +39,34 @@ const recording = {
 };
 
 describe('RecordingDialog', () => {
+    it('loads transmitter annotations from the recording target NORAD ID', () => {
+        const socket = { emit: vi.fn() };
+        const targetedRecording = {
+            ...recording,
+            metadata: { ...recording.metadata, target_satellite_norad_id: '25338' },
+        };
+        renderWithProviders(<RecordingDialog open onClose={vi.fn()} recording={targetedRecording} socket={socket} />);
+
+        expect(socket.emit).toHaveBeenCalledWith('api.call', {
+            cmd: 'get-transmitters',
+            data: { norad_cat_id: 25338 },
+        }, expect.any(Function));
+        act(() => {
+            socket.emit.mock.calls[0][2]({
+                success: true,
+                data: [{ id: 'tx', description: 'APT', downlink_low: 137_100_000 }],
+            });
+        });
+        expect(screen.getByTestId('waterfall-transmitter-strip')).toBeInTheDocument();
+    });
+
+    it('does not request or show transmitters when recording metadata has no target', () => {
+        const socket = { emit: vi.fn() };
+        renderWithProviders(<RecordingDialog open onClose={vi.fn()} recording={recording} socket={socket} />);
+        expect(socket.emit).not.toHaveBeenCalled();
+        expect(screen.queryByTestId('waterfall-transmitter-strip')).not.toBeInTheDocument();
+    });
+
     it('shows associated recording files with thumbnails and sizes', () => {
         renderWithProviders(
             <RecordingDialog

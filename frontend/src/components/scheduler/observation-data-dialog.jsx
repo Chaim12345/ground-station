@@ -549,6 +549,7 @@ const ObservationDataDialog = ({ open, onClose, observation }) => {
                     open={fileDetailsOpen}
                     onClose={() => setFileDetailsOpen(false)}
                     recording={selectedFile}
+                    socket={socket}
                 />
             )}
 

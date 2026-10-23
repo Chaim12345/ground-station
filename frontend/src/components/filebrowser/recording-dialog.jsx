@@ -17,7 +17,7 @@
  *
  */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Box,
     Typography,
@@ -107,8 +107,35 @@ function buildAssociatedFiles(recording) {
     return files;
 }
 
-export default function RecordingDialog({ open, onClose, recording }) {
+export default function RecordingDialog({ open, onClose, recording, socket }) {
     const { t } = useTranslation('filebrowser');
+    const [transmitterResult, setTransmitterResult] = useState(null);
+    const targetNoradId = Number(recording?.metadata?.target_satellite_norad_id);
+    const hasTargetSatellite = Number.isInteger(targetNoradId) && targetNoradId > 0;
+
+    useEffect(() => {
+        setTransmitterResult(null);
+        if (!open || !hasTargetSatellite || !socket) return undefined;
+
+        let active = true;
+        socket.emit('api.call', {
+            cmd: 'get-transmitters',
+            data: { norad_cat_id: targetNoradId },
+        }, (response) => {
+            // A response for a previously opened recording must not annotate the new one.
+            if (active) {
+                setTransmitterResult({
+                    noradId: targetNoradId,
+                    transmitters: response?.success && Array.isArray(response.data) ? response.data : [],
+                });
+            }
+        });
+        return () => { active = false; };
+    }, [hasTargetSatellite, open, socket, targetNoradId]);
+
+    const transmitters = hasTargetSatellite && transmitterResult?.noradId === targetNoradId
+        ? transmitterResult.transmitters
+        : [];
     // Get timezone preference
     const timezone = useSelector((state) => {
         const tzPref = state.preferences?.preferences?.find(p => p.name === 'timezone');
@@ -205,6 +232,7 @@ export default function RecordingDialog({ open, onClose, recording }) {
                                 alt={recording.name}
                                 centerFrequency={recording?.metadata?.center_frequency}
                                 sampleRate={recording?.metadata?.sample_rate}
+                                transmitters={transmitters}
                                 startTime={recording?.metadata?.start_time}
                                 endTime={
                                     recording?.metadata?.finalized_time ||

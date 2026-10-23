@@ -504,6 +504,7 @@ const PlaybackAccordion = ({
                 open={detailsOpen}
                 onClose={() => setDetailsOpen(false)}
                 recording={selectedPlaybackRecording}
+                socket={socket}
             />
         </Accordion>
     );

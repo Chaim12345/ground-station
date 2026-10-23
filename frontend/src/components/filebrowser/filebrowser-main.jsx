@@ -2179,6 +2179,7 @@ export default function FileBrowserMain() {
                     open={detailsOpen}
                     onClose={handleCloseRecordingDetails}
                     recording={selectedItem}
+                    socket={socket}
                 />
             )}
 

@@ -18,25 +18,54 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, CircularProgress, IconButton, Tooltip, Typography } from '@mui/material';
+import { Box, CircularProgress, IconButton, Popover, Tooltip, Typography } from '@mui/material';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import DownloadIcon from '@mui/icons-material/Download';
+import CloseIcon from '@mui/icons-material/Close';
 import FrequencyScale from '../waterfall/frequency-scale.jsx';
 import { useTranslation } from 'react-i18next';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const WHEEL_ZOOM_STEP = 0.35;
 const SCALE_STRIP_HEIGHT = 20;
+const TRANSMITTER_STRIP_HEIGHT = 38;
 const TAP_MOVE_TOLERANCE_PX = 6;
 const TRANSFORM_INTERACTION_IDLE_MS = 120;
+const SPEED_OF_LIGHT_M_S = 299_792_458;
+const ESTIMATED_MAX_RADIAL_SPEED_M_S = 8_000;
+const POINT_SIGNAL_HALF_WIDTH_HZ = 15_000;
+const transmitterAccent = (theme) => theme.palette.mode === 'dark' ? '#7cd9e6' : '#00758a';
+
+function getDownlinkRange(transmitter) {
+    const low = Number(transmitter.downlink_low);
+    const high = transmitter.downlink_high == null ? low : Number(transmitter.downlink_high);
+    if (!Number.isFinite(low) || low <= 0 || !Number.isFinite(high) || high < low) return null;
+    return { low, high };
+}
+
+function getSearchEnvelope(low, high) {
+    // The catalog gives a frequency or range, but no reliable occupied bandwidth.
+    // Use a clearly labeled allowance for point entries and a conservative LEO Doppler bound.
+    const signalMargin = high === low ? POINT_SIGNAL_HALF_WIDTH_HZ : 0;
+    const dopplerMargin = Math.ceil(high * ESTIMATED_MAX_RADIAL_SPEED_M_S / SPEED_OF_LIGHT_M_S);
+    return {
+        signalLow: low - signalMargin,
+        signalHigh: high + signalMargin,
+        searchLow: low - signalMargin - dopplerMargin,
+        searchHigh: high + signalMargin + dopplerMargin,
+        signalMargin,
+        dopplerMargin,
+    };
+}
 
 export default function WaterfallViewer({
     src,
     alt,
     centerFrequency,
     sampleRate,
+    transmitters = [],
     startTime,
     endTime,
     formatDate,
@@ -78,6 +107,20 @@ export default function WaterfallViewer({
     const [failedSrc, setFailedSrc] = useState(null);
     const [transformTick, setTransformTick] = useState(0);
     const [yScaledSourceTick, setYScaledSourceTick] = useState(0);
+    const [hoveredTransmitterKeys, setHoveredTransmitterKeys] = useState(null);
+    const [transmitterDetails, setTransmitterDetails] = useState(null);
+
+    // Reserve space only when a target transmitter falls within the recording's band.
+    const hasTransmitterStrip = useMemo(() => {
+        if (!Number.isFinite(centerFrequency) || !Number.isFinite(sampleRate) || sampleRate <= 0) return false;
+        const start = centerFrequency - sampleRate / 2;
+        const end = centerFrequency + sampleRate / 2;
+        return transmitters.some((transmitter) => {
+            const range = getDownlinkRange(transmitter);
+            return range && range.high >= start && range.low <= end;
+        });
+    }, [centerFrequency, sampleRate, transmitters]);
+    const topStripHeight = SCALE_STRIP_HEIGHT + (hasTransmitterStrip ? TRANSMITTER_STRIP_HEIGHT : 0);
 
     const formatFrequencyValue = useCallback(
         (frequencyHz) => {
@@ -179,6 +222,7 @@ export default function WaterfallViewer({
     }, [clearTransformInteractionTimer, scheduleTransformStateCommit]);
 
     const applyTransform = useCallback((nextScale, nextPositionX, options = {}) => {
+        setTransmitterDetails(null);
         scaleRef.current = nextScale;
         positionXRef.current = nextPositionX;
         if (options.trackInteraction) {
@@ -238,15 +282,15 @@ export default function WaterfallViewer({
             const localX = clientX - rect.left;
             const localY = clientY - rect.top;
 
-            const imageViewportHeight = Math.max(1, containerSize.height - SCALE_STRIP_HEIGHT);
-            if (localY < SCALE_STRIP_HEIGHT || localY > containerSize.height) {
+            const imageViewportHeight = Math.max(1, containerSize.height - topStripHeight);
+            if (localY < topStripHeight || localY > containerSize.height) {
                 return null;
             }
 
             // Keep cursor math in source-space so crosshair stays stable across zoom/pan.
             const transformedWidth = containerSize.width * scaleRef.current;
             const normalizedX = (localX - positionXRef.current) / transformedWidth;
-            const normalizedY = (localY - SCALE_STRIP_HEIGHT) / imageViewportHeight;
+            const normalizedY = (localY - topStripHeight) / imageViewportHeight;
 
             if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
                 return null;
@@ -277,7 +321,7 @@ export default function WaterfallViewer({
                 timeLabel,
             };
         },
-        [centerFrequency, containerSize.height, containerSize.width, endTime, formatDateValue, sampleRate, startTime]
+        [centerFrequency, containerSize.height, containerSize.width, endTime, formatDateValue, sampleRate, startTime, topStripHeight]
     );
 
     const zoomOnXAxisOnly = useCallback(
@@ -448,6 +492,9 @@ export default function WaterfallViewer({
     const handlePointerDown = useCallback(
         (event) => {
             if (!src) return;
+            // Portaled popovers still bubble through this React parent; their backdrop must
+            // receive the click rather than having the viewer capture its pointer.
+            if (!event.currentTarget.contains(event.target)) return;
             if (event.pointerType === 'mouse' && event.button !== 0) return;
             if (event.cancelable) {
                 event.preventDefault();
@@ -613,6 +660,100 @@ export default function WaterfallViewer({
         };
     }, [centerFrequency, containerSize.width, getVisibleXNormRange, positionX, sampleRate, scaleX]);
 
+    const visibleTransmitters = useMemo(() => {
+        if (!hasTransmitterStrip || !visibleFrequencyRange || !containerSize.width) return [];
+        const span = visibleFrequencyRange.end - visibleFrequencyRange.start;
+        if (span <= 0) return [];
+        return transmitters.flatMap((transmitter, index) => {
+            const range = getDownlinkRange(transmitter);
+            if (!range || range.high < visibleFrequencyRange.start || range.low > visibleFrequencyRange.end) return [];
+            const { low, high } = range;
+            // For a partly visible range, point to the middle of its visible segment.
+            const frequency = (Math.max(low, visibleFrequencyRange.start) + Math.min(high, visibleFrequencyRange.end)) / 2;
+            const rangeStartX = clamp((low - visibleFrequencyRange.start) / span * containerSize.width, 0, containerSize.width);
+            const rangeEndX = clamp((high - visibleFrequencyRange.start) / span * containerSize.width, 0, containerSize.width);
+            return [{
+                key: transmitter.id ?? index,
+                label: transmitter.description || t('waterfall_viewer.unnamed_transmitter', { defaultValue: 'Transmitter' }),
+                frequency,
+                low,
+                high,
+                envelope: getSearchEnvelope(low, high),
+                x: (frequency - visibleFrequencyRange.start) / span * containerSize.width,
+                rangeStartX,
+                rangeEndX,
+            }];
+        }).sort((a, b) => a.x - b.x);
+    }, [containerSize.width, hasTransmitterStrip, t, transmitters, visibleFrequencyRange]);
+
+    const transmitterLabelGroups = useMemo(() => {
+        const groups = [];
+        for (const transmitter of visibleTransmitters) {
+            const last = groups.at(-1);
+            // One label describes closely spaced markers; every frequency keeps its own arrow and popup entry.
+            if (last && transmitter.x - last.markers.reduce((sum, marker) => sum + marker.x, 0) / last.markers.length < 110) {
+                last.markers.push(transmitter);
+            } else {
+                groups.push({ markers: [transmitter] });
+            }
+        }
+        return groups;
+    }, [visibleTransmitters]);
+
+    const transmitterMarkerGroups = useMemo(() => {
+        const groupsByFrequency = new Map();
+        for (const transmitter of visibleTransmitters) {
+            const frequencyKey = `${transmitter.low}:${transmitter.high}`;
+            if (!groupsByFrequency.has(frequencyKey)) {
+                groupsByFrequency.set(frequencyKey, { markers: [] });
+            }
+            groupsByFrequency.get(frequencyKey).markers.push(transmitter);
+        }
+        return Array.from(groupsByFrequency.values());
+    }, [visibleTransmitters]);
+
+    const transmitterDetailGroups = useMemo(() => {
+        const groupsByFrequency = new Map();
+        for (const marker of transmitterDetails?.markers ?? []) {
+            // Show the shared frequency estimate once, while keeping every catalog name visible.
+            const frequencyKey = `${marker.low}:${marker.high}`;
+            if (!groupsByFrequency.has(frequencyKey)) {
+                groupsByFrequency.set(frequencyKey, { marker, names: [] });
+            }
+            groupsByFrequency.get(frequencyKey).names.push(marker);
+        }
+        return Array.from(groupsByFrequency.values());
+    }, [transmitterDetails]);
+
+    const highlightedTransmitters = useMemo(() => {
+        const selectedKeys = transmitterDetails
+            ? transmitterDetails.markers.map((marker) => marker.key)
+            : hoveredTransmitterKeys;
+        if (!selectedKeys) return [];
+        const keys = new Set(selectedKeys);
+        const shownFrequencies = new Set();
+        return visibleTransmitters.filter((transmitter) => {
+            if (!keys.has(transmitter.key)) return false;
+            // Catalog rows at the same nominal range share one band and must not stack opacity.
+            const frequencyKey = `${transmitter.low}:${transmitter.high}`;
+            if (shownFrequencies.has(frequencyKey)) return false;
+            shownFrequencies.add(frequencyKey);
+            return true;
+        });
+    }, [hoveredTransmitterKeys, transmitterDetails, visibleTransmitters]);
+
+    const frequencyToVisibleX = useCallback((frequency) => {
+        if (!visibleFrequencyRange || !containerSize.width) return 0;
+        const span = visibleFrequencyRange.end - visibleFrequencyRange.start;
+        return clamp((frequency - visibleFrequencyRange.start) / span * containerSize.width, 0, containerSize.width);
+    }, [containerSize.width, visibleFrequencyRange]);
+
+    const openTransmitterDetails = useCallback((event, markers) => {
+        event.stopPropagation();
+        const anchorEl = event.currentTarget;
+        setTransmitterDetails((current) => current?.anchorEl === anchorEl ? null : { anchorEl, markers });
+    }, []);
+
     const visibleScaleCenterFrequency = useMemo(() => {
         if (!visibleFrequencyRange) {
             return centerFrequency;
@@ -627,36 +768,16 @@ export default function WaterfallViewer({
         return Math.max(1, visibleFrequencyRange.end - visibleFrequencyRange.start);
     }, [sampleRate, visibleFrequencyRange]);
 
-    const centerFrequencyMarkerX = useMemo(() => {
-        if (
-            !Number.isFinite(centerFrequency) ||
-            !Number.isFinite(sampleRate) ||
-            !Number.isFinite(containerSize.width) ||
-            containerSize.width <= 0
-        ) {
-            return null;
-        }
-
-        const fullStartFrequency = centerFrequency - sampleRate / 2;
-        const normalizedCenterX = (centerFrequency - fullStartFrequency) / sampleRate;
-        const x = positionX + normalizedCenterX * containerSize.width * scaleX;
-
-        if (!Number.isFinite(x) || x < 0 || x > containerSize.width) {
-            return null;
-        }
-        return x;
-    }, [centerFrequency, containerSize.width, positionX, sampleRate, scaleX]);
-
     const displayedCursorInfo = useMemo(() => {
         if (!cursorInfo || !containerSize.width || !containerSize.height) {
             return null;
         }
 
-        const imageViewportHeight = Math.max(1, containerSize.height - SCALE_STRIP_HEIGHT);
+        const imageViewportHeight = Math.max(1, containerSize.height - topStripHeight);
         const x = positionX + cursorInfo.normalizedX * containerSize.width * scaleX;
-        const y = SCALE_STRIP_HEIGHT + cursorInfo.normalizedY * imageViewportHeight;
+        const y = topStripHeight + cursorInfo.normalizedY * imageViewportHeight;
 
-        if (x < 0 || x > containerSize.width || y < SCALE_STRIP_HEIGHT || y > containerSize.height) {
+        if (x < 0 || x > containerSize.width || y < topStripHeight || y > containerSize.height) {
             return null;
         }
 
@@ -665,7 +786,7 @@ export default function WaterfallViewer({
             x,
             y,
         };
-    }, [containerSize.height, containerSize.width, cursorInfo, positionX, scaleX]);
+    }, [containerSize.height, containerSize.width, cursorInfo, positionX, scaleX, topStripHeight]);
 
     useEffect(() => {
         if (!containerRef.current) return undefined;
@@ -701,7 +822,7 @@ export default function WaterfallViewer({
         const sourceImage = sourceImageRef.current;
         const imageWidth = sourceImageSize.width;
         const imageHeight = sourceImageSize.height;
-        const viewportHeight = Math.max(1, containerSize.height - SCALE_STRIP_HEIGHT);
+        const viewportHeight = Math.max(1, containerSize.height - topStripHeight);
 
         if (!sourceImage || !imageWidth || !imageHeight || viewportHeight <= 0) {
             yScaledSourceCanvasRef.current = null;
@@ -736,7 +857,7 @@ export default function WaterfallViewer({
         yScaledCtx.imageSmoothingEnabled = false;
         yScaledCtx.drawImage(sourceImage, 0, 0, imageWidth, imageHeight, 0, 0, imageWidth, viewportHeight);
         setYScaledSourceTick((tick) => tick + 1);
-    }, [containerSize.height, sourceImageSize.height, sourceImageSize.width]);
+    }, [containerSize.height, sourceImageSize.height, sourceImageSize.width, topStripHeight]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -753,7 +874,7 @@ export default function WaterfallViewer({
         const imageWidth = sourceImageSize.width;
         const imageHeight = sourceImageSize.height;
         const viewportWidth = containerSize.width;
-        const viewportHeight = Math.max(1, containerSize.height - SCALE_STRIP_HEIGHT);
+        const viewportHeight = Math.max(1, containerSize.height - topStripHeight);
 
         if (!sourceImage || !imageWidth || !imageHeight || !viewportWidth || viewportHeight <= 0) {
             ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -800,6 +921,7 @@ export default function WaterfallViewer({
     }, [
         containerSize.height,
         containerSize.width,
+        topStripHeight,
         getVisibleXNormRange,
         positionX,
         scaleX,
@@ -854,6 +976,8 @@ export default function WaterfallViewer({
         endTransformInteraction();
         setIsDragging(false);
         setCursorInfo(null);
+        setHoveredTransmitterKeys(null);
+        setTransmitterDetails(null);
         setShowHint(true);
     }, [applyTransform, endTransformInteraction, src]);
 
@@ -922,6 +1046,108 @@ export default function WaterfallViewer({
                     WebkitUserDrag: 'none',
                 }}
             />
+            {hasTransmitterStrip && (
+                <Box
+                    data-testid="waterfall-transmitter-strip"
+                    sx={{
+                        position: 'relative',
+                        height: `${TRANSMITTER_STRIP_HEIGHT}px`,
+                        width: '100%',
+                        bgcolor: '#10212b',
+                        borderBottom: '1px solid #31505e',
+                    }}
+                >
+                    {transmitterMarkerGroups.filter((group) => group.markers[0].high > group.markers[0].low).map((group) => (
+                        <Box
+                            key={group.markers[0].key}
+                            data-testid="waterfall-transmitter-range"
+                            sx={{
+                                position: 'absolute',
+                                left: group.markers[0].rangeStartX,
+                                width: Math.max(2, group.markers[0].rangeEndX - group.markers[0].rangeStartX),
+                                bottom: 0,
+                                height: 5,
+                                bgcolor: 'rgba(84, 216, 235, 0.28)',
+                                pointerEvents: 'none',
+                            }}
+                        />
+                    ))}
+                    {transmitterLabelGroups.map((group) => {
+                        const averageX = group.markers.reduce((sum, marker) => sum + marker.x, 0) / group.markers.length;
+                        const label = group.markers.length === 1
+                            ? group.markers[0].label
+                            : `${group.markers[0].label} +${group.markers.length - 1}`;
+                        return (
+                            <Box
+                                key={group.markers[0].key}
+                                data-testid="waterfall-transmitter-label"
+                                tabIndex={0}
+                                role="button"
+                                aria-haspopup="dialog"
+                                aria-expanded={transmitterDetails?.markers[0]?.key === group.markers[0].key}
+                                onMouseEnter={() => setHoveredTransmitterKeys(group.markers.map((marker) => marker.key))}
+                                onMouseLeave={() => setHoveredTransmitterKeys(null)}
+                                onFocus={() => setHoveredTransmitterKeys(group.markers.map((marker) => marker.key))}
+                                onBlur={() => setHoveredTransmitterKeys(null)}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => openTransmitterDetails(event, group.markers)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        openTransmitterDetails(event, group.markers);
+                                    }
+                                }}
+                                sx={{
+                                    position: 'absolute',
+                                    left: clamp(averageX, 55, Math.max(55, containerSize.width - 55)),
+                                    top: 2,
+                                    transform: 'translateX(-50%)',
+                                    width: 106,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    textAlign: 'center',
+                                    color: '#b9eaf2',
+                                    fontSize: '0.68rem',
+                                    lineHeight: '16px',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                {label}
+                            </Box>
+                        );
+                    })}
+                    {transmitterMarkerGroups.map((group) => (
+                        <Box
+                            key={group.markers[0].key}
+                            data-testid="waterfall-transmitter-marker"
+                            data-frequency={group.markers[0].frequency}
+                            style={{ left: group.markers[0].x }}
+                            tabIndex={0}
+                            role="button"
+                            aria-label={`${group.markers[0].label}${group.markers.length > 1 ? ` +${group.markers.length - 1}` : ''}: ${formatFrequencyValue(group.markers[0].frequency)}`}
+                            aria-haspopup="dialog"
+                            aria-expanded={transmitterDetails?.markers[0]?.key === group.markers[0].key}
+                            onMouseEnter={() => setHoveredTransmitterKeys(group.markers.map((marker) => marker.key))}
+                            onMouseLeave={() => setHoveredTransmitterKeys(null)}
+                            onFocus={() => setHoveredTransmitterKeys(group.markers.map((marker) => marker.key))}
+                            onBlur={() => setHoveredTransmitterKeys(null)}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => openTransmitterDetails(event, group.markers)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    openTransmitterDetails(event, group.markers);
+                                }
+                            }}
+                            sx={{ position: 'absolute', bottom: 0, width: 12, height: 18, transform: 'translateX(-50%)', cursor: 'pointer' }}
+                        >
+                            <Box sx={{ width: 2, height: 10, bgcolor: '#54d8eb', mx: 'auto' }} />
+                            <Box sx={{ width: 0, height: 0, mx: 'auto', borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '7px solid #54d8eb' }} />
+                        </Box>
+                    ))}
+                </Box>
+            )}
             <Box sx={{ height: `${SCALE_STRIP_HEIGHT}px`, width: '100%' }}>
                 <FrequencyScale
                     centerFrequency={visibleScaleCenterFrequency}
@@ -938,7 +1164,7 @@ export default function WaterfallViewer({
                     position: 'absolute',
                     left: 0,
                     right: 0,
-                    top: `${SCALE_STRIP_HEIGHT}px`,
+                    top: `${topStripHeight}px`,
                     bottom: 0,
                 }}
             >
@@ -954,20 +1180,47 @@ export default function WaterfallViewer({
                 />
             </Box>
 
-            {centerFrequencyMarkerX !== null && (
-                <Box
-                    data-testid="waterfall-center-frequency-line"
-                    style={{ left: centerFrequencyMarkerX }}
-                    sx={{
-                        position: 'absolute',
-                        top: 0,
-                        bottom: 0,
-                        width: '1px',
-                        bgcolor: 'rgba(255, 56, 56, 0.38)',
-                        pointerEvents: 'none',
-                    }}
-                />
-            )}
+            {highlightedTransmitters.map((transmitter) => {
+                const { envelope } = transmitter;
+                const searchLeft = frequencyToVisibleX(envelope.searchLow);
+                const searchRight = frequencyToVisibleX(envelope.searchHigh);
+                const signalLeft = frequencyToVisibleX(envelope.signalLow);
+                const signalRight = frequencyToVisibleX(envelope.signalHigh);
+                if (searchRight <= searchLeft) return null;
+                return (
+                    <React.Fragment key={transmitter.key}>
+                        <Box
+                            data-testid="waterfall-transmitter-search-band"
+                            data-frequency-low={envelope.searchLow}
+                            data-frequency-high={envelope.searchHigh}
+                            style={{ left: searchLeft, width: searchRight - searchLeft }}
+                            sx={{
+                                position: 'absolute',
+                                top: `${topStripHeight}px`,
+                                bottom: 0,
+                                bgcolor: 'rgba(84, 216, 235, 0.15)',
+                                borderLeft: '1px dashed rgba(84, 216, 235, 0.75)',
+                                borderRight: '1px dashed rgba(84, 216, 235, 0.75)',
+                                boxShadow: '0 0 10px 2px rgba(84, 216, 235, 0.18)',
+                                pointerEvents: 'none',
+                            }}
+                        />
+                        {signalRight > signalLeft && (
+                            <Box
+                                data-testid="waterfall-transmitter-signal-band"
+                                style={{ left: signalLeft, width: signalRight - signalLeft }}
+                                sx={{
+                                    position: 'absolute',
+                                    top: `${topStripHeight}px`,
+                                    bottom: 0,
+                                    bgcolor: 'rgba(84, 216, 235, 0.28)',
+                                    pointerEvents: 'none',
+                                }}
+                            />
+                        )}
+                    </React.Fragment>
+                );
+            })}
 
             {displayedCursorInfo && (
                 <>
@@ -1173,6 +1426,126 @@ export default function WaterfallViewer({
                     <CircularProgress size={28} />
                 </Box>
             )}
+
+            <Popover
+                open={Boolean(transmitterDetails)}
+                anchorEl={transmitterDetails?.anchorEl ?? null}
+                onClose={() => setTransmitterDetails(null)}
+                disableScrollLock
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+                slotProps={{ paper: { sx: {
+                    width: 360,
+                    maxWidth: 'calc(100vw - 24px)',
+                    maxHeight: 'min(380px, calc(100vh - 24px))',
+                    overflowY: 'auto',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 2,
+                    boxShadow: 12,
+                } } }}
+            >
+                {transmitterDetails && <Box
+                    data-testid="waterfall-transmitter-details"
+                    role="dialog"
+                    aria-label={t('waterfall_viewer.transmitter_details', { defaultValue: 'Transmitter details' })}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerMove={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                >
+                    <Box sx={{
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        px: 1.5,
+                        py: 0.75,
+                        bgcolor: 'background.paper',
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                    }}>
+                        <Box>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3 }}>
+                                {t('waterfall_viewer.transmitter_details', { defaultValue: 'Transmitter details' })}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                                {`${transmitterDetails.markers.length} ${t('waterfall_viewer.transmitters', { defaultValue: 'transmitters' })}`}
+                            </Typography>
+                        </Box>
+                        <IconButton
+                            size="small"
+                            aria-label={t('waterfall_viewer.close_transmitter_details', { defaultValue: 'Close transmitter details' })}
+                            onClick={() => setTransmitterDetails(null)}
+                        >
+                            <CloseIcon fontSize="small" />
+                        </IconButton>
+                    </Box>
+                    <Box sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {transmitterDetailGroups.map(({ marker, names }) => (
+                            <Box
+                                key={`${marker.low}:${marker.high}`}
+                                data-testid="waterfall-transmitter-frequency-group"
+                                sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, overflow: 'hidden' }}
+                            >
+                                <Box sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.75,
+                                    px: 1.25,
+                                    py: 0.75,
+                                    bgcolor: (theme) => theme.palette.mode === 'dark'
+                                        ? 'rgba(84, 216, 235, 0.1)'
+                                        : 'rgba(0, 117, 138, 0.07)',
+                                }}>
+                                    <Box sx={{ width: 3, height: 16, borderRadius: 1, bgcolor: transmitterAccent, flexShrink: 0 }} />
+                                    <Typography sx={{
+                                        flex: 1,
+                                        minWidth: 0,
+                                        color: transmitterAccent,
+                                        fontSize: '0.78rem',
+                                        fontWeight: 700,
+                                        fontVariantNumeric: 'tabular-nums',
+                                        overflowWrap: 'anywhere',
+                                    }}>
+                                        {marker.low === marker.high
+                                            ? formatFrequencyValue(marker.low)
+                                            : `${formatFrequencyValue(marker.low)}–${formatFrequencyValue(marker.high)}`}
+                                    </Typography>
+                                    {names.length > 1 && (
+                                        <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                                            {names.length}
+                                        </Typography>
+                                    )}
+                                </Box>
+                                <Box component="ul" sx={{ listStyle: 'none', m: 0, px: 1.25, py: 0.75, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                    {names.map((name) => (
+                                        <Box component="li" key={name.key} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+                                            <Box component="span" sx={{ display: 'block', width: 5, height: 5, mt: 0.6, borderRadius: '50%', bgcolor: transmitterAccent, flexShrink: 0 }} />
+                                            <Typography component="span" sx={{ fontSize: '0.78rem', lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+                                                {name.label}
+                                            </Typography>
+                                        </Box>
+                                    ))}
+                                </Box>
+                                <Box sx={{ px: 1.25, py: 0.75, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'action.hover' }}>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.67rem' }}>
+                                        {t('waterfall_viewer.estimated_search_area', { defaultValue: 'Estimated search area' })}
+                                    </Typography>
+                                    <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>
+                                        {`${formatFrequencyValue(marker.envelope.searchLow)}–${formatFrequencyValue(marker.envelope.searchHigh)}`}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25, fontSize: '0.68rem' }}>
+                                        {`${t('waterfall_viewer.doppler_allowance', { defaultValue: 'Doppler allowance' })} ±${(marker.envelope.dopplerMargin / 1_000).toFixed(1)} kHz (${t('waterfall_viewer.leo_estimate', { defaultValue: 'LEO estimate' })})`}
+                                        {marker.envelope.signalMargin > 0 && ` · ${t('waterfall_viewer.signal_width_allowance', { defaultValue: 'signal width allowance' })} ±${marker.envelope.signalMargin / 1_000} kHz`}
+                                    </Typography>
+                                </Box>
+                            </Box>
+                        ))}
+                    </Box>
+                </Box>}
+            </Popover>
         </Box>
     );
 }
