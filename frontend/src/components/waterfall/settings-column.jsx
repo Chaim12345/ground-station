@@ -111,6 +111,7 @@ import { useSdrTakeoverDialog } from './use-sdr-takeover-dialog.jsx';
 import { callSdrApi, liveConfigToUpdates, joinSdr } from './sdr-join.js';
 import { DevRenderProfiler } from './render-profiler.jsx';
 import { formatGnssRate, getGnssTuningAdvice } from './gnss-tuning.js';
+import useStableEvent from '../../hooks/useStableEvent.js';
 
 const PLAYBACK_DEFAULT_FFT_OVERLAP_PERCENT = 50;
 
@@ -531,8 +532,9 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         };
     }, [emitApiCall, getSdrInUseConflict, requestTakeoverConfirmation, dispatch, socket, selectedSDRId]);
 
-    // Convert to useCallback to ensure stability of the function reference
-    const sendSDRConfigToBackend = useCallback((updates = {}) => {
+    // A retune changes the defaults below, but it should not replace every
+    // accordion callback that calls this function.
+    const sendSDRConfigToBackend = useStableEvent((updates = {}) => {
             const targetSDRId = updates.selectedSDRId ?? selectedSDRId;
             const effectivePlaybackRecordingPath = updates.recordingPath ?? playbackRecordingPath;
             if (targetSDRId !== "none" && targetSDRId !== "") {
@@ -600,28 +602,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                 });
             }
             return Promise.resolve({ success: false, skipped: true });
-        }, [
-            selectedSDRId,
-            centerFrequency,
-            sampleRate,
-            gain,
-            fftSize,
-            fftWindow,
-            fftOverlapPercent,
-            fftOverlapDepth,
-            fftAveraging,
-            biasT,
-            tunerAgc,
-            rtlAgc,
-            selectedOffsetValue,
-            playbackRecordingPath,
-            selectedAntenna,
-            soapyAgc,
-            sdrSettingsById,
-            callWithTakeoverConfirmation,
-            dispatch,
-        ]
-    );
+        });
 
     const applyLoadedSDRParameters = useCallback((selectedValue, response, liveConfig = null) => {
         const caps = response?.capabilities || {};
@@ -1639,6 +1620,15 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         }
     };
 
+    // The trace showed these new callback props invalidating memoized accordions
+    // even when their displayed SDR/VFO settings had not changed.
+    const onStartRecording = useStableEvent(handleStartRecording);
+    const onStopRecording = useStableEvent(handleStopRecording);
+    const onRecordingSelect = useStableEvent(handleRecordingSelect);
+    const onPlaybackRecordingChange = useStableEvent(handlePlaybackRecordingDropdownChange);
+    const onPlaybackPlay = useStableEvent(handlePlaybackPlay);
+    const onPlaybackStop = useStableEvent(handlePlaybackStop);
+
     return (
         <>
             <TitleBar
@@ -1706,7 +1696,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     playbackRecordings={playbackRecordings}
                     playbackRecordingsLoading={playbackRecordingsLoading}
                     selectedPlaybackRecordingName={selectedPlaybackRecording?.playback_path || selectedPlaybackRecording?.name || playbackRecordingPath || 'none'}
-                    onPlaybackRecordingChange={handlePlaybackRecordingDropdownChange}
+                    onPlaybackRecordingChange={onPlaybackRecordingChange}
                     />
                 </DevRenderProfiler>
 
@@ -1792,8 +1782,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     onRecordingBandDragStepChange={handleRecordingBandDragStepChange}
                     storageFormat={recordingStorageFormat}
                     onStorageFormatChange={handleRecordingStorageFormatChange}
-                    onStartRecording={handleStartRecording}
-                    onStopRecording={handleStopRecording}
+                    onStartRecording={onStartRecording}
+                    onStopRecording={onStopRecording}
                     isStreaming={isStreaming}
                     selectedSDRId={selectedSDRId}
                     centerFrequency={centerFrequency}
@@ -1808,9 +1798,9 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     onAccordionChange={handlePlaybackAccordionChange}
                     isStreaming={isStreaming}
                     selectedPlaybackRecording={selectedPlaybackRecording}
-                    onRecordingSelect={handleRecordingSelect}
-                    onPlaybackPlay={handlePlaybackPlay}
-                    onPlaybackStop={handlePlaybackStop}
+                    onRecordingSelect={onRecordingSelect}
+                    onPlaybackPlay={onPlaybackPlay}
+                    onPlaybackStop={onPlaybackStop}
                     playbackStartTime={playbackStartTime}
                     playbackRemainingSecondsRef={playbackRemainingSecondsRef}
                     />

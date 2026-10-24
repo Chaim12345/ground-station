@@ -26,14 +26,14 @@ export const useVfoAudioState = () => {
     });
 
     // Handle VFO mute toggle
-    const handleVfoMuteToggle = (vfoIndex) => {
+    const handleVfoMuteToggle = React.useCallback((vfoIndex) => {
         const newMutedState = !vfoMutedRedux[vfoIndex];
         // Call audio provider to mute/unmute
         // Backend sends vfo_number as 1-4, which matches our vfoIndex
         if (setVfoMute) {
             setVfoMute(vfoIndex, newMutedState);
         }
-    };
+    }, [setVfoMute, vfoMutedRedux]);
 
     return {
         vfoMuted: vfoMutedRedux,
@@ -51,11 +51,11 @@ export const useVfoDecoderInfo = () => {
     const currentSessionId = useSelector(state => state.decoders.currentSessionId);
 
     // Get decoder info for a specific VFO (works for both data decoders and transcription)
-    const getVFODecoderInfo = (vfoIndex) => {
+    const getVFODecoderInfo = React.useCallback((vfoIndex) => {
         if (!currentSessionId || !vfoIndex) return null;
         const decoderKey = `${currentSessionId}_vfo${vfoIndex}`;
         return activeDecoders[decoderKey] || null;
-    };
+    }, [activeDecoders, currentSessionId]);
 
     return {
         getVFODecoderInfo,

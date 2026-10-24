@@ -108,9 +108,9 @@ const MainLayout = React.memo(function MainLayout() {
     const playbackTotalSecondsRef = useRef(null);
 
     const dispatch = useDispatch();
-    const {
-        gridEditable,
-    } = useSelector(state => state.waterfall);
+    // Streaming and tuning update the waterfall slice frequently. The grid only
+    // needs to render again when its edit controls change.
+    const gridEditable = useSelector(state => state.waterfall.gridEditable);
 
     const {width, containerRef, mounted} = useContainerWidth({measureBeforeMount: true});
     const [deferredIslandCount, setDeferredIslandCount] = useState(0);
