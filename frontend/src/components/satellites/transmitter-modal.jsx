@@ -16,6 +16,7 @@ import {useDispatch, useSelector} from "react-redux";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
+import FormHelperText from "@mui/material/FormHelperText";
 import {
     submitTransmitter,
     editTransmitter,
@@ -465,6 +466,7 @@ const TransmitterModal = ({
                         sx={getFieldSx('description')}
                         disabled={loading}
                         error={validationErrors.description}
+                        helperText={t('transmitter_modal.help.description')}
                         required
                     />
 
@@ -476,6 +478,7 @@ const TransmitterModal = ({
                             value={sourceValue}
                             sx={getFieldSx('source')}
                             disabled
+                            helperText={t('transmitter_modal.help.source')}
                         />
                     )}
 
@@ -493,6 +496,7 @@ const TransmitterModal = ({
                                     <MenuItem key={option.value} value={option.value}>{option.name}</MenuItem>
                                 ))}
                             </Select>
+                            <FormHelperText>{t('transmitter_modal.help.type')}</FormHelperText>
                         </FormControl>
 
                         <FormControl fullWidth variant="outlined" error={validationErrors.status} size="small">
@@ -508,6 +512,7 @@ const TransmitterModal = ({
                                     <MenuItem key={option.value} value={option.value}>{option.name}</MenuItem>
                                 ))}
                             </Select>
+                            <FormHelperText>{t('transmitter_modal.help.status')}</FormHelperText>
                         </FormControl>
                     </Box>
 
@@ -524,6 +529,7 @@ const TransmitterModal = ({
                                 <MenuItem key={option.value} value={option.value}>{option.name}</MenuItem>
                             ))}
                         </Select>
+                        <FormHelperText>{t('transmitter_modal.help.alive')}</FormHelperText>
                     </FormControl>
 
                     {/* Uplink Frequencies Section */}
@@ -542,6 +548,7 @@ const TransmitterModal = ({
                         sx={getFieldSx('uplinkLow')}
                         disabled={loading}
                         error={validationErrors.uplinkLow}
+                        helperText={t('transmitter_modal.help.uplink_low')}
                     />
 
                     <TextField
@@ -555,6 +562,7 @@ const TransmitterModal = ({
                         sx={getFieldSx('uplinkHigh')}
                         disabled={loading}
                         error={validationErrors.uplinkHigh}
+                        helperText={t('transmitter_modal.help.uplink_high')}
                     />
 
                     <TextField
@@ -567,6 +575,7 @@ const TransmitterModal = ({
                         placeholder="e.g., 1000"
                         sx={{ ...getFieldSx('uplinkDrift'), mb: 3 }}
                         disabled={loading}
+                        helperText={t('transmitter_modal.help.uplink_drift')}
                     />
 
                     {/* Downlink Frequencies Section */}
@@ -585,6 +594,7 @@ const TransmitterModal = ({
                         sx={getFieldSx('downlinkLow')}
                         disabled={loading}
                         error={validationErrors.downlinkLow}
+                        helperText={t('transmitter_modal.help.downlink_low')}
                     />
 
                     <TextField
@@ -598,6 +608,7 @@ const TransmitterModal = ({
                         sx={getFieldSx('downlinkHigh')}
                         disabled={loading}
                         error={validationErrors.downlinkHigh}
+                        helperText={t('transmitter_modal.help.downlink_high')}
                     />
 
                     <TextField
@@ -610,6 +621,7 @@ const TransmitterModal = ({
                         placeholder="e.g., 500"
                         sx={{ ...getFieldSx('downlinkDrift'), mb: 3 }}
                         disabled={loading}
+                        helperText={t('transmitter_modal.help.downlink_drift')}
                     />
 
                     {/* Transmission Settings Section */}
@@ -631,6 +643,7 @@ const TransmitterModal = ({
                                     <MenuItem key={option.value} value={option.value}>{option.name}</MenuItem>
                                 ))}
                             </Select>
+                            <FormHelperText>{t('transmitter_modal.help.downlink_mode')}</FormHelperText>
                         </FormControl>
 
                         <FormControl fullWidth variant="outlined" size="small">
@@ -646,6 +659,7 @@ const TransmitterModal = ({
                                     <MenuItem key={option.value} value={option.value}>{option.name}</MenuItem>
                                 ))}
                             </Select>
+                            <FormHelperText>{t('transmitter_modal.help.uplink_mode')}</FormHelperText>
                         </FormControl>
                     </Box>
 
@@ -663,6 +677,7 @@ const TransmitterModal = ({
                                     <MenuItem key={option.value} value={option.value}>{option.name}</MenuItem>
                                 ))}
                             </Select>
+                            <FormHelperText>{t('transmitter_modal.help.invert')}</FormHelperText>
                         </FormControl>
 
                         <TextField
@@ -674,6 +689,7 @@ const TransmitterModal = ({
                             type="number"
                             placeholder="e.g., 9600"
                             disabled={loading}
+                            helperText={t('transmitter_modal.help.baud')}
                         />
                     </Box>
                     <Box sx={{ display: 'flex', gap: 2, mt: 2.5 }}>
@@ -703,6 +719,7 @@ const TransmitterModal = ({
                                     <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
                                 ))}
                             </Select>
+                            <FormHelperText>{t('transmitter_modal.help.framing')}</FormHelperText>
                         </FormControl>
                     </Box>
 

@@ -326,5 +326,49 @@
       "no_added_items": "Keine hinzugefügten Elemente",
       "no_removed_items": "Keine entfernten Elemente"
     }
+  },
+  "satellite_edit_dialog": {
+    "help": {
+      "name": "Name in Satellitenlisten und Steuerelementen zur Zielauswahl.",
+      "norad_id": "Eindeutige NORAD-Katalognummer; nach dem Anlegen nicht mehr änderbar.",
+      "sat_id": "Optionale Kennung aus einem externen Satellitenkatalog.",
+      "status": "Betriebsstatus in den Satellitendetails und Filtern.",
+      "is_frequency_violator": "Katalogkennzeichen für einen gemeldeten Verstoß gegen die Frequenzkoordination.",
+      "operator": "Organisation, die den Satelliten betreibt.",
+      "countries": "Land oder Länder, die dem Satelliten zugeordnet sind.",
+      "name_other": "Weiterer Name aus einer Satellitendatenquelle.",
+      "alternative_name": "Zusätzlicher Alias für die Satellitensuche.",
+      "website": "Link zu Informationen über den Satelliten oder die Mission.",
+      "image": "Direkte Bild-URL für die Satellitendetails.",
+      "orbit_model_kind": "TLE verwendet zwei Elementzeilen; OMM verwendet einen JSON-Orbitdatensatz.",
+      "orbit_central_body": "Himmelskörper, den der Satellit umkreist: Erde, Mond oder Mars.",
+      "tle1": "Erste Zeile des Bahnelementdatensatzes; für einen TLE-Orbit erforderlich.",
+      "tle2": "Zweite Zeile des Bahnelementdatensatzes; für einen TLE-Orbit erforderlich.",
+      "orbit_epoch": "Zeitpunkt, für den diese Bahnelemente gelten, im Format ISO 8601.",
+      "orbit_fetched_at": "Letzter Abruf dieses Orbits von seiner Quelle; schreibgeschützt.",
+      "orbit_first_seen_at": "Erstes Auftreten dieses Orbitdatensatzes im Katalog; schreibgeschützt.",
+      "orbit_changed_at": "Letzte Änderung der Bahndaten; schreibgeschützt.",
+      "orbit_omm_payload": "OMM-Bahnelemente als JSON-Objekt; für einen OMM-Orbit erforderlich."
+    }
+  },
+  "transmitter_modal": {
+    "help": {
+      "description": "Kurzname in Senderlisten und Auswahlmenüs.",
+      "source": "Importquelle dieses Eintrags; hier nicht änderbar.",
+      "type": "Zweck des Senders, etwa Telemetrie, Bake oder Transponder.",
+      "status": "Betriebsstatus im Katalog; startet oder stoppt keinen Empfang.",
+      "alive": "Gibt an, ob der Sender vermutlich noch sendet.",
+      "uplink_low": "Vom Boden gesendete Frequenz oder Untergrenze eines Uplink-Bereichs, in Hz.",
+      "uplink_high": "Obergrenze eines Uplink-Bereichs; bei einer einzelnen Frequenz leer lassen.",
+      "uplink_drift": "Optional geschätzte Abweichung von der angegebenen Uplink-Frequenz, in Hz.",
+      "downlink_low": "Am Boden empfangene Frequenz oder Untergrenze eines Downlink-Bereichs, in Hz.",
+      "downlink_high": "Obergrenze eines Downlink-Bereichs; bei einer einzelnen Frequenz leer lassen.",
+      "downlink_drift": "Optional geschätzte Abweichung von der angegebenen Downlink-Frequenz, in Hz.",
+      "downlink_mode": "Modulation des empfangenen Signals.",
+      "uplink_mode": "Modulation des gesendeten Signals.",
+      "invert": "Bei einem Transponder entsprechen höhere Uplink-Frequenzen niedrigeren Downlink-Frequenzen.",
+      "baud": "Digitale Symbolrate in Symbolen pro Sekunde; bei unbekanntem Wert leer lassen.",
+      "framing": "Paketrahmung für die FSK-Decodierung; Auto verwendet die Decoder-Voreinstellung."
+    }
   }
 }

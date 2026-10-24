@@ -466,7 +466,29 @@
     }
   },
   "satellite_edit_dialog": {
-    "satellite_edit_tabs": "卫星编辑标签页"
+    "satellite_edit_tabs": "卫星编辑标签页",
+    "help": {
+      "name": "在卫星列表和目标选择控件中显示的名称。",
+      "norad_id": "唯一的 NORAD 编目编号；创建后无法更改。",
+      "sat_id": "来自外部卫星目录的可选标识符。",
+      "status": "在卫星详情和筛选条件中显示的运行状态。",
+      "is_frequency_violator": "表示曾被报告违反频率协调规定的目录标记。",
+      "operator": "负责运行该卫星的机构。",
+      "countries": "与该卫星关联的一个或多个国家。",
+      "name_other": "卫星数据源提供的另一名称。",
+      "alternative_name": "搜索该卫星时使用的其他别名。",
+      "website": "指向卫星或任务相关信息的链接。",
+      "image": "在卫星详情中使用的图片直链 URL。",
+      "orbit_model_kind": "TLE 使用两行根数；OMM 使用 JSON 轨道记录。",
+      "orbit_central_body": "卫星环绕的天体：地球、月球或火星。",
+      "tle1": "两行根数的第一行；TLE 轨道必填。",
+      "tle2": "两行根数的第二行；TLE 轨道必填。",
+      "orbit_epoch": "这些轨道根数的有效时间，格式为 ISO 8601。",
+      "orbit_fetched_at": "上次从数据源获取该轨道的时间；只读。",
+      "orbit_first_seen_at": "该轨道记录首次出现在目录中的时间；只读。",
+      "orbit_changed_at": "轨道数据上次更改的时间；只读。",
+      "orbit_omm_payload": "JSON 对象形式的 OMM 轨道根数；OMM 轨道必填。"
+    }
   },
   "satellite_info_page": {
     "countries": "国家：",
@@ -508,6 +530,24 @@
     "experimental_communications": "实验通信卫星"
   },
   "transmitter_modal": {
+    "help": {
+      "description": "在发射机列表和选择菜单中显示的简短名称。",
+      "source": "此记录的导入来源；不能在此更改。",
+      "type": "发射机的用途，例如遥测、信标或转发器。",
+      "status": "目录中的运行状态；不会启动或停止接收。",
+      "alive": "此发射机是否被认为仍在发射信号。",
+      "uplink_low": "从地面发送的频率，或上行频率范围的下限，单位为 Hz。",
+      "uplink_high": "上行频率范围的上限；单一频率时留空。",
+      "uplink_drift": "相对于所列上行频率的可选估计频偏，单位为 Hz。",
+      "downlink_low": "地面接收的频率，或下行频率范围的下限，单位为 Hz。",
+      "downlink_high": "下行频率范围的上限；单一频率时留空。",
+      "downlink_drift": "相对于所列下行频率的可选估计频偏，单位为 Hz。",
+      "downlink_mode": "接收信号使用的调制方式。",
+      "uplink_mode": "发射信号使用的调制方式。",
+      "invert": "对于转发器，较高的上行频率对应较低的下行频率。",
+      "baud": "数字信号每秒的符号数；未知时留空。",
+      "framing": "FSK 解码使用的数据包帧格式；自动模式使用解码器默认设置。"
+    },
     "alive": "存活 *",
     "basic_information": "基本信息",
     "baud_rate": "波特率",

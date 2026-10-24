@@ -215,5 +215,49 @@
       "no_added_items": "Nessun elemento aggiunto",
       "no_removed_items": "Nessun elemento rimosso"
     }
+  },
+  "satellite_edit_dialog": {
+    "help": {
+      "name": "Nome mostrato negli elenchi dei satelliti e nei controlli del bersaglio.",
+      "norad_id": "Numero di catalogo NORAD univoco; non può essere modificato dopo la creazione.",
+      "sat_id": "Identificativo facoltativo di un catalogo satellitare esterno.",
+      "status": "Stato operativo mostrato nei dettagli e nei filtri dei satelliti.",
+      "is_frequency_violator": "Indicatore del catalogo per una violazione segnalata del coordinamento delle frequenze.",
+      "operator": "Organizzazione responsabile della gestione del satellite.",
+      "countries": "Paese o paesi associati al satellite.",
+      "name_other": "Altro nome fornito da una fonte di dati satellitari.",
+      "alternative_name": "Alias aggiuntivo usato per cercare il satellite.",
+      "website": "Link a informazioni sul satellite o sulla missione.",
+      "image": "URL diretto dell'immagine mostrata nei dettagli del satellite.",
+      "orbit_model_kind": "TLE usa due righe di elementi; OMM usa un record orbitale JSON.",
+      "orbit_central_body": "Corpo attorno al quale orbita il satellite: Terra, Luna o Marte.",
+      "tle1": "Prima riga degli elementi orbitali; richiesta per un'orbita TLE.",
+      "tle2": "Seconda riga degli elementi orbitali; richiesta per un'orbita TLE.",
+      "orbit_epoch": "Istante in cui questi elementi orbitali sono validi, nel formato ISO 8601.",
+      "orbit_fetched_at": "Ultimo recupero di questa orbita dalla fonte; sola lettura.",
+      "orbit_first_seen_at": "Prima comparsa di questo record orbitale nel catalogo; sola lettura.",
+      "orbit_changed_at": "Ultima modifica dei dati orbitali; sola lettura.",
+      "orbit_omm_payload": "Elementi orbitali OMM come oggetto JSON; richiesti per un'orbita OMM."
+    }
+  },
+  "transmitter_modal": {
+    "help": {
+      "description": "Nome breve mostrato negli elenchi e nei menu di selezione dei trasmettitori.",
+      "source": "Fonte da cui è stato importato il record; non modificabile qui.",
+      "type": "Funzione del trasmettitore, ad esempio telemetria, beacon o transponder.",
+      "status": "Stato operativo nel catalogo; non avvia né interrompe la ricezione.",
+      "alive": "Indica se si ritiene che il trasmettitore sia ancora in funzione.",
+      "uplink_low": "Frequenza inviata da terra o limite inferiore di un intervallo uplink, in Hz.",
+      "uplink_high": "Limite superiore di un intervallo uplink; lasciare vuoto per una sola frequenza.",
+      "uplink_drift": "Scostamento stimato facoltativo dalla frequenza uplink indicata, in Hz.",
+      "downlink_low": "Frequenza ricevuta a terra o limite inferiore di un intervallo downlink, in Hz.",
+      "downlink_high": "Limite superiore di un intervallo downlink; lasciare vuoto per una sola frequenza.",
+      "downlink_drift": "Scostamento stimato facoltativo dalla frequenza downlink indicata, in Hz.",
+      "downlink_mode": "Modulazione usata per il segnale ricevuto.",
+      "uplink_mode": "Modulazione usata per il segnale trasmesso.",
+      "invert": "In un transponder, frequenze uplink più alte corrispondono a frequenze downlink più basse.",
+      "baud": "Velocità dei simboli digitali al secondo; lasciare vuoto se sconosciuta.",
+      "framing": "Formato dei pacchetti per la decodifica FSK; Auto usa l'impostazione predefinita del decoder."
+    }
   }
 }

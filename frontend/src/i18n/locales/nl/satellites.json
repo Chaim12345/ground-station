@@ -326,5 +326,49 @@
       "no_added_items": "Geen toegevoegde items",
       "no_removed_items": "Geen verwijderde items"
     }
+  },
+  "satellite_edit_dialog": {
+    "help": {
+      "name": "Naam in satellietlijsten en bedieningselementen voor doelkeuze.",
+      "norad_id": "Uniek NORAD-catalogusnummer; na het aanmaken niet meer te wijzigen.",
+      "sat_id": "Optionele identificatie uit een externe satellietcatalogus.",
+      "status": "Operationele status in satellietdetails en filters.",
+      "is_frequency_violator": "Catalogusmarkering voor een gemelde schending van frequentiecoördinatie.",
+      "operator": "Organisatie die de satelliet beheert.",
+      "countries": "Land of landen die bij de satelliet horen.",
+      "name_other": "Andere naam uit een bron met satellietgegevens.",
+      "alternative_name": "Extra alias voor het zoeken naar de satelliet.",
+      "website": "Link naar informatie over de satelliet of missie.",
+      "image": "Directe afbeeldings-URL voor de satellietdetails.",
+      "orbit_model_kind": "TLE gebruikt twee elementregels; OMM gebruikt een JSON-baanrecord.",
+      "orbit_central_body": "Hemellichaam waar de satelliet omheen draait: aarde, maan of Mars.",
+      "tle1": "Eerste regel van de baanelementen; vereist voor een TLE-baan.",
+      "tle2": "Tweede regel van de baanelementen; vereist voor een TLE-baan.",
+      "orbit_epoch": "Tijdstip waarvoor deze baanelementen gelden, in ISO 8601-formaat.",
+      "orbit_fetched_at": "Laatste keer dat deze baan bij de bron is opgehaald; alleen-lezen.",
+      "orbit_first_seen_at": "Eerste verschijning van dit baanrecord in de catalogus; alleen-lezen.",
+      "orbit_changed_at": "Laatste wijziging van de baangegevens; alleen-lezen.",
+      "orbit_omm_payload": "OMM-baanelementen als JSON-object; vereist voor een OMM-baan."
+    }
+  },
+  "transmitter_modal": {
+    "help": {
+      "description": "Korte naam in zenderlijsten en keuzemenu's.",
+      "source": "Importbron van dit record; hier niet te wijzigen.",
+      "type": "Doel van de zender, zoals telemetrie, baken of transponder.",
+      "status": "Operationele status in de catalogus; start of stopt de ontvangst niet.",
+      "alive": "Geeft aan of de zender vermoedelijk nog uitzendt.",
+      "uplink_low": "Vanaf de grond verzonden frequentie of ondergrens van een uplinkbereik, in Hz.",
+      "uplink_high": "Bovengrens van een uplinkbereik; leeg laten voor één frequentie.",
+      "uplink_drift": "Optionele geschatte afwijking van de vermelde uplinkfrequentie, in Hz.",
+      "downlink_low": "Op de grond ontvangen frequentie of ondergrens van een downlinkbereik, in Hz.",
+      "downlink_high": "Bovengrens van een downlinkbereik; leeg laten voor één frequentie.",
+      "downlink_drift": "Optionele geschatte afwijking van de vermelde downlinkfrequentie, in Hz.",
+      "downlink_mode": "Modulatie van het ontvangen signaal.",
+      "uplink_mode": "Modulatie van het verzonden signaal.",
+      "invert": "Bij een transponder horen hogere uplinkfrequenties bij lagere downlinkfrequenties.",
+      "baud": "Digitale symboolsnelheid in symbolen per seconde; leeg laten als onbekend.",
+      "framing": "Pakketframing voor FSK-decodering; Auto gebruikt de standaardinstelling van de decoder."
+    }
   }
 }

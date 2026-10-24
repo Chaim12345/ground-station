@@ -401,6 +401,50 @@
       "cancel": "Cancel"
     }
   },
+  "satellite_edit_dialog": {
+    "help": {
+      "name": "Name shown in satellite lists and target controls.",
+      "norad_id": "Unique NORAD catalog number; it cannot be changed after creation.",
+      "sat_id": "Optional identifier from an external satellite catalog.",
+      "status": "Operational status shown in satellite details and filters.",
+      "is_frequency_violator": "Catalog flag for a reported frequency coordination violation.",
+      "operator": "Organization responsible for operating the satellite.",
+      "countries": "Country or countries associated with the satellite.",
+      "name_other": "Another name supplied by a satellite data source.",
+      "alternative_name": "Additional alias used when searching for the satellite.",
+      "website": "Link to information about the satellite or mission.",
+      "image": "Direct image URL used in satellite details.",
+      "orbit_model_kind": "TLE uses two element lines; OMM uses a JSON orbit record.",
+      "orbit_central_body": "Body that the satellite orbits: Earth, Moon, or Mars.",
+      "tle1": "First line of the two-line element set; required for a TLE orbit.",
+      "tle2": "Second line of the two-line element set; required for a TLE orbit.",
+      "orbit_epoch": "Time when these orbital elements are valid, in ISO 8601 format.",
+      "orbit_fetched_at": "Last time this orbit was fetched from its source; read-only.",
+      "orbit_first_seen_at": "First time this orbit record appeared in the catalog; read-only.",
+      "orbit_changed_at": "Last time the orbital data changed; read-only.",
+      "orbit_omm_payload": "OMM orbit elements as a JSON object; required for an OMM orbit."
+    }
+  },
+  "transmitter_modal": {
+    "help": {
+      "description": "Short name shown in transmitter lists and selection menus.",
+      "source": "Where this record was imported from; it cannot be changed here.",
+      "type": "The transmitter's purpose, such as telemetry, beacon, or transponder.",
+      "status": "Catalog operating status; this does not start or stop reception.",
+      "alive": "Whether this transmitter is believed to still be on air.",
+      "uplink_low": "Frequency sent from the ground, or the low end of an uplink range, in Hz.",
+      "uplink_high": "High end of an uplink range; leave blank for a single frequency.",
+      "uplink_drift": "Optional estimated shift from the listed uplink frequency, in Hz.",
+      "downlink_low": "Frequency received on the ground, or the low end of a downlink range, in Hz.",
+      "downlink_high": "High end of a downlink range; leave blank for a single frequency.",
+      "downlink_drift": "Optional estimated shift from the listed downlink frequency, in Hz.",
+      "downlink_mode": "Modulation used for the received signal.",
+      "uplink_mode": "Modulation used for the transmitted signal.",
+      "invert": "For a transponder, higher uplink frequencies map to lower downlink frequencies.",
+      "baud": "Digital symbol rate in symbols per second; leave blank if unknown.",
+      "framing": "Packet framing used by FSK decoding; Auto uses the decoder default."
+    }
+  },
   "synchronize": {
     "header": {
       "title": "Orbital Data Sync",

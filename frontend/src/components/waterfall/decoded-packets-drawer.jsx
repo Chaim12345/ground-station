@@ -127,6 +127,9 @@ const ParametersCell = React.memo(function ParametersCell({ value, isLora }) {
                 color: isLora ? 'text.secondary' : 'text.disabled',
                 ...(isLora ? {
                     display: '-webkit-box',
+                    minWidth: 0,
+                    width: '100%',
+                    whiteSpace: 'normal',
                     WebkitBoxOrient: 'vertical',
                     WebkitLineClamp: 2,
                     overflow: 'hidden',
@@ -930,6 +933,10 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
                                 backgroundColor: theme.palette.background.paper,
                                 [`& .${gridClasses.cell}:focus, & .${gridClasses.cell}:focus-within`]: {
                                     outline: 'none',
+                                },
+                                [`& .${gridClasses.cell}[data-field="parameters"]`]: {
+                                    display: 'flex',
+                                    alignItems: 'center',
                                 },
                                 [`& .${gridClasses.columnHeader}`]: {
                                     backgroundColor: theme.palette.background.default,

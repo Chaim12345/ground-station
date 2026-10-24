@@ -326,5 +326,49 @@
       "no_added_items": "Aucun élément ajouté",
       "no_removed_items": "Aucun élément supprimé"
     }
+  },
+  "satellite_edit_dialog": {
+    "help": {
+      "name": "Nom affiché dans les listes de satellites et les commandes de ciblage.",
+      "norad_id": "Numéro de catalogue NORAD unique ; il ne peut plus être modifié après la création.",
+      "sat_id": "Identifiant facultatif provenant d'un catalogue de satellites externe.",
+      "status": "État opérationnel affiché dans les détails et les filtres des satellites.",
+      "is_frequency_violator": "Indicateur du catalogue signalant une infraction à la coordination des fréquences.",
+      "operator": "Organisme responsable de l'exploitation du satellite.",
+      "countries": "Pays associés au satellite.",
+      "name_other": "Autre nom fourni par une source de données satellitaires.",
+      "alternative_name": "Autre alias utilisé pour rechercher le satellite.",
+      "website": "Lien vers des informations sur le satellite ou sa mission.",
+      "image": "URL directe de l'image affichée dans les détails du satellite.",
+      "orbit_model_kind": "TLE utilise deux lignes d'éléments ; OMM utilise un enregistrement orbital JSON.",
+      "orbit_central_body": "Corps autour duquel le satellite orbite : Terre, Lune ou Mars.",
+      "tle1": "Première ligne du jeu d'éléments orbitaux ; requise pour une orbite TLE.",
+      "tle2": "Deuxième ligne du jeu d'éléments orbitaux ; requise pour une orbite TLE.",
+      "orbit_epoch": "Date à laquelle ces éléments orbitaux sont valides, au format ISO 8601.",
+      "orbit_fetched_at": "Dernière récupération de cette orbite depuis sa source ; lecture seule.",
+      "orbit_first_seen_at": "Première apparition de cet enregistrement orbital dans le catalogue ; lecture seule.",
+      "orbit_changed_at": "Dernière modification des données orbitales ; lecture seule.",
+      "orbit_omm_payload": "Éléments orbitaux OMM sous forme d'objet JSON ; requis pour une orbite OMM."
+    }
+  },
+  "transmitter_modal": {
+    "help": {
+      "description": "Nom court affiché dans les listes et menus de sélection des émetteurs.",
+      "source": "Source d'importation de cet enregistrement ; elle ne peut pas être modifiée ici.",
+      "type": "Fonction de l'émetteur, par exemple télémétrie, balise ou transpondeur.",
+      "status": "État opérationnel du catalogue ; ce champ ne démarre ni n'arrête la réception.",
+      "alive": "Indique si l'émetteur est supposé toujours émettre.",
+      "uplink_low": "Fréquence envoyée depuis le sol ou limite basse d'une plage montante, en Hz.",
+      "uplink_high": "Limite haute d'une plage montante ; laisser vide pour une seule fréquence.",
+      "uplink_drift": "Écart estimé facultatif par rapport à la fréquence montante indiquée, en Hz.",
+      "downlink_low": "Fréquence reçue au sol ou limite basse d'une plage descendante, en Hz.",
+      "downlink_high": "Limite haute d'une plage descendante ; laisser vide pour une seule fréquence.",
+      "downlink_drift": "Écart estimé facultatif par rapport à la fréquence descendante indiquée, en Hz.",
+      "downlink_mode": "Modulation utilisée pour le signal reçu.",
+      "uplink_mode": "Modulation utilisée pour le signal transmis.",
+      "invert": "Pour un transpondeur, les fréquences montantes plus élevées correspondent aux fréquences descendantes plus basses.",
+      "baud": "Débit de symboles numériques par seconde ; laisser vide s'il est inconnu.",
+      "framing": "Tramage des paquets pour le décodage FSK ; Auto utilise la valeur par défaut du décodeur."
+    }
   }
 }

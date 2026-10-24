@@ -8,6 +8,7 @@ import {
     DialogActions,
     DialogContent,
     DialogTitle,
+    FormHelperText,
     FormControlLabel,
     MenuItem,
     Stack,
@@ -123,6 +124,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
     const [hasLocalEdits, setHasLocalEdits] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
     const initializedSatelliteIdRef = useRef(null);
+    const frequencyViolationHelpId = React.useId();
 
     useEffect(() => {
         if (!open) {
@@ -360,6 +362,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 size="small"
                                 error={Boolean(validationErrors.name || submitErrorFields.name)}
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.name')}
                             />
                             <TextField
                                 label={t('satellite_database.norad_id')}
@@ -372,6 +375,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 disabled={Boolean(formValues.id) || isSubmitting}
                                 size="small"
                                 error={Boolean(validationErrors.norad_id || submitErrorFields.norad_id)}
+                                helperText={t('satellite_edit_dialog.help.norad_id')}
                             />
                             <TextField
                                 label={t('satellite_database.sat_id')}
@@ -381,6 +385,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.sat_id')}
                             />
                             <TextField
                                 label={t('satellite_database.status')}
@@ -390,19 +395,26 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.status')}
                             />
-                            <FormControlLabel
-                                control={(
-                                    <Checkbox
-                                        checked={Boolean(formValues.is_frequency_violator)}
-                                        onChange={handleCheckboxChange}
-                                        name="is_frequency_violator"
-                                        size="small"
-                                        disabled={isSubmitting}
-                                    />
-                                )}
-                                label={t('satellite_database.is_frequency_violator')}
-                            />
+                            <Box>
+                                <FormControlLabel
+                                    control={(
+                                        <Checkbox
+                                            checked={Boolean(formValues.is_frequency_violator)}
+                                            onChange={handleCheckboxChange}
+                                            name="is_frequency_violator"
+                                            size="small"
+                                            disabled={isSubmitting}
+                                            inputProps={{ 'aria-describedby': frequencyViolationHelpId }}
+                                        />
+                                    )}
+                                    label={t('satellite_database.is_frequency_violator')}
+                                />
+                                <FormHelperText id={frequencyViolationHelpId} sx={{ ml: 4, mt: -0.5 }}>
+                                    {t('satellite_edit_dialog.help.is_frequency_violator')}
+                                </FormHelperText>
+                            </Box>
                             <TextField
                                 label={t('satellite_database.operator')}
                                 name="operator"
@@ -411,6 +423,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.operator')}
                             />
                             <TextField
                                 label={t('satellite_database.countries')}
@@ -420,6 +433,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.countries')}
                             />
                             <TextField
                                 label={t('satellite_database.name_other')}
@@ -429,6 +443,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.name_other')}
                             />
                             <TextField
                                 label={t('satellite_database.alternative_name')}
@@ -438,6 +453,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.alternative_name')}
                             />
                             <TextField
                                 label={t('satellite_database.website')}
@@ -447,6 +463,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.website')}
                             />
                             <TextField
                                 label={t('satellite_database.image')}
@@ -456,6 +473,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 fullWidth
                                 size="small"
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.image')}
                             />
                         </Box>
                     )}
@@ -471,6 +489,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 size="small"
                                 error={Boolean(validationErrors.orbit_model_kind || submitErrorFields.orbit_model_kind)}
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.orbit_model_kind')}
                             >
                                 <MenuItem value="tle">TLE</MenuItem>
                                 <MenuItem value="omm">OMM</MenuItem>
@@ -485,6 +504,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 size="small"
                                 error={Boolean(validationErrors.orbit_central_body || submitErrorFields.orbit_central_body)}
                                 disabled={isSubmitting}
+                                helperText={t('satellite_edit_dialog.help.orbit_central_body')}
                             >
                                 <MenuItem value="earth">earth</MenuItem>
                                 <MenuItem value="moon">moon</MenuItem>
@@ -503,6 +523,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 error={Boolean(validationErrors.tle1 || submitErrorFields.tle1)}
                                 disabled={isSubmitting}
                                 sx={monospaceInputSx}
+                                helperText={t('satellite_edit_dialog.help.tle1')}
                             />
                             <TextField
                                 label={t('satellite_database.tle2')}
@@ -517,6 +538,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 error={Boolean(validationErrors.tle2 || submitErrorFields.tle2)}
                                 disabled={isSubmitting}
                                 sx={monospaceInputSx}
+                                helperText={t('satellite_edit_dialog.help.tle2')}
                             />
                             <TextField
                                 label={t('satellite_database.orbit_epoch', { defaultValue: 'Orbit Epoch (ISO 8601)' })}
@@ -529,6 +551,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                 placeholder="2026-05-09T12:34:56Z"
                                 InputProps={formValues.id ? { readOnly: true } : undefined}
                                 sx={monospaceInputSx}
+                                helperText={t('satellite_edit_dialog.help.orbit_epoch')}
                             />
                             {formValues.id && (
                                 <>
@@ -539,6 +562,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                         size="small"
                                         InputProps={{ readOnly: true }}
                                         sx={monospaceInputSx}
+                                        helperText={t('satellite_edit_dialog.help.orbit_fetched_at')}
                                     />
                                     <TextField
                                         label={t('satellite_database.orbit_first_seen')}
@@ -547,6 +571,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                         size="small"
                                         InputProps={{ readOnly: true }}
                                         sx={monospaceInputSx}
+                                        helperText={t('satellite_edit_dialog.help.orbit_first_seen_at')}
                                     />
                                     <TextField
                                         label={t('satellite_database.orbit_changed')}
@@ -555,6 +580,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                         size="small"
                                         InputProps={{ readOnly: true }}
                                         sx={monospaceInputSx}
+                                        helperText={t('satellite_edit_dialog.help.orbit_changed_at')}
                                     />
                                 </>
                             )}
@@ -572,6 +598,7 @@ const SatelliteEditDialog = ({ open, onClose, satelliteData, onSaved }) => {
                                     error={Boolean(validationErrors.orbit_omm_payload || submitErrorFields.orbit_omm_payload)}
                                     disabled={isSubmitting}
                                     sx={monospaceInputSx}
+                                    helperText={t('satellite_edit_dialog.help.orbit_omm_payload')}
                                 />
                             )}
                         </Box>
