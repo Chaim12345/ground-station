@@ -233,7 +233,7 @@ const groupTransmittersByBand = (transmitters) => {
         .map(band => ({ band, transmitters: grouped[band] }));
 };
 
-export default function MonitoredSatelliteDialog() {
+export default function MonitoredSatelliteDialog({ onExited }) {
     const dispatch = useDispatch();
     // 观测调度对话框复用 decoder-parameters.js，其键位于 waterfall 命名空间，
     // 用命名空间回退数组让本组件的 common 键与共享模块的 waterfall 键都能解析
@@ -1020,6 +1020,7 @@ export default function MonitoredSatelliteDialog() {
     return (
         <Dialog
             open={open}
+            TransitionProps={{ onExited }}
             onClose={handleClose}
             maxWidth="md"
             fullWidth

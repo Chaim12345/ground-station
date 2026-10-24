@@ -85,8 +85,7 @@ import VersionUpdateOverlay from "./version-update-overlay.jsx";
 import UpdateIndicator from "./update-indicator.jsx";
 import ApplicationFooter from "./application-footer.jsx";
 import PerformanceMetricsDialog from "../performance/performance-metrics-dialog.jsx";
-import ObservationFormDialog from "../scheduler/observation-form-dialog.jsx";
-import MonitoredSatelliteDialog from "../scheduler/monitored-satellite-dialog.jsx";
+import SchedulerDialogHost from "../scheduler/scheduler-dialog-host.jsx";
 import BackgroundTasksPopover from "../tasks/tasks-popover.jsx";
 import VfoAudioPopover from "./vfoaudio.jsx";
 import LocationPage from "../settings/location-form.jsx";
@@ -1671,10 +1670,8 @@ export default function Layout() {
                 <ApplicationFooter />
                 {hasVersionChanged && <VersionUpdateOverlay />}
                 <PerformanceMetricsDialog />
-                {/* Keep scheduler dialogs mounted at app-layout scope so other pages
-                    can open them without routing to /scheduler first. */}
-                <ObservationFormDialog />
-                <MonitoredSatelliteDialog />
+                {/* The host stays available on every page; it mounts forms when opened. */}
+                <SchedulerDialogHost />
             </Box>
 
             {/* Location Setup Dialog */}

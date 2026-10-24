@@ -252,7 +252,7 @@ const groupTransmittersByBand = (transmitters) => {
         .map(band => ({ band, transmitters: grouped[band] }));
 };
 
-const ObservationFormDialog = () => {
+const ObservationFormDialog = ({ onExited }) => {
     const dispatch = useDispatch();
     // 同上：本组件用 common，同时需要解析 decoder-parameters.js 的 waterfall 键
     const { t } = useTranslation(['common', 'waterfall']);
@@ -1187,6 +1187,7 @@ const ObservationFormDialog = () => {
     return (
         <Dialog
             open={open}
+            TransitionProps={{ onExited }}
             onClose={handleClose}
             maxWidth="md"
             fullWidth
