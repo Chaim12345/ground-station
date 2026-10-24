@@ -12,15 +12,13 @@ import {
     MenuItem,
     Select,
     TextField,
-    Button,
-    ButtonGroup,
-    Menu,
     ListSubheader,
 } from "@mui/material";
-import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import TuneIcon from '@mui/icons-material/Tune';
 
-import { preciseHumanizeFrequency, getFrequencyBand } from "../common/common.jsx";
+import { getFrequencyBand } from "../common/common.jsx";
 import FrequencyDisplay from "./frequency-dial.jsx";
+import TransmitterTargetLabel from './transmitter-target-label.jsx';
 import { useTranslation } from 'react-i18next';
 
 const FrequencyControlAccordion = ({
@@ -40,23 +38,6 @@ const FrequencyControlAccordion = ({
                                        isStreaming,
 }) => {
     const { t } = useTranslation('waterfall');
-    const [anchorEl, setAnchorEl] = React.useState(null);
-    const buttonGroupRef = React.useRef(null);
-    const open = Boolean(anchorEl);
-
-    const handleClick = (event) => {
-        setAnchorEl(buttonGroupRef.current);
-    };
-
-    const handleClose = () => {
-        setAnchorEl(null);
-    };
-
-    const handleMenuItemClick = (transmitterId) => {
-        onTransmitterChange({ target: { value: transmitterId } });
-        handleClose();
-    };
-
     const selectedTransmitter = availableTransmitters.find(t => t.id === getProperTransmitterId());
     // Check if we're playing back a SigMF recording
     const isPlayingback = selectedSDRId === 'sigmf-playback' && isStreaming;
@@ -108,102 +89,38 @@ const FrequencyControlAccordion = ({
                     />
                 </Box>
 
-                {/* Split Button - New UI */}
-                <Box sx={{ mt: 1, mb: 0 }}>
-                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary' }}>
-                        {t('frequency.go_to_transmitter')}
-                    </Typography>
-                    <ButtonGroup
-                        ref={buttonGroupRef}
-                        variant="contained"
-                        fullWidth
-                        disabled={isRecording || isPlayingback}
-                        sx={{
-                            '& .MuiButton-root': {
-                                textTransform: 'none',
-                                fontSize: '0.875rem'
-                            }
-                        }}
-                    >
-                        <Button
-                            onClick={handleClick}
-                            sx={{
-                                justifyContent: 'flex-start',
-                                px: 2,
-                                flex: 1
-                            }}
-                        >
-                            {selectedTransmitter ? (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                                    <Box
-                                        sx={{
-                                            width: 8,
-                                            height: 8,
-                                            borderRadius: '50%',
-                                            backgroundColor: selectedTransmitter.alive ? '#4caf50' : '#f44336',
-                                            boxShadow: selectedTransmitter.alive
-                                                ? '0 0 6px rgba(76, 175, 80, 0.6)'
-                                                : '0 0 6px rgba(244, 67, 54, 0.6)',
-                                        }}
-                                    />
-                                    <Box sx={{ textAlign: 'left', overflow: 'hidden' }}>
-                                        <Box sx={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {selectedTransmitter.description}
-                                        </Box>
-                                        <Box sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                            {[selectedTransmitter.trackerLabel, preciseHumanizeFrequency(selectedTransmitter.downlink_low)]
-                                                .filter(Boolean)
-                                                .join(' • ')}
-                                        </Box>
-                                    </Box>
+                <FormControl
+                    disabled={isRecording || isPlayingback}
+                    sx={{ mt: 1 }}
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                >
+                    <InputLabel id="frequency-transmitter-label">{t('frequency.go_to_transmitter')}</InputLabel>
+                    <Select
+                        labelId="frequency-transmitter-label"
+                        value={getProperTransmitterId()}
+                        onChange={onTransmitterChange}
+                        label={t('frequency.go_to_transmitter')}
+                        size="small"
+                        sx={{ fontSize: '0.875rem' }}
+                        renderValue={() => selectedTransmitter ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+                                <TransmitterTargetLabel transmitter={selectedTransmitter} sx={{ maxWidth: '55%' }} />
+                                <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {selectedTransmitter.description}
                                 </Box>
-                            ) : (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                                    <Box sx={{ width: 8, height: 8 }} />
-                                    <Box sx={{ textAlign: 'left', overflow: 'hidden' }}>
-                                        <Box sx={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {t('frequency.no_frequency_selected')}
-                                        </Box>
-                                        <Box sx={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                            {t('settings_frequency.tune_or_pick_one', { defaultValue: 'Tune or pick one' })}
-                                        </Box>
-                                    </Box>
-                                </Box>
-                            )}
-                        </Button>
-                        <Button
-                            size="small"
-                            onClick={handleClick}
-                            sx={{ px: 0.5, minWidth: '32px', width: '32px' }}
-                        >
-                            <ArrowDropDownIcon fontSize="small" />
-                        </Button>
-                    </ButtonGroup>
-                    <Menu
-                        anchorEl={anchorEl}
-                        open={open}
-                        onClose={handleClose}
-                        anchorOrigin={{
-                            vertical: 'bottom',
-                            horizontal: 'left',
-                        }}
-                        transformOrigin={{
-                            vertical: 'top',
-                            horizontal: 'left',
-                        }}
-                        PaperProps={{
-                            sx: {
-                                maxHeight: 400,
-                                minWidth: 300,
-                            }
-                        }}
+                            </Box>
+                        ) : t('settings_frequency.tune_or_pick_one', { defaultValue: 'Tune or pick one' })}
                     >
-                        <MenuItem onClick={() => handleMenuItemClick('none')} sx={{ fontSize: '0.875rem' }}>
+                        <MenuItem value="none" sx={{ fontSize: '0.875rem' }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Box sx={{ width: 8, height: 8 }} />
+                                <TuneIcon fontSize="small" />
                                 <Box>
                                     <Box sx={{ fontWeight: 600 }}>{t('frequency.no_frequency_selected')}</Box>
-                                    <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{t('settings_frequency.manual_control', { defaultValue: 'Manual control' })}</Box>
+                                    <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+                                        {t('settings_frequency.manual_control', { defaultValue: 'Manual control' })}
+                                    </Box>
                                 </Box>
                             </Box>
                         </MenuItem>
@@ -214,87 +131,41 @@ const FrequencyControlAccordion = ({
                             ...groupTx.map((transmitter) => (
                                 <MenuItem
                                     key={transmitter.uiId || transmitter.id}
-                                    onClick={() => handleMenuItemClick(transmitter.id)}
+                                    value={transmitter.id}
                                     sx={{ fontSize: '0.875rem', pl: 3 }}
                                 >
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
                                         <Box
                                             sx={{
                                                 width: 8,
                                                 height: 8,
                                                 borderRadius: '50%',
-                                                backgroundColor: transmitter.alive ? '#4caf50' : '#f44336',
-                                                boxShadow: transmitter.alive
-                                                    ? '0 0 6px rgba(76, 175, 80, 0.6)'
-                                                    : '0 0 6px rgba(244, 67, 54, 0.6)',
+                                                backgroundColor: transmitter.alive ? 'success.main' : 'error.main',
+                                                boxShadow: (theme) => transmitter.alive
+                                                    ? `0 0 6px ${theme.palette.success.main}99`
+                                                    : `0 0 6px ${theme.palette.error.main}99`,
+                                                flexShrink: 0,
                                             }}
                                         />
-                                        <Box>
+                                        <Box sx={{ flex: 1, minWidth: 0 }}>
                                             <Box sx={{ fontWeight: 600 }}>{transmitter.description}</Box>
-                                            <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                                                {[
-                                                    transmitter.trackerLabel || null,
-                                                    `Source: ${transmitter.source || 'Unknown'}`,
-                                                    preciseHumanizeFrequency(transmitter.downlink_low),
-                                                ].filter(Boolean).join(' • ')}
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, mt: 0.3, minWidth: 0, whiteSpace: 'nowrap', fontSize: '0.75rem', color: 'text.secondary' }}>
+                                                <TransmitterTargetLabel transmitter={transmitter} sx={{ flexShrink: 0, maxWidth: '50%' }} />
+                                                <Box component="span" sx={{ flexShrink: 0 }}>•</Box>
+                                                <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                    {[
+                                                        `${(transmitter.downlink_low / 1e6).toFixed(6)} MHz (${transmitter.mode})`,
+                                                        transmitter.source || 'Unknown',
+                                                    ].filter(Boolean).join(' • ')}
+                                                </Box>
                                             </Box>
                                         </Box>
                                     </Box>
                                 </MenuItem>
                             ))
                         ])}
-                    </Menu>
-                </Box>
-
-                {/* Original Dropdown - Commented Out */}
-                {/*
-                <FormControl disabled={isRecording || isPlayingback}
-                             sx={{minWidth: 200, marginTop: 1, marginBottom: 0}} fullWidth variant="outlined"
-                             size="small">
-                    <InputLabel htmlFor="transmitter-select">{t('frequency.go_to_transmitter')}</InputLabel>
-                    <Select
-                        id="transmitter-select"
-                        value={getProperTransmitterId()}
-                        onChange={onTransmitterChange}
-                        size="small">
-                        <MenuItem value="none" sx={{ fontSize: '0.875rem' }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Box sx={{ width: 8, height: 8 }} />
-                                <Box>
-                                    <Box sx={{ fontWeight: 600 }}>{t('frequency.no_frequency_selected')}</Box>
-                                    <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Manual control</Box>
-                                </Box>
-                            </Box>
-                        </MenuItem>
-                        <MenuItem value="" disabled>
-                            <em>{t('frequency.select_transmitter')}</em>
-                        </MenuItem>
-                        {availableTransmitters.map((transmitter) => {
-                            return <MenuItem value={transmitter.id} key={transmitter.id} sx={{ fontSize: '0.875rem' }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Box
-                                        sx={{
-                                            width: 8,
-                                            height: 8,
-                                            borderRadius: '50%',
-                                            backgroundColor: transmitter.alive ? '#4caf50' : '#f44336',
-                                            boxShadow: transmitter.alive
-                                                ? '0 0 6px rgba(76, 175, 80, 0.6)'
-                                                : '0 0 6px rgba(244, 67, 54, 0.6)',
-                                        }}
-                                    />
-                                    <Box>
-                                        <Box sx={{ fontWeight: 600 }}>{transmitter['description']}</Box>
-                                        <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                                            {preciseHumanizeFrequency(transmitter['downlink_low'])}
-                                        </Box>
-                                    </Box>
-                                </Box>
-                            </MenuItem>;
-                        })}
                     </Select>
                 </FormControl>
-                */}
 
                 <FormControl
                     disabled={isRecording || isPlayingback}

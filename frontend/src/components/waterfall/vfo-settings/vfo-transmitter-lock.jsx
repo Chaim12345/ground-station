@@ -27,8 +27,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import { useTranslation } from 'react-i18next';
 import { getFrequencyBand } from '../../common/common.jsx';
 import { selectRunningRigTransmitters } from '../../target/transmitter-selectors.js';
-import { parseTargetSlotNumber } from '../../target/celestial-target-utils.js';
-import TargetNumberIcon from '../../common/target-number-icon.jsx';
+import TransmitterTargetLabel from '../transmitter-target-label.jsx';
 
 const sameIdentifier = (left, right) => {
     if (left == null || right == null) {
@@ -42,32 +41,6 @@ const getTransmitterOptionValue = (transmitter) => (
         ? `${transmitter.trackerId}:${transmitter.id}`
         : String(transmitter.id))
 );
-
-const TransmitterTargetLabel = ({ transmitter, sx = {} }) => {
-    const targetNumber = parseTargetSlotNumber(transmitter.trackerId);
-    const targetName = transmitter.trackerTargetName || '';
-
-    return (
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.65, minWidth: 0, maxWidth: '100%', ...sx }}>
-            {targetNumber != null ? (
-                <TargetNumberIcon targetNumber={targetNumber} size={14} sx={{ flexShrink: 0 }} />
-            ) : transmitter.trackerLabel ? (
-                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 700, flexShrink: 0 }}>
-                    {transmitter.trackerLabel}
-                </Box>
-            ) : null}
-            {targetName && (
-                <Box
-                    component="span"
-                    title={targetName}
-                    sx={{ color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                >
-                    {targetName}
-                </Box>
-            )}
-        </Box>
-    );
-};
 
 /**
  * Transmitter Lock Select Component
