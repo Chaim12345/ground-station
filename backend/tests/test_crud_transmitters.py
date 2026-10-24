@@ -737,3 +737,48 @@ class TestTransmittersCRUD:
 
         assert result["success"] is True
         assert result["data"]["itu_notification"] == {"urls": []}
+
+
+@pytest.mark.asyncio
+async def test_lora_config_can_be_edited_and_is_validated(db_session):
+    await add_satellite(
+        db_session,
+        {
+            "name": "LoRa Satellite",
+            "sat_id": "LORA-001",
+            "norad_id": 44001,
+            "status": "alive",
+            "is_frequency_violator": False,
+            "tle1": TLE1_TEMPLATE.format(norad=44001),
+            "tle2": TLE2_TEMPLATE.format(norad=44001),
+        },
+    )
+    profile = {"sf": 10, "bw": 250000, "cr": 5, "sync_word": [18], "ldro_mode": 1}
+    added = await add_transmitter(
+        db_session,
+        {
+            "description": "LoRa profile",
+            "satelliteId": 44001,
+            "alive": True,
+            "status": "active",
+            "type": "Transmitter",
+            "downlinkLow": 436701300,
+            "mode": "LoRa",
+            "lora_config": profile,
+        },
+    )
+    assert added["success"] is True
+    transmitter_id = added["data"]["id"]
+    assert added["data"]["lora_config"] == {**profile, "cr": 1}
+
+    edited = await edit_transmitter(
+        db_session, {"id": transmitter_id, "lora_config": {"sf": 9, "bw": 125000}}
+    )
+    assert edited["success"] is True
+    fetched = await fetch_transmitters_for_satellite(db_session, 44001)
+    assert fetched["data"][0]["lora_config"] == {"sf": 9, "bw": 125000}
+
+    invalid = await edit_transmitter(db_session, {"id": transmitter_id, "lora_config": {"sf": 6}})
+    assert invalid["success"] is False
+    fetched_again = await fetch_transmitters_for_satellite(db_session, 44001)
+    assert fetched_again["data"][0]["lora_config"] == {"sf": 9, "bw": 125000}

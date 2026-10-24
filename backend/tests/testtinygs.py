@@ -18,6 +18,7 @@ import requests
 from sqlalchemy import select
 
 from db.models import OrbitalSources, Transmitters
+from pipeline.config.decoderconfigservice import DecoderConfigService
 from tlesync import logic, tinygs
 
 
@@ -26,8 +27,31 @@ def _tinygs_satellite(norad=44001):
         "name": "TestSat",
         "displayName": "Test Satellite",
         "configurations": [
-            {"NORAD": norad, "mode": "LoRa", "freq": 436.7013, "bw": 250, "sf": 10},
-            {"NORAD": norad, "mode": "LoRa", "freq": 436.7013, "bw": 125, "sf": 9},
+            {
+                "NORAD": norad,
+                "mode": "LoRa",
+                "freq": 436.7013,
+                "bw": 250,
+                "sf": 10,
+                "cr": 5,
+                "sw": 18,
+                "pl": 8,
+                "crc": True,
+                "fldro": 1,
+                "iq": True,
+            },
+            {
+                "NORAD": norad,
+                "mode": "LoRa",
+                "freq": 436.7013,
+                "bw": 125,
+                "sf": 9,
+                "cr": 8,
+                "sw": 52,
+                "pl": 9,
+                "crc": True,
+                "fldro": 0,
+            },
         ],
     }
 
@@ -37,16 +61,53 @@ def test_tinygs_profiles_map_to_stable_distinct_source_rows():
 
     rows = tinygs.parse_tinygs_transmitters(satellites)
 
-    assert len(rows) == 2  # Alternate receiver settings describe one downlink.
+    assert len(rows) == 4  # Two profiles for each cataloged satellite.
     assert rows[0]["source"] == "tinygs"
     assert rows[0]["norad_cat_id"] == 44001
     assert rows[0]["downlink_low"] == 436701300
     assert rows[0]["mode"] == "LoRa"
-    assert rows[0]["alive"] is None
-    assert rows[0]["status"] == "unknown"
-    assert rows[1]["norad_cat_id"] == 100956
+    assert {row["uuid"] for row in rows[:2]} == {
+        row["uuid"]
+        for row in tinygs.parse_tinygs_transmitters(
+            [
+                {
+                    **_tinygs_satellite(),
+                    "configurations": list(reversed(_tinygs_satellite()["configurations"])),
+                }
+            ]
+        )
+    }
+    assert {row["lora_config"]["sf"] for row in rows[:2]} == {9, 10}
+    assert {row["lora_config"]["bw"] for row in rows[:2]} == {125000, 250000}
+    assert {row["lora_config"]["cr"] for row in rows[:2]} == {1, 4}
+    assert {tuple(row["lora_config"]["sync_word"]) for row in rows[:2]} == {(18,), (52,)}
+    assert {row["lora_config"]["preamble_len"] for row in rows[:2]} == {8, 9}
+    assert {row["lora_config"]["ldro_mode"] for row in rows[:2]} == {1, 2}
+    assert all(row["lora_config"]["has_crc"] for row in rows[:2])
+    assert (
+        next(row for row in rows[:2] if row["lora_config"]["sf"] == 10)["lora_config"]["invert_iq"]
+        is True
+    )
+    assert rows[0]["alive"] is True
+    assert rows[0]["status"] == "active"
+    assert rows[2]["norad_cat_id"] == 100956
     assert rows[0]["uuid"] == tinygs.parse_tinygs_transmitters([_tinygs_satellite()])[0]["uuid"]
+    isolated = _tinygs_satellite()
+    isolated["configurations"] = [isolated["configurations"][1]]
+    assert next(row for row in rows[:2] if row["lora_config"]["sf"] == 9)["uuid"] == (
+        tinygs.parse_tinygs_transmitters([isolated])[0]["uuid"]
+    )
     assert len(rows[0]["uuid"]) == 22
+
+
+def test_identical_tinygs_receiver_profiles_do_not_create_duplicate_rows():
+    satellite = _tinygs_satellite()
+    satellite["configurations"].append(copy.deepcopy(satellite["configurations"][0]))
+
+    rows = tinygs.parse_tinygs_transmitters([satellite])
+
+    assert len(rows) == 2
+    assert len({row["uuid"] for row in rows}) == 2
 
 
 def test_tinygs_fetch_sends_webapp_timestamp_header(monkeypatch):
@@ -67,7 +128,7 @@ def test_tinygs_fetch_sends_webapp_timestamp_header(monkeypatch):
     monkeypatch.setattr(tinygs.requests, "get", fake_get)
     rows = tinygs._fetch_tinygs_transmitters()
 
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert calls[0][0] == tinygs.TINYGS_SUPPORTED_URL
     encoded = base64.b64decode(calls[0][1]["headers"]["x-client-timestamp"])
     decoded = bytes(
@@ -185,9 +246,66 @@ async def test_orbital_sync_adds_tinygs_without_replacing_satnogs(
     if tinygs_fails:
         assert any("TinyGS unavailable" in error for error in emitted[-1]["errors"])
     else:
-        tinygs_row = next(tx for tx in transmitters if tx.source == "tinygs")
+        tinygs_rows = [tx for tx in transmitters if tx.source == "tinygs"]
+        assert len(tinygs_rows) == 2
+        tinygs_row = next(tx for tx in tinygs_rows if tx.lora_config["sf"] == 10)
         assert tinygs_row.norad_cat_id == 44001
         assert tinygs_row.downlink_low == 436701300
+        assert tinygs_row.alive is True
+        assert tinygs_row.status == "active"
+        assert tinygs_row.lora_config["bw"] == 250000
+        config = DecoderConfigService().get_config(
+            "lora",
+            transmitter={
+                "description": tinygs_row.description,
+                "lora_config": tinygs_row.lora_config,
+            },
+        )
+        assert (config.sf, config.bw, config.cr, config.ldro_mode) == (10, 250000, 1, 1)
+        assert config.config_source == "transmitter_metadata"
         assert tinygs_row.source_transmitter_id
-        assert emitted[-1]["stats"]["transmitters_processed"] == 2
+        assert emitted[-1]["stats"]["transmitters_processed"] == 3
         assert "TinyGS Transmitters" in emitted[-1]["completed_sources"]
+
+        # A profile whose frequency disappeared must be removed after a complete fetch.
+        stale_id = tinygs.uuid_to_short_transmitter_id(uuid.uuid4())
+        db_session.add(
+            Transmitters(
+                id=stale_id,
+                source="tinygs",
+                description="Stale TinyGS profile",
+                norad_cat_id=44001,
+                downlink_low=436702000,
+                mode="LoRa",
+                status="active",
+                alive=True,
+            )
+        )
+        await db_session.commit()
+        assert (
+            await logic.synchronize_satellite_data_internal(
+                db_session,
+                logging.getLogger(__name__),
+                lambda state: None,
+            )
+            is True
+        )
+        refreshed = (await db_session.execute(select(Transmitters))).scalars().all()
+        assert stale_id not in {tx.id for tx in refreshed}
+
+        async def unavailable_tinygs(_pool):
+            raise requests.ConnectionError("TinyGS unavailable")
+
+        monkeypatch.setattr(logic, "fetch_tinygs_transmitters", unavailable_tinygs)
+        assert (
+            await logic.synchronize_satellite_data_internal(
+                db_session,
+                logging.getLogger(__name__),
+                lambda state: None,
+            )
+            is True
+        )
+        after_failed_fetch = (await db_session.execute(select(Transmitters))).scalars().all()
+        assert {tx.id for tx in after_failed_fetch if tx.source == "tinygs"} == {
+            tx.id for tx in refreshed if tx.source == "tinygs"
+        }

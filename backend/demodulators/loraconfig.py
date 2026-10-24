@@ -80,6 +80,11 @@ def lora_metadata(transmitter: dict[str, Any]) -> dict[str, Any]:
             ):
                 value *= 1000
             params[key] = int(value)
+    profile = transmitter.get("lora_config")
+    if isinstance(profile, dict):
+        for key in LORA_DEFAULTS:
+            if profile.get(key) is not None:
+                params[key] = profile[key]
     for key in (*LORA_DEFAULTS, "fldro"):
         if transmitter.get(key) is not None:
             params[key] = transmitter[key]

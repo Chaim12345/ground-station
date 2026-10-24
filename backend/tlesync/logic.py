@@ -27,7 +27,7 @@ from common.arguments import arguments
 from common.common import *  # noqa: F401,F403
 from common.exceptions import SynchronizationErrorMainTLESource
 from crud.orbitalsources import fetch_orbital_source
-from db.models import SatelliteOrbits, Satellites
+from db.models import SatelliteOrbits, Satellites, Transmitters
 from handlers.entities.transmitterimport import (
     import_gr_satellites_transmitters,
     import_satdump_transmitters,
@@ -191,6 +191,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
         satnogs_satellite_data: List[Dict[str, Any]] = []
         satnogs_transmitter_data: List[Dict[str, Any]] = []
         tinygs_transmitter_data: List[Dict[str, Any]] = []
+        tinygs_metadata_fetched = False
         celestrak_list: List[Dict[str, Any]] = []
         group_assignments: Dict[str, List[int]] = {}
         rate_limited_celestrak_sources: List[str] = []
@@ -611,6 +612,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
             await _emit(progress_state)
             try:
                 tinygs_transmitter_data = await fetch_tinygs_transmitters(pool)
+                tinygs_metadata_fetched = True
                 logger.info("Fetched %s TinyGS downlinks", len(tinygs_transmitter_data))
                 sync_state["completed_sources"].append("TinyGS Transmitters")
                 completed_phases.add("fetch_tinygs_transmitters")
@@ -691,6 +693,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                 )
 
             processed_transmitter_uuids = set(existing_data["transmitter_uuids"])
+            processed_tinygs_ids: set[str] = set()
 
             # Now process satellites
             for i, sat in enumerate(celestrak_list):
@@ -809,6 +812,8 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                     # commit session
                     await dbsession.commit()
                     processed_transmitter_uuids.add(transmitter_uuid)
+                    if transmitter.source == "tinygs":
+                        processed_tinygs_ids.add(transmitter.id)
 
                     # If this is a new transmitter, add it to the newly added list
                     if is_new_transmitter:
@@ -868,6 +873,8 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                     await dbsession.merge(transmitter)
                     await dbsession.commit()
                     processed_transmitter_uuids.add(transmitter_uuid)
+                    if transmitter.source == "tinygs":
+                        processed_tinygs_ids.add(transmitter.id)
 
                     if is_new_transmitter:
                         sync_state["newly_added"]["transmitters"].append(
@@ -881,6 +888,31 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                                 "mode": transmitter.mode,
                             }
                         )
+
+            # Reconcile only satellites covered by this orbital sync. A failed
+            # TinyGS fetch or missing orbit source must not erase older rows.
+            if tinygs_metadata_fetched:
+                covered_norads = celestrak_norad_ids | set(manual_only_norad_ids)
+                tinygs_rows = await dbsession.execute(
+                    select(Transmitters).where(
+                        Transmitters.source == "tinygs",
+                        Transmitters.norad_cat_id.in_(covered_norads),
+                    )
+                )
+                for old_profile in tinygs_rows.scalars().all():
+                    if old_profile.id in processed_tinygs_ids:
+                        continue
+                    sync_state["removed"]["transmitters"].append(
+                        {
+                            "uuid": old_profile.id,
+                            "description": old_profile.description,
+                            "norad_id": old_profile.norad_cat_id,
+                            "downlink_low": old_profile.downlink_low,
+                            "mode": old_profile.mode,
+                        }
+                    )
+                    await dbsession.delete(old_profile)
+                await dbsession.commit()
 
             # Mark processing phases as complete
             completed_phases.add("process_satellites")

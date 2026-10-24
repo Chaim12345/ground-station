@@ -22,6 +22,7 @@ import { Box, Typography, CircularProgress, Alert, Link, Button } from '@mui/mat
 import { Lightbulb as LightbulbIcon, Info as InfoIcon } from '@mui/icons-material';
 import { useSocket } from '../common/socket.jsx';
 import { useTranslation } from 'react-i18next';
+import {formatLoraConfig} from '../../utils/lora-config.js';
 
 /**
  * DecoderConfigSuggestion component
@@ -52,6 +53,7 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
     const transmitterFraming = transmitter?.framing;
     const transmitterMode = transmitter?.mode;
     const transmitterDescription = transmitter?.description;
+    const transmitterLoraConfig = JSON.stringify(transmitter?.lora_config ?? null);
 
     useEffect(() => {
         // Only fetch if we should show and have required data
@@ -87,7 +89,8 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
 
         fetchConfig();
     }, [socket, decoderType, satelliteId, transmitterId, transmitterBaud,
-        transmitterDeviation, transmitterFraming, transmitterMode, transmitterDescription, show]);
+        transmitterDeviation, transmitterFraming, transmitterMode, transmitterDescription,
+        transmitterLoraConfig, show]);
 
     const handleApply = () => {
         if (config && onApply) {
@@ -167,15 +170,8 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
             parts.push('Differential');
         }
 
-        // LoRa specific
-        if (config.sf) {
-            parts.push(`SF${config.sf}`);
-        }
-        if (config.bw) {
-            parts.push(`BW${config.bw / 1000}k`);
-        }
-        if (config.cr) {
-            parts.push(`CR4/${config.cr + 4}`);
+        if (decoderType === 'lora') {
+            parts.push(formatLoraConfig(config));
         }
 
         return parts.join(' • ');
@@ -187,6 +183,17 @@ export const DecoderConfigSuggestion = ({ decoderType, satellite, transmitter, s
             case 'satellite_config':
                 return 'Configuration from satellite database';
             case 'transmitter_metadata':
+                if (decoderType === 'lora' && config.transmitter?.lora_config) {
+                    const supplied = Object.keys(config.transmitter.lora_config)
+                        .map((key) => ({
+                            sf: 'SF', bw: 'bandwidth', cr: 'coding rate', sync_word: 'sync word',
+                            preamble_len: 'preamble', ldro_mode: 'LDRO', implicit_header: 'header mode',
+                            payload_length: 'payload length', has_crc: 'CRC', invert_iq: 'IQ polarity',
+                        })[key] || key)
+                        .join(', ');
+                    const source = config.transmitter.source === 'tinygs' ? 'TinyGS' : 'Transmitter';
+                    return `${source} profile supplies ${supplied}; other settings use decoder defaults`;
+                }
                 return 'Configuration from transmitter settings and metadata';
             case 'smart_default':
                 return 'Configuration estimated using smart defaults based on decoder type and baud rate';

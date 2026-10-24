@@ -28,6 +28,7 @@ from common.common import logger, serialize_object
 from common.targetkey import normalize_target_key
 from constants.framing import FSK_DECODER_FRAMINGS
 from db.models import CelestialTargets, Transmitters
+from demodulators.loraconfig import LORA_DEFAULTS, normalize_lora
 
 NULL_MARKERS = {"", "-", None}
 UNSET = object()
@@ -151,6 +152,27 @@ def _coerce_optional_json(value: Any, field_name: str) -> Any | None:
     raise ValueError(f"{field_name} must be valid JSON")
 
 
+def _coerce_optional_lora_config(value: Any) -> dict[str, Any] | None:
+    """Accept only decoder-supported LoRa fields, retaining omitted fields as defaults."""
+    if value is None or value == "" or value == "-":
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("lora_config must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise ValueError("lora_config must be a JSON object")
+    unknown = set(value) - set(LORA_DEFAULTS)
+    if unknown:
+        raise ValueError(f"unsupported LoRa fields: {', '.join(sorted(unknown))}")
+    supplied = {key: entry for key, entry in value.items() if entry is not None}
+    if not supplied:
+        return None
+    normalized = normalize_lora(supplied)
+    return {key: normalized[key] for key in supplied}
+
+
 def _normalize_owner_fields(payload: dict, *, for_edit: bool = False) -> dict:
     satellite_id_value = payload.pop("satelliteId", UNSET)
     norad_cat_id_value = payload.pop("norad_cat_id", UNSET)
@@ -212,6 +234,11 @@ def _normalize_transmitter_payload(data: dict, for_edit: bool = False) -> dict:
         payload["framing"] = _coerce_optional_framing(payload["framing"])
     elif not for_edit:
         payload["framing"] = None
+
+    if "lora_config" in payload:
+        payload["lora_config"] = _coerce_optional_lora_config(payload["lora_config"])
+    elif not for_edit:
+        payload["lora_config"] = None
 
     optional_bool_fields = {"alive": "alive", "invert": "invert"}
     for source_key, target_key in optional_bool_fields.items():

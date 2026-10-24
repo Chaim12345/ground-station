@@ -1,5 +1,5 @@
 import React from 'react';
-import {render, screen, waitFor} from '@testing-library/react';
+import {fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {beforeEach, expect, it, vi} from 'vitest';
 import '../../i18n/config.js';
 import {DecoderConfigSuggestion} from './decoder-config-suggestion.jsx';
@@ -49,5 +49,38 @@ it('refreshes the decoder suggestion when saved transmitter settings change', as
     );
 
     await waitFor(() => expect(screen.getByText(/600 Hz deviation/)).toBeInTheDocument());
+    expect(socket.emit).toHaveBeenCalledTimes(2);
+});
+
+it('shows TinyGS LoRa profile values and refreshes when the profile changes', async () => {
+    socket.emit.mockImplementation((_event, request, reply) => {
+        const transmitter = request.data.transmitter;
+        reply({
+            success: true,
+            data: {
+                framing: 'lora', config_source: 'transmitter_metadata', transmitter,
+                ...transmitter.lora_config,
+            },
+        });
+    });
+    const onApply = vi.fn();
+    const transmitter = {
+        id: 'tinygs-1', mode: 'LoRa', source: 'tinygs',
+        lora_config: {sf: 10, bw: 250000, cr: 1, sync_word: [18], preamble_len: 8},
+    };
+    const {rerender} = render(
+        <DecoderConfigSuggestion show decoderType="lora" transmitter={transmitter} onApply={onApply}/>
+    );
+
+    await waitFor(() => expect(screen.getByText(/SF10.*BW250k.*CR4\/5/)).toBeInTheDocument());
+    expect(screen.getByText(/TinyGS profile supplies SF, bandwidth, coding rate, sync word, preamble/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: 'Apply'}));
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({sf: 10, bw: 250000}));
+
+    rerender(
+        <DecoderConfigSuggestion show decoderType="lora" onApply={onApply}
+                                 transmitter={{...transmitter, lora_config: {...transmitter.lora_config, sf: 9}}}/>
+    );
+    await waitFor(() => expect(screen.getByText(/SF9.*BW250k/)).toBeInTheDocument());
     expect(socket.emit).toHaveBeenCalledTimes(2);
 });

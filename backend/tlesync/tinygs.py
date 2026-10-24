@@ -9,6 +9,7 @@
 
 import asyncio
 import base64
+import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from typing import Any
 
 import requests
 
+from demodulators.loraconfig import normalize_lora
 from tlesync.utils import uuid_to_short_transmitter_id
 
 TINYGS_SUPPORTED_URL = "https://api.tinygs.com/v3/satellites/?status=Supported"
@@ -46,13 +48,52 @@ def _frequency_hz(value: Any) -> int | None:
         return None
 
 
+def _lora_config(configuration: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert TinyGS LoRa fields into the decoder's units and validate them."""
+    values: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("sf", "sf"),
+        ("cr", "cr"),
+        ("sw", "sync_word"),
+        ("pl", "preamble_len"),
+        ("crc", "has_crc"),
+        ("iq", "invert_iq"),
+    ):
+        if configuration.get(source_key) is not None:
+            values[target_key] = configuration[source_key]
+
+    if configuration.get("bw") is not None:
+        try:
+            bandwidth_hz = Decimal(str(configuration["bw"])) * 1000
+            if not bandwidth_hz.is_finite() or bandwidth_hz != bandwidth_hz.to_integral_value():
+                return None
+            values["bw"] = int(bandwidth_hz)
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    if configuration.get("fldro") is not None:
+        # TinyGS only forces LDRO on; zero leaves symbol-duration detection automatic.
+        if configuration["fldro"] not in (0, 1, False, True):
+            return None
+        values["ldro_mode"] = 1 if configuration["fldro"] else 2
+
+    if not values:
+        return None
+    try:
+        normalized = normalize_lora(values)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    # Keep only source-supplied fields so the suggestion can distinguish defaults.
+    return {key: normalized[key] for key in values}
+
+
 def parse_tinygs_transmitters(satellites: Any) -> list[dict[str, Any]]:
-    """Turn receiver configurations into distinct source-tagged downlinks."""
+    """Turn each distinct receiver profile into a source-tagged transmitter."""
     if not isinstance(satellites, list) or not satellites:
         raise ValueError("TinyGS returned no satellites")
 
     transmitters: list[dict[str, Any]] = []
-    seen: set[tuple[int, str, int]] = set()
+    grouped: dict[tuple[int, str, int], dict[str, Any]] = {}
     for satellite in satellites:
         if not isinstance(satellite, dict):
             continue
@@ -82,26 +123,37 @@ def parse_tinygs_transmitters(satellites: Any) -> list[dict[str, Any]]:
                 continue
             mode = mode.strip()
             key = (norad, mode, frequency_hz)
-            # Several TinyGS receiver profiles can describe the same downlink.
-            if key in seen:
-                continue
-            seen.add(key)
-
-            source_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tinygs:{norad}:{mode}:{frequency_hz}"))
             name = satellite.get("displayName") or satellite.get("name") or f"NORAD {norad}"
+            group = grouped.setdefault(key, {"name": str(name).strip(), "profiles": {}})
+            profile = _lora_config(configuration) if mode.lower() == "lora" else None
+            fingerprint = json.dumps(profile, sort_keys=True, separators=(",", ":"))
+            group["profiles"][fingerprint] = profile
+
+    for (norad, mode, frequency_hz), group in grouped.items():
+        base_source_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"tinygs:{norad}:{mode}:{frequency_hz}")
+        )
+        for fingerprint, profile in sorted(group["profiles"].items()):
+            # A profile's ID must not depend on how many sibling profiles exist.
+            source_id = (
+                str(uuid.uuid5(uuid.NAMESPACE_URL, f"{base_source_id}:{fingerprint}"))
+                if profile is not None
+                else base_source_id
+            )
             transmitters.append(
                 {
                     "uuid": uuid_to_short_transmitter_id(source_id),
                     "source_transmitter_id": source_id,
                     "source": TINYGS_SOURCE,
-                    "description": f"{str(name).strip()} {mode}",
+                    "description": f"{group['name']} {mode}",
                     "norad_cat_id": norad,
                     "downlink_low": frequency_hz,
                     "mode": mode,
+                    "lora_config": profile,
                     "type": "Transmitter",
-                    # Supported describes a TinyGS receiver profile, not spacecraft health.
-                    "alive": None,
-                    "status": "unknown",
+                    # Treat TinyGS-supported receiver profiles as active downlinks.
+                    "alive": True,
+                    "status": "active",
                     "citation": TINYGS_SUPPORTED_URL,
                 }
             )

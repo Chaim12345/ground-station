@@ -24,6 +24,7 @@ import {
 import { setTargetTransmitters } from "../target/target-slice.jsx";
 import {useSocket} from "../common/socket.jsx";
 import { useTranslation } from 'react-i18next';
+import {getLoraParameters} from '../waterfall/decoder-parameters.js';
 
 
 // Define the dropdown options
@@ -118,6 +119,7 @@ const TransmitterModal = ({
     const dispatch = useDispatch();
     const {socket} = useSocket();
     const { loading, error } = useSelector(state => state.satellites);
+    const loraParameters = React.useMemo(() => getLoraParameters(), []);
 
     const [formData, setFormData] = useState({
         description: "",
@@ -136,6 +138,7 @@ const TransmitterModal = ({
         baud: "",
         deviation: "",
         framing: "",
+        loraConfig: {},
     });
 
     const [validationErrors, setValidationErrors] = useState({});
@@ -182,6 +185,7 @@ const TransmitterModal = ({
                 baud: fromNullableField(transmitter.baud),
                 deviation: fromNullableField(transmitter.deviation),
                 framing: fromNullableField(transmitter.framing),
+                loraConfig: {...(transmitter._original?.lora_config || transmitter.lora_config || {})},
             });
         } else {
             // Reset form for new transmitter
@@ -202,6 +206,7 @@ const TransmitterModal = ({
                 baud: "",
                 deviation: "",
                 framing: "",
+                loraConfig: {},
             });
         }
         // Clear validation errors when modal opens/closes
@@ -221,6 +226,19 @@ const TransmitterModal = ({
                 [field]: false
             }));
         }
+    };
+
+    const handleLoraChange = (key) => (event) => {
+        const value = JSON.parse(event.target.value);
+        setFormData((current) => {
+            const loraConfig = {...current.loraConfig};
+            if (value === null) {
+                delete loraConfig[key];
+            } else {
+                loraConfig[key] = value;
+            }
+            return {...current, loraConfig};
+        });
     };
 
     const validateForm = () => {
@@ -265,8 +283,9 @@ const TransmitterModal = ({
             return;
         }
 
+        const {loraConfig, ...otherFormData} = formData;
         const processedData = {
-            ...formData,
+            ...otherFormData,
             // Convert empty UI values to null for backend normalization.
             description: toNullableField(formData.description),
             type: toNullableField(formData.type),
@@ -284,6 +303,9 @@ const TransmitterModal = ({
             baud: toNullableField(formData.baud),
             deviation: toNullableField(formData.deviation),
             framing: toNullableField(formData.framing),
+            lora_config: String(formData.mode).toLowerCase() === 'lora' && Object.keys(loraConfig).length
+                ? loraConfig
+                : null,
         };
 
         // Keep satellite payloads unchanged while enabling mission/body ownership via target_key.
@@ -683,6 +705,60 @@ const TransmitterModal = ({
                             </Select>
                         </FormControl>
                     </Box>
+
+                    {String(formData.mode).toLowerCase() === 'lora' && (
+                        <Box sx={{mt: 3}}>
+                            <Typography variant="h6" sx={{color: 'primary.main', mb: 1, fontWeight: 'bold'}}>
+                                {t('transmitter_modal.lora_profile', {defaultValue: 'LoRa receiver profile'})}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
+                                {t('transmitter_modal.lora_profile_help', {
+                                    defaultValue: 'Only specified values are stored; unspecified values use decoder defaults.',
+                                })}
+                            </Typography>
+                            <Box sx={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 2}}>
+                                {Object.entries(loraParameters).map(([parameterKey, definition]) => {
+                                    const key = parameterKey.slice('lora_'.length);
+                                    const options = definition.type === 'switch'
+                                        ? [{value: true, label: 'On'}, {value: false, label: 'Off'}]
+                                        : definition.options;
+                                    const currentValue = formData.loraConfig[key];
+                                    const hasListedValue = options.some((option) =>
+                                        JSON.stringify(option.value) === JSON.stringify(currentValue));
+                                    return (
+                                        <FormControl key={key} fullWidth size="small">
+                                            <InputLabel>{definition.label}</InputLabel>
+                                            <Select
+                                                value={JSON.stringify(formData.loraConfig[key] ?? null)}
+                                                onChange={handleLoraChange(key)}
+                                                label={definition.label}
+                                                disabled={loading}
+                                            >
+                                                <MenuItem value="null">Unspecified</MenuItem>
+                                                {currentValue != null && !hasListedValue && (
+                                                    <MenuItem value={JSON.stringify(currentValue)}>
+                                                        {Array.isArray(currentValue)
+                                                            ? currentValue.join(', ')
+                                                            : String(currentValue)} (current)
+                                                    </MenuItem>
+                                                )}
+                                                {options.map((option) => (
+                                                    <MenuItem key={JSON.stringify(option.value)} value={JSON.stringify(option.value)}>
+                                                        {option.label}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                            {definition.description && (
+                                                <Typography variant="caption" color="text.secondary" sx={{mt: 0.5}}>
+                                                    {definition.description}
+                                                </Typography>
+                                            )}
+                                        </FormControl>
+                                    );
+                                })}
+                            </Box>
+                        </Box>
+                    )}
                 </Box>
                 </Box>
             </DialogContent>

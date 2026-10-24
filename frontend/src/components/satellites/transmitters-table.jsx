@@ -34,6 +34,7 @@ import {useSocket} from "../common/socket.jsx";
 import TransmitterModal from "./transmitter-modal.jsx";
 import { useTranslation } from 'react-i18next';
 import {toSelectedIds} from '../../utils/datagrid-selection.js';
+import {formatLoraConfig} from '../../utils/lora-config.js';
 
 // Frequency formatting function
 const formatFrequency = (frequency) => {
@@ -113,6 +114,7 @@ const mapTransmittersToRows = (transmitters = []) => (
         baud: displayValue(transmitter.baud),
         deviation: displayValue(transmitter.deviation),
         framing: displayValue(transmitter.framing),
+        loraConfig: formatLoraConfig(transmitter.lora_config),
         _original: transmitter,
     }))
 );
@@ -326,6 +328,19 @@ const TransmittersTable = ({ satelliteData, inDialog = false, actionsPortalTarge
             renderCell: (params) => formatFrequency(params.value)
         },
         {field: "mode", headerName: t('satellite_info.transmitters.columns.mode'), flex: 0.7, minWidth: 82},
+        {
+            field: "loraConfig",
+            headerName: t('transmitters_table.lora_profile', {defaultValue: 'LoRa profile'}),
+            flex: 1.5,
+            minWidth: 230,
+            renderCell: (params) => (
+                <Tooltip title={params.value || '-'} arrow>
+                    <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                        {params.value || '-'}
+                    </span>
+                </Tooltip>
+            ),
+        },
         {field: "uplinkMode", headerName: t('satellite_info.transmitters.columns.uplink_mode'), flex: 0.75, minWidth: 92},
         {field: "invert", headerName: t('satellite_info.transmitters.columns.invert'), flex: 0.6, minWidth: 70},
         {field: "baud", headerName: t('satellite_info.transmitters.columns.baud'), flex: 0.8, minWidth: 80},
