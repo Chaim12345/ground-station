@@ -35,7 +35,7 @@ import {
 import {toast} from '../../utils/toast-with-timestamp.jsx';
 import {useSocket} from "../common/socket.jsx";
 import {DataGrid, gridClasses} from "@mui/x-data-grid";
-import {useDispatch, useSelector} from "react-redux";
+import {useDispatch, useSelector, useStore} from "react-redux";
 import {useTranslation} from 'react-i18next';
 import {
     setGridEditable,
@@ -48,6 +48,7 @@ import SatelliteDetailsTable from "./satellites-table.jsx";
 import SatelliteGroupSelectorBar from "./satellite-group-selector-bar.jsx";
 import EarthViewPassTimeline from './earthview-pass-timeline.jsx';
 import { useTargetRotatorSelectionDialog } from '../target/use-target-rotator-selection-dialog.jsx';
+import useStableEvent from '../../hooks/useStableEvent.js';
 
 // global callback for dashboard editing here
 const setGridEditableEarthViewEvent = 'earth-view-set-grid-editable';
@@ -114,19 +115,116 @@ const ThemedDiv = styled('div')(({theme}) => ({
     backgroundColor: theme.palette.background.paper,
 }));
 
-const EarthViewLayout = React.memo(function EarthViewLayout() {
+const MemoizedEarthViewMapContainer = React.memo(EarthViewMapContainer);
+
+// Tracker updates are needed by the map's retarget dialog, but they must not
+// rebuild the responsive grid or every island on each telemetry update.
+const EarthViewMapIsland = () => {
     const {socket} = useSocket();
     const dispatch = useDispatch();
+    const store = useStore();
     const {t} = useTranslation('earthview');
-    const gridEditable = useSelector((state) => state.earthViewTrack.gridEditable);
-    const selectedSatGroupId = useSelector((state) => state.earthViewTrack.selectedSatGroupId);
-    const {
-        trackingState,
-        trackerViews,
-    } = useSelector(state => state.targetSatTrack);
-    const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const { requestRotatorForTarget, dialog: rotatorSelectionDialog } = useTargetRotatorSelectionDialog();
 
+    const handleSetTrackingOnBackend = useStableEvent(async ({ noradId, satelliteName }) => {
+        const selectedAssignment = await requestRotatorForTarget(satelliteName);
+        if (!selectedAssignment) {
+            return;
+        }
+        const assignmentAction = String(selectedAssignment?.action || 'retarget_current_slot');
+        const isCreateNewSlot = assignmentAction === 'create_new_slot';
+        const trackerId = String(selectedAssignment?.trackerId || '');
+        const rotatorId = String(selectedAssignment?.rotatorId || 'none');
+        const assignmentRigId = String(selectedAssignment?.rigId || 'none');
+        if (!trackerId) {
+            return;
+        }
+
+        // Read after the dialog resolves so a group switch during the dialog
+        // cannot retarget using a stale group or tracker snapshot.
+        const state = store.getState();
+        const trackerInstances = state.trackerInstances?.instances || [];
+        const trackerViews = state.targetSatTrack?.trackerViews;
+        const trackingState = state.targetSatTrack?.trackingState;
+        const selectedSatGroupId = state.earthViewTrack?.selectedSatGroupId;
+        const selectedTrackerInstance = trackerInstances.find(
+            (instance) => String(instance?.tracker_id || '') === trackerId
+        );
+        const selectedTrackerView = trackerViews?.[trackerId] || {};
+        const selectedTrackerState = selectedTrackerView?.trackingState || selectedTrackerInstance?.tracking_state || {};
+        const nextRigId = isCreateNewSlot
+            ? assignmentRigId
+            : String(
+                selectedTrackerView?.selectedRadioRig
+                ?? selectedTrackerState?.rig_id
+                ?? assignmentRigId
+                ?? 'none'
+            );
+        const nextRotatorId = isCreateNewSlot ? 'none' : rotatorId;
+        const nextTransmitterId = isCreateNewSlot
+            ? 'none'
+            : String(selectedTrackerState?.transmitter_id || 'none');
+        const nextGroupId = selectedSatGroupId || selectedTrackerState?.group_id || trackingState?.group_id || '';
+
+        dispatch(setTrackerId(trackerId));
+        dispatch(setRotator({ value: nextRotatorId, trackerId }));
+
+        // Always overwrite target identity fields when retargeting to a satellite slot.
+        const normalizedTargetName = String(satelliteName || noradId || '').trim();
+        const satelliteTargetPatch = {
+            target_type: 'satellite',
+            target_name: normalizedTargetName || String(noradId || '').trim(),
+            command: null,
+            body_id: null,
+        };
+
+        const newTrackingState = isCreateNewSlot
+            ? {
+                tracker_id: trackerId,
+                norad_id: noradId,
+                group_id: nextGroupId,
+                ...satelliteTargetPatch,
+                rig_id: nextRigId,
+                rotator_id: nextRotatorId,
+                transmitter_id: 'none',
+                rig_state: 'disconnected',
+                rotator_state: 'disconnected',
+                rig_vfo: 'none',
+                vfo1: 'uplink',
+                vfo2: 'downlink',
+            }
+            : {
+                ...selectedTrackerState,
+                tracker_id: trackerId,
+                norad_id: noradId,
+                group_id: nextGroupId,
+                ...satelliteTargetPatch,
+                rig_id: nextRigId,
+                rotator_id: nextRotatorId,
+                transmitter_id: nextTransmitterId,
+            };
+
+        dispatch(setTrackingStateInBackend({socket, data: newTrackingState}))
+            .unwrap()
+            .then((response) => {
+                // Success handling
+            })
+            .catch((error) => {
+                toast.error(`${t('satellite_info.failed_tracking')}: ${error?.message || error?.error || 'Unknown error'}`);
+            });
+    });
+
+    return (
+        <>
+            <MemoizedEarthViewMapContainer handleSetTrackingOnBackend={handleSetTrackingOnBackend}/>
+            {rotatorSelectionDialog}
+        </>
+    );
+};
+
+const EarthViewLayout = React.memo(function EarthViewLayout() {
+    const dispatch = useDispatch();
+    const gridEditable = useSelector((state) => state.earthViewTrack.gridEditable);
     const {width, containerRef, mounted} = useContainerWidth({measureBeforeMount: true});
 
     // Default layout if none in localStorage
@@ -390,87 +488,6 @@ const EarthViewLayout = React.memo(function EarthViewLayout() {
         return normalizeLayoutsResizeHandles(loaded ?? defaultLayouts);
     });
 
-    const handleSetTrackingOnBackend = async ({ noradId, satelliteName }) => {
-        const selectedAssignment = await requestRotatorForTarget(satelliteName);
-        if (!selectedAssignment) {
-            return;
-        }
-        const assignmentAction = String(selectedAssignment?.action || 'retarget_current_slot');
-        const isCreateNewSlot = assignmentAction === 'create_new_slot';
-        const trackerId = String(selectedAssignment?.trackerId || '');
-        const rotatorId = String(selectedAssignment?.rotatorId || 'none');
-        const assignmentRigId = String(selectedAssignment?.rigId || 'none');
-        if (!trackerId) {
-            return;
-        }
-
-        const selectedTrackerInstance = trackerInstances.find(
-            (instance) => String(instance?.tracker_id || '') === trackerId
-        );
-        const selectedTrackerView = trackerViews?.[trackerId] || {};
-        const selectedTrackerState = selectedTrackerView?.trackingState || selectedTrackerInstance?.tracking_state || {};
-        const nextRigId = isCreateNewSlot
-            ? assignmentRigId
-            : String(
-                selectedTrackerView?.selectedRadioRig
-                ?? selectedTrackerState?.rig_id
-                ?? assignmentRigId
-                ?? 'none'
-            );
-        const nextRotatorId = isCreateNewSlot ? 'none' : rotatorId;
-        const nextTransmitterId = isCreateNewSlot
-            ? 'none'
-            : String(selectedTrackerState?.transmitter_id || 'none');
-        const nextGroupId = selectedSatGroupId || selectedTrackerState?.group_id || trackingState?.group_id || '';
-
-        dispatch(setTrackerId(trackerId));
-        dispatch(setRotator({ value: nextRotatorId, trackerId }));
-
-        // Always overwrite target identity fields when retargeting to a satellite slot.
-        const normalizedTargetName = String(satelliteName || noradId || '').trim();
-        const satelliteTargetPatch = {
-            target_type: 'satellite',
-            target_name: normalizedTargetName || String(noradId || '').trim(),
-            command: null,
-            body_id: null,
-        };
-
-        const newTrackingState = isCreateNewSlot
-            ? {
-                tracker_id: trackerId,
-                norad_id: noradId,
-                group_id: nextGroupId,
-                ...satelliteTargetPatch,
-                rig_id: nextRigId,
-                rotator_id: nextRotatorId,
-                transmitter_id: 'none',
-                rig_state: 'disconnected',
-                rotator_state: 'disconnected',
-                rig_vfo: 'none',
-                vfo1: 'uplink',
-                vfo2: 'downlink',
-            }
-            : {
-                ...selectedTrackerState,
-                tracker_id: trackerId,
-                norad_id: noradId,
-                group_id: nextGroupId,
-                ...satelliteTargetPatch,
-                rig_id: nextRigId,
-                rotator_id: nextRotatorId,
-                transmitter_id: nextTransmitterId,
-            };
-
-        dispatch(setTrackingStateInBackend({socket, data: newTrackingState}))
-            .unwrap()
-            .then((response) => {
-                // Success handling
-            })
-            .catch((error) => {
-                toast.error(`${t('satellite_info.failed_tracking')}: ${error?.message || error?.error || 'Unknown error'}`);
-            });
-    };
-
     function handleLayoutsChange(currentLayout, allLayouts) {
         const normalizedLayouts = normalizeLayoutsResizeHandles(allLayouts);
         setLayouts(normalizedLayouts);
@@ -488,7 +505,7 @@ const EarthViewLayout = React.memo(function EarthViewLayout() {
     // pre-made ResponsiveGridLayout
     let gridContents = [
         <StyledIslandParent key="map">
-            <EarthViewMapContainer handleSetTrackingOnBackend={handleSetTrackingOnBackend}/>
+            <EarthViewMapIsland/>
         </StyledIslandParent>,
         <StyledIslandParentNoScrollbar key="passes">
             <NextPassesGroupIsland/>
@@ -524,7 +541,6 @@ const EarthViewLayout = React.memo(function EarthViewLayout() {
 
     return (
         <>
-            {rotatorSelectionDialog}
             <SatelliteGroupSelectorBar/>
             <div ref={containerRef}>
                 {ResponsiveGridLayoutParent}
