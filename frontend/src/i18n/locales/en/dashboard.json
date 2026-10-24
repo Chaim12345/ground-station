@@ -57,6 +57,9 @@
   "target_popover": {
     "edit_satellite": "Edit satellite",
     "edit_transmitters": "Edit transmitters",
+    "copy_target": "Copy target name and ID",
+    "copied_target": "Target name and ID copied",
+    "copy_target_failed": "Could not copy target name and ID",
     "sections": {
       "basic_information": "Basic Information",
       "current_position": "Current Position",

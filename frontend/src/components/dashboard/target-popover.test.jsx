@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,6 +33,7 @@ vi.mock('../satellites/transmitters-dialog.jsx', () => ({
         <div role="dialog" aria-label="Transmitters editor">
             <span>{title}</span>
             <span>{satelliteData?.norad_id}</span>
+            <span>{satelliteData?.target_key}</span>
             <button type="button" onClick={onClose}>Close transmitters</button>
         </div>
     ),
@@ -45,6 +46,7 @@ const renderPopover = () => {
                 { tracker_id: 'sat-1', target_number: 1 },
                 { tracker_id: 'sat-2', target_number: 2 },
                 { tracker_id: 'body-1', target_number: 3 },
+                { tracker_id: 'mission-1', target_number: 4 },
             ],
         },
         targetSatTrack: {
@@ -61,7 +63,11 @@ const renderPopover = () => {
                 },
                 'body-1': {
                     satelliteData: { details: { target_type: 'body', body_id: 'moon', name: 'Moon' }, position: { el: 30 } },
-                    trackingState: { target_type: 'body', body_id: 'moon' },
+                    trackingState: { target_type: 'body', body_id: 'moon', target_key: 'body:moon' },
+                },
+                'mission-1': {
+                    satelliteData: { details: { target_type: 'mission', command: '-61', name: 'Voyager 1' }, position: { el: 10 } },
+                    trackingState: { target_type: 'mission', command: '-61', target_key: 'mission:-61' },
                 },
             },
         },
@@ -75,6 +81,10 @@ describe('dashboard target popover editors', () => {
     beforeEach(() => {
         socket.emit.mockReset();
         navigate.mockReset();
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        });
         socket.emit.mockImplementation((_event, request, acknowledge) => {
             if (request.cmd === 'get-satellite') {
                 acknowledge({ success: true, data: { details: { norad_id: request.data, operator: 'Catalog operator' } } });
@@ -99,7 +109,7 @@ describe('dashboard target popover editors', () => {
 
     it('opens transmitters for the clicked satellite and keeps row navigation available', () => {
         renderPopover();
-        expect(screen.getAllByRole('button', { name: 'Edit transmitters' })).toHaveLength(2);
+        expect(screen.getAllByRole('button', { name: 'Edit transmitters' })).toHaveLength(4);
         fireEvent.click(screen.getAllByRole('button', { name: 'Edit transmitters' })[0]);
 
         const dialog = screen.getByRole('dialog', { name: 'Transmitters editor' });
@@ -110,5 +120,30 @@ describe('dashboard target popover editors', () => {
         fireEvent.click(screen.getByRole('button', { name: /satellite info/i }));
         fireEvent.click(screen.getByRole('button', { name: /Second satellite \(222\)/i }));
         expect(navigate).toHaveBeenCalledWith('/tracking');
+    });
+
+    it.each([
+        ['body:moon', 2],
+        ['mission:-61', 3],
+    ])('opens transmitters for %s using its target key', (targetKey, buttonIndex) => {
+        renderPopover();
+        fireEvent.click(screen.getAllByRole('button', { name: 'Edit transmitters' })[buttonIndex]);
+
+        expect(within(screen.getByRole('dialog', { name: 'Transmitters editor' })).getByText(targetKey)).toBeInTheDocument();
+        expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it('copies the displayed name and identifier for satellites, bodies, and missions', async () => {
+        renderPopover();
+        const copyButtons = screen.getAllByRole('button', { name: 'Copy target name and ID' });
+        expect(copyButtons).toHaveLength(4);
+        copyButtons.forEach((button) => fireEvent.click(button));
+
+        await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(4));
+        expect(navigator.clipboard.writeText).toHaveBeenNthCalledWith(1, 'First satellite (111)');
+        expect(navigator.clipboard.writeText).toHaveBeenNthCalledWith(2, 'Second satellite (222)');
+        expect(navigator.clipboard.writeText).toHaveBeenNthCalledWith(3, 'Moon (moon)');
+        expect(navigator.clipboard.writeText).toHaveBeenNthCalledWith(4, 'Voyager 1 (-61)');
+        expect(navigate).not.toHaveBeenCalled();
     });
 });

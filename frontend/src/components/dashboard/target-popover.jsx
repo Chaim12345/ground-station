@@ -44,6 +44,8 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import EditIcon from '@mui/icons-material/Edit';
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
+import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined';
+import { toast } from '../../utils/toast-with-timestamp.jsx';
 import { formatLegibleDateTime } from "../common/common.jsx";
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDate as formatDateHelper } from '../../utils/date-time.js';
@@ -224,6 +226,10 @@ const SatelliteInfoPopover = () => {
             const targetIdentifier = targetType === 'satellite'
                 ? (noradId != null ? String(noradId) : '')
                 : (targetType === 'mission' ? missionCommand : bodyId);
+            // Celestial transmitters belong to the backend target key, which may be on either view.
+            const targetKey = String(
+                tracking?.target_key || details?.target_key || instanceTracking?.target_key || ''
+            ).trim();
             const satName = String(
                 details?.name
                 || tracking?.target_name
@@ -258,6 +264,7 @@ const SatelliteInfoPopover = () => {
                 targetType,
                 targetTypeLabel: normalizeTargetTypeLabel(targetType),
                 targetIdentifier,
+                targetLabel: targetIdentifier ? `${satName} (${targetIdentifier})` : satName,
                 elevation,
                 latitude,
                 longitude,
@@ -271,6 +278,7 @@ const SatelliteInfoPopover = () => {
                 dialogData: {
                     ...details,
                     norad_id: noradId,
+                    target_key: targetKey,
                     name: satName,
                     transmitters: view?.satelliteData?.transmitters || [],
                 },
@@ -476,6 +484,16 @@ const SatelliteInfoPopover = () => {
                 transmitters: response.data?.transmitters || row.dialogData.transmitters,
             });
         });
+    };
+
+    const handleCopyTarget = async (row) => {
+        try {
+            await navigator.clipboard.writeText(row.targetLabel);
+            toast.success(t('target_popover.copied_target', { defaultValue: 'Target name and ID copied' }));
+        } catch (error) {
+            console.error('Failed to copy target name and ID:', error);
+            toast.error(t('target_popover.copy_target_failed', { defaultValue: 'Could not copy target name and ID' }));
+        }
     };
 
     const handleOpenTargetPageForTracker = useCallback((nextTrackerId) => {
@@ -991,6 +1009,9 @@ const SatelliteInfoPopover = () => {
                                 const canEditSatellite = row.targetType === 'satellite'
                                     && Number.isFinite(Number(row.satNorad))
                                     && Number(row.satNorad) > 0;
+                                const canEditTransmitters = row.targetType === 'satellite'
+                                    ? canEditSatellite
+                                    : Boolean(row.dialogData.target_key);
 
                                 return (
                                     <Box
@@ -1022,7 +1043,7 @@ const SatelliteInfoPopover = () => {
                                             },
                                         }}
                                     >
-                                        <Stack direction="row" spacing={0.6} alignItems="center" sx={{ mb: 0.6, pr: canEditSatellite ? 6 : 0 }}>
+                                        <Stack direction="row" spacing={0.6} alignItems="center" sx={{ mb: 0.6, pr: canEditSatellite ? 10 : 7 }}>
                                             <TargetNumberIcon
                                                 targetNumber={row.targetNumber}
                                                 prefix="T"
@@ -1042,23 +1063,7 @@ const SatelliteInfoPopover = () => {
                                                     textOverflow: 'ellipsis',
                                                 }}
                                             >
-                                                {(() => {
-                                                    if (row.targetType === 'satellite') {
-                                                        if (
-                                                            row.satNorad !== null
-                                                            && row.satNorad !== undefined
-                                                            && String(row.satNorad).trim() !== ''
-                                                            && String(row.satNorad).toLowerCase() !== 'none'
-                                                        ) {
-                                                            return `${row.satName} (${row.satNorad})`;
-                                                        }
-                                                        return row.satName;
-                                                    }
-                                                    if (row.targetIdentifier) {
-                                                        return `${row.satName} (${row.targetIdentifier})`;
-                                                    }
-                                                    return row.satName;
-                                                })()}
+                                                {row.targetLabel}
                                             </Typography>
                                         </Stack>
 
@@ -1159,8 +1164,8 @@ const SatelliteInfoPopover = () => {
                                             )}
                                         </Box>
                                     </Box>
-                                    {canEditSatellite && (
-                                        <Box sx={{ position: 'absolute', top: 5, right: 5, display: 'flex', gap: 0.25 }}>
+                                    <Box sx={{ position: 'absolute', top: 5, right: 5, display: 'flex', gap: 0.25 }}>
+                                        {canEditSatellite && (
                                             <Tooltip title={t('target_popover.edit_satellite', { defaultValue: 'Edit satellite' })}>
                                                 <IconButton
                                                     size="small"
@@ -1171,18 +1176,34 @@ const SatelliteInfoPopover = () => {
                                                     <EditIcon sx={{ fontSize: 16 }} />
                                                 </IconButton>
                                             </Tooltip>
-                                            <Tooltip title={t('target_popover.edit_transmitters', { defaultValue: 'Edit transmitters' })}>
+                                        )}
+                                        <Tooltip title={t('target_popover.edit_transmitters', { defaultValue: 'Edit transmitters' })}>
+                                            <span>
                                                 <IconButton
                                                     size="small"
                                                     aria-label={t('target_popover.edit_transmitters', { defaultValue: 'Edit transmitters' })}
                                                     onClick={() => handleOpenEditor(row, 'transmitters')}
+                                                    disabled={!canEditTransmitters}
                                                     sx={{ width: 24, height: 24, color: 'text.secondary' }}
                                                 >
                                                     <RadioButtonCheckedIcon sx={{ fontSize: 16 }} />
                                                 </IconButton>
-                                            </Tooltip>
-                                        </Box>
-                                    )}
+                                            </span>
+                                        </Tooltip>
+                                        <Tooltip title={t('target_popover.copy_target', { defaultValue: 'Copy target name and ID' })}>
+                                            <span>
+                                                <IconButton
+                                                    size="small"
+                                                    aria-label={t('target_popover.copy_target', { defaultValue: 'Copy target name and ID' })}
+                                                    onClick={() => handleCopyTarget(row)}
+                                                    disabled={!row.targetIdentifier}
+                                                    sx={{ width: 24, height: 24, color: 'text.secondary' }}
+                                                >
+                                                    <ContentCopyOutlinedIcon sx={{ fontSize: 16 }} />
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
+                                    </Box>
                                     </Box>
                                 );
                             })}
