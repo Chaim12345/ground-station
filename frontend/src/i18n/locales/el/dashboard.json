@@ -35,6 +35,8 @@
     "refresh_now": "Ανανεωση Τωρα"
   },
   "target_popover": {
+    "edit_satellite": "Επεξεργασία δορυφόρου",
+    "edit_transmitters": "Επεξεργασία πομποδεκτών",
     "sections": {
       "basic_information": "Βασικες Πληροφοριες",
       "current_position": "Τρεχουσα Θεση",

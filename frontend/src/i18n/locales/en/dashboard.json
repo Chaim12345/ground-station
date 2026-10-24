@@ -55,6 +55,8 @@
     "refresh_now": "Refresh Now"
   },
   "target_popover": {
+    "edit_satellite": "Edit satellite",
+    "edit_transmitters": "Edit transmitters",
     "sections": {
       "basic_information": "Basic Information",
       "current_position": "Current Position",

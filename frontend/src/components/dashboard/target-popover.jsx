@@ -42,6 +42,8 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import EditIcon from '@mui/icons-material/Edit';
+import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
 import { formatLegibleDateTime } from "../common/common.jsx";
 import { useUserTimeSettings } from '../../hooks/useUserTimeSettings.jsx';
 import { formatDate as formatDateHelper } from '../../utils/date-time.js';
@@ -49,6 +51,8 @@ import TargetNumberIcon from "../common/target-number-icon.jsx";
 import { fetchFleetPassSummaries, setTrackerId } from "../target/target-slice.jsx";
 import { useSocket } from "../common/socket.jsx";
 import { normalizeTargetType } from "../target/celestial-target-utils.js";
+import SatelliteEditDialog from "../satellites/satellite-edit-dialog.jsx";
+import TransmittersDialog from "../satellites/transmitters-dialog.jsx";
 
 const EMPTY_OPEN_TARGET_DATA = Object.freeze({
     satelliteData: {
@@ -104,6 +108,7 @@ const SatelliteInfoPopover = () => {
     const [anchorEl, setAnchorEl] = useState(null);
     const navigate = useNavigate();
     const { t } = useTranslation('dashboard');
+    const { t: tSat } = useTranslation('satellites');
     const { timezone, locale } = useUserTimeSettings();
     const { socket } = useSocket();
     const fleetSummaryFetchInFlightRef = useRef(false);
@@ -112,6 +117,9 @@ const SatelliteInfoPopover = () => {
     const currentFleetSummaryRequestTrackersRef = useRef([]);
     const currentFleetSummarySignatureRef = useRef('');
     const [nowMs, setNowMs] = useState(() => Date.now());
+    const [activeEditor, setActiveEditor] = useState(null);
+    const [editorSatelliteData, setEditorSatelliteData] = useState(null);
+    const editorRequestIdRef = useRef(0);
 
     const open = Boolean(anchorEl);
     const trackerId = useSelector((state) => state.targetSatTrack?.trackerId || "");
@@ -260,6 +268,12 @@ const SatelliteInfoPopover = () => {
                 minElevation,
                 isTracking,
                 isTrackingActive,
+                dialogData: {
+                    ...details,
+                    norad_id: noradId,
+                    name: satName,
+                    transmitters: view?.satelliteData?.transmitters || [],
+                },
             };
         });
     }, [trackerInstances, trackerViews, trackerId]);
@@ -437,6 +451,31 @@ const SatelliteInfoPopover = () => {
 
     const handleClose = () => {
         setAnchorEl(null);
+    };
+
+    const handleCloseEditor = () => {
+        editorRequestIdRef.current += 1;
+        setActiveEditor(null);
+        setEditorSatelliteData(null);
+    };
+
+    const handleOpenEditor = (row, editor) => {
+        setEditorSatelliteData(row.dialogData);
+        setActiveEditor(editor);
+        setAnchorEl(null);
+
+        // The live tracker view can omit catalog fields needed by the satellite editor.
+        if (editor !== 'satellite' || !socket?.emit) return;
+        const requestId = ++editorRequestIdRef.current;
+        // Fetch this row directly so editing another tracker does not replace the active tracker's data.
+        socket.emit('api.call', { cmd: 'get-satellite', data: Number(row.satNorad) }, (response) => {
+            if (editorRequestIdRef.current !== requestId || !response?.success) return;
+            setEditorSatelliteData({
+                ...row.dialogData,
+                ...(response.data?.details || {}),
+                transmitters: response.data?.transmitters || row.dialogData.transmitters,
+            });
+        });
     };
 
     const handleOpenTargetPageForTracker = useCallback((nextTrackerId) => {
@@ -949,10 +988,16 @@ const SatelliteInfoPopover = () => {
                                 const summary = fleetPassSummaryByTrackerId?.[row.trackerId];
                                 const aosLos = formatFleetPassCountdown(summary);
                                 const isRowTracking = row.isTracking || row.isTrackingActive;
+                                const canEditSatellite = row.targetType === 'satellite'
+                                    && Number.isFinite(Number(row.satNorad))
+                                    && Number(row.satNorad) > 0;
 
                                 return (
                                     <Box
                                         key={row.trackerId}
+                                        sx={{ position: 'relative' }}
+                                    >
+                                    <Box
                                         component="button"
                                         type="button"
                                         onClick={() => handleOpenTargetPageForTracker(row.trackerId)}
@@ -977,7 +1022,7 @@ const SatelliteInfoPopover = () => {
                                             },
                                         }}
                                     >
-                                        <Stack direction="row" spacing={0.6} alignItems="center" sx={{ mb: 0.6 }}>
+                                        <Stack direction="row" spacing={0.6} alignItems="center" sx={{ mb: 0.6, pr: canEditSatellite ? 6 : 0 }}>
                                             <TargetNumberIcon
                                                 targetNumber={row.targetNumber}
                                                 prefix="T"
@@ -1114,6 +1159,31 @@ const SatelliteInfoPopover = () => {
                                             )}
                                         </Box>
                                     </Box>
+                                    {canEditSatellite && (
+                                        <Box sx={{ position: 'absolute', top: 5, right: 5, display: 'flex', gap: 0.25 }}>
+                                            <Tooltip title={t('target_popover.edit_satellite', { defaultValue: 'Edit satellite' })}>
+                                                <IconButton
+                                                    size="small"
+                                                    aria-label={t('target_popover.edit_satellite', { defaultValue: 'Edit satellite' })}
+                                                    onClick={() => handleOpenEditor(row, 'satellite')}
+                                                    sx={{ width: 24, height: 24, color: 'text.secondary' }}
+                                                >
+                                                    <EditIcon sx={{ fontSize: 16 }} />
+                                                </IconButton>
+                                            </Tooltip>
+                                            <Tooltip title={t('target_popover.edit_transmitters', { defaultValue: 'Edit transmitters' })}>
+                                                <IconButton
+                                                    size="small"
+                                                    aria-label={t('target_popover.edit_transmitters', { defaultValue: 'Edit transmitters' })}
+                                                    onClick={() => handleOpenEditor(row, 'transmitters')}
+                                                    sx={{ width: 24, height: 24, color: 'text.secondary' }}
+                                                >
+                                                    <RadioButtonCheckedIcon sx={{ fontSize: 16 }} />
+                                                </IconButton>
+                                            </Tooltip>
+                                        </Box>
+                                    )}
+                                    </Box>
                                 );
                             })}
                         </Stack>
@@ -1148,6 +1218,21 @@ const SatelliteInfoPopover = () => {
                 </Box>
                 )}
             </Popover>
+            <SatelliteEditDialog
+                open={activeEditor === 'satellite'}
+                onClose={handleCloseEditor}
+                satelliteData={editorSatelliteData}
+            />
+            <TransmittersDialog
+                open={activeEditor === 'transmitters'}
+                onClose={handleCloseEditor}
+                title={tSat('satellite_database.edit_transmitters_title', {
+                    name: editorSatelliteData?.name || editorSatelliteData?.norad_id || '',
+                })}
+                satelliteData={editorSatelliteData}
+                variant="paper"
+                widthOffsetPx={20}
+            />
         </>
     );
 };
