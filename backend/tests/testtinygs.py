@@ -12,6 +12,7 @@ import copy
 import json
 import logging
 import uuid
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -20,6 +21,7 @@ from sqlalchemy import select
 from db.models import OrbitalSources, Transmitters
 from pipeline.config.decoderconfigservice import DecoderConfigService
 from tlesync import logic, tinygs
+from tracker.righandler import RigHandler
 
 
 def _tinygs_satellite(norad=44001):
@@ -136,6 +138,38 @@ def test_mismatched_tle_lines_fall_back_to_configuration_norad():
     rows = tinygs.parse_tinygs_transmitters([satellite])
 
     assert {row["norad_cat_id"] for row in rows} == {44001}
+
+
+@pytest.mark.asyncio
+async def test_kosar_profiles_reach_locked_vfo_decoder_suggestion():
+    profiles = [(8, 436_100_000), (10, 863_400_000), (11, 863_400_000)]
+    tracker = SimpleNamespace(
+        input_transmitters=[
+            {
+                "id": f"kosar-sf{sf}",
+                "description": "KOSAR 1.5 LoRa",
+                "source": "tinygs",
+                "mode": "LoRa",
+                "downlink_low": frequency,
+                "lora_config": {"sf": sf, "bw": 125_000, "sync_word": [52]},
+            }
+            for sf, frequency in profiles
+        ],
+        rig_data={},
+        current_transmitter_id="kosar-sf8",
+        current_rig_state="idle",
+    )
+
+    await RigHandler(tracker).update_transmitter_doppler(range_rate_km_s=0)
+
+    telemetry = tracker.rig_data["transmitters"]
+    assert len(telemetry) == 3
+    for (sf, _frequency), transmitter in zip(profiles, telemetry):
+        assert transmitter["lora_config"]["sf"] == sf
+        suggested = DecoderConfigService().get_config("lora", transmitter=transmitter)
+        assert suggested.sf == sf
+        assert suggested.sync_word == [52]
+        assert suggested.config_source == "transmitter_metadata"
 
 
 def test_tinygs_fetch_sends_webapp_timestamp_header(monkeypatch):

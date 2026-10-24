@@ -132,6 +132,12 @@ class RigHandler:
                     "invert": transmitter.get("invert", False),
                     "source": transmitter.get("source"),
                     "alive": transmitter.get("alive"),
+                    # Decoder suggestions consume these fields from the VFO's
+                    # locked transmitter, not from the satellite details list.
+                    "baud": transmitter.get("baud"),
+                    "deviation": transmitter.get("deviation"),
+                    "framing": transmitter.get("framing"),
+                    "lora_config": transmitter.get("lora_config"),
                     "downlink_low": downlink_freq,
                     "downlink_high": transmitter.get("downlink_high"),
                     "uplink_low": uplink_freq,
