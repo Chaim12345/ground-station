@@ -25,6 +25,7 @@ from common.arguments import arguments
 from crud.preferences import fetch_integration_preferences_map
 from db import AsyncSessionLocal
 from db.models import Satellites, Transmitters
+from demodulators.loraconfig import LORA_DEFAULTS
 from handlers.entities.sdr import handle_vfo_demodulator_state
 from handlers.entities.transcriptionhelpers import fetch_transmitter_and_satellite
 from handlers.routing import get_auth_context
@@ -121,6 +122,10 @@ async def update_vfo_parameters(
         "pipeline",
         "target_sample_rate",  # Other decoders
         "sstv_mode",
+        # Live VFO controls use the same PHY fields as the LoRa config resolver.
+        # Keep the legacy forced-LDRO alias for saved client configurations.
+        *LORA_DEFAULTS,
+        "fldro",
         "gnss_sample_rate",
         "gnss_total_channels",
         "gnss_output_rate_ms",
@@ -848,10 +853,18 @@ async def handle_vfo_decoder_state(vfo_state, session_id, logger, force_restart=
                     "center_frequency": vfo_state.center_freq,
                     "bandwidth": vfo_state.bandwidth,
                 }
-                logger.warning(
-                    f"No locked transmitter for {requested_decoder.upper()} decoder on VFO {vfo_number} - using default settings. "
-                    f"Lock a transmitter to use its baud rate."
-                )
+                if decoder_param_overrides:
+                    logger.info(
+                        "%s decoder on VFO %s using manual parameters: %s",
+                        requested_decoder.upper(),
+                        vfo_number,
+                        decoder_param_overrides,
+                    )
+                else:
+                    logger.warning(
+                        f"No locked transmitter for {requested_decoder.upper()} decoder on VFO {vfo_number} - using default settings. "
+                        f"Lock a transmitter to use its baud rate."
+                    )
 
             decoder_kwargs["satellite"] = satellite_info
             decoder_kwargs["transmitter"] = transmitter_info
