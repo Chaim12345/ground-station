@@ -1,4 +1,4 @@
-export const BOOKMARK_SOURCE_KEYS = ['manual', 'satnogs', 'gr-satellites', 'satdump'];
+export const BOOKMARK_SOURCE_KEYS = ['manual', 'satnogs', 'gr-satellites', 'satdump', 'tinygs'];
 
 export const normalizeBookmarkSource = (source) => {
     if (typeof source !== 'string') {
@@ -51,6 +51,16 @@ export const getBookmarkSourceStyle = (source, theme) => {
             accent: theme.palette.secondary.main,
             lineDash: [6, 2],
             strokeWidth: 1.2,
+        };
+    }
+
+    if (normalized === 'tinygs') {
+        return {
+            key: normalized,
+            badge: 'TG',
+            accent: theme.palette.info.main,
+            lineDash: [8, 2],
+            strokeWidth: 1.0,
         };
     }
 

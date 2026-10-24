@@ -655,20 +655,23 @@ def detect_satellite_modifications(
     return False
 
 
-def create_transmitter_from_satnogs_data(transmitter_info):
+def create_transmitter_from_metadata_data(transmitter_info):
     """
-    Create a Transmitters object from SATNOGS transmitter data.
+    Create a Transmitters object from normalized transmitter metadata.
 
     Args:
-        transmitter_info (dict): SATNOGS transmitter information
+        transmitter_info (dict): Source-tagged transmitter information
 
     Returns:
         tuple: (Transmitters object, comparison data dict)
     """
-    source_transmitter_id = transmitter_info.get("uuid", None)
+    source_transmitter_id = transmitter_info.get("source_transmitter_id") or transmitter_info.get(
+        "uuid"
+    )
     if source_transmitter_id is not None:
         source_transmitter_id = str(source_transmitter_id).strip() or None
-    transmitter_uuid = normalize_external_transmitter_id(source_transmitter_id)
+    transmitter_uuid = normalize_external_transmitter_id(transmitter_info.get("uuid"))
+    source = transmitter_info.get("source") or "satnogs"
 
     transmitter_data_for_comparison = {
         "description": transmitter_info.get("description", None),
@@ -679,7 +682,7 @@ def create_transmitter_from_satnogs_data(transmitter_info):
         "mode": transmitter_info.get("mode", None),
         "status": transmitter_info.get("status", None),
         "frequency_violation": transmitter_info.get("frequency_violation", None),
-        "source": "satnogs",
+        "source": source,
     }
 
     transmitter = Transmitters(
@@ -704,7 +707,7 @@ def create_transmitter_from_satnogs_data(transmitter_info):
         status=transmitter_info.get("status", None),
         citation=transmitter_info.get("citation", None),
         service=transmitter_info.get("service", None),
-        source="satnogs",
+        source=source,
         source_transmitter_id=source_transmitter_id,
         iaru_coordination=transmitter_info.get("iaru_coordination", None),
         iaru_coordination_url=transmitter_info.get("iaru_coordination_url", None),

@@ -22,7 +22,8 @@
     "bookmark_source_user_defined": "User defined",
     "bookmark_source_satnogs": "SATNOGS",
     "bookmark_source_gr_satellites": "gr-satellites",
-    "bookmark_source_satdump": "Satdump"
+    "bookmark_source_satdump": "Satdump",
+    "bookmark_source_tinygs": "TinyGS"
   },
   "frequency": {
     "title": "Controllo frequenza",

@@ -31,6 +31,7 @@ def test_config_metadata_overrides_and_legacy_tinygs_values():
     assert config.framing == "lora" and config.baudrate == 0
     assert normalize_lora({"fldro": True})["ldro_mode"] == 1
     assert normalize_lora({"sync_word": []})["sync_word"] == [0, 0]
+    assert normalize_lora({"preamble_len": 9})["preamble_len"] == 9
     for denominator in range(5, 9):
         assert normalize_lora({"cr": denominator})["cr"] == denominator - 4
     for key, value in {

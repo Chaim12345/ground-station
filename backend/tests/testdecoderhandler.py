@@ -121,7 +121,7 @@ def test_maps_complete_lora_scheduler_parameters():
         "bw": 125000,
         "cr": 5,
         "sync_word": [52],
-        "preamble_len": 8,
+        "preamble_len": 9,
         "ldro_mode": 0,
         "implicit_header": True,
         "payload_length": 107,

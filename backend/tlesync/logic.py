@@ -48,6 +48,7 @@ from tlesync.sourcestate import (
     suspend_celestrak_source,
 )
 from tlesync.state import SatelliteSyncState
+from tlesync.tinygs import fetch_tinygs_transmitters
 from tlesync.utils import (
     async_fetch,
     create_final_success_message,
@@ -55,7 +56,7 @@ from tlesync.utils import (
     create_progress_tracker,
     create_satellite_from_tle_data,
     create_satellite_orbit_from_source_data,
-    create_transmitter_from_satnogs_data,
+    create_transmitter_from_metadata_data,
     detect_duplicate_satellites,
     detect_satellite_modifications,
     detect_transmitter_modifications,
@@ -167,7 +168,8 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
             "fetch_orbital_sources": 15,  # Fetching orbital data from sources
             "fetch_satnogs_satellites": 10,  # Fetching satellite metadata from configured API(s)
             "fetch_satnogs_transmitters": 10,  # Fetching transmitter metadata from configured API(s)
-            "process_satellites": 40,  # Processing satellite data
+            "fetch_tinygs_transmitters": 5,  # Fetching TinyGS radio configurations
+            "process_satellites": 35,  # Processing satellite data
             "process_transmitters": 25,  # Processing transmitter data
         }
 
@@ -188,6 +190,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
         )
         satnogs_satellite_data: List[Dict[str, Any]] = []
         satnogs_transmitter_data: List[Dict[str, Any]] = []
+        tinygs_transmitter_data: List[Dict[str, Any]] = []
         celestrak_list: List[Dict[str, Any]] = []
         group_assignments: Dict[str, List[int]] = {}
         rate_limited_celestrak_sources: List[str] = []
@@ -600,6 +603,35 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                 sync_state["active_sources"] = []
                 sync_state_manager.set_state(sync_state)
 
+            progress_state = update_progress(
+                "fetch_tinygs_transmitters", 0, 1, "Fetching TinyGS radio configurations"
+            )
+            sync_state["active_sources"] = ["TinyGS Transmitters"]
+            sync_state_manager.set_state(sync_state)
+            await _emit(progress_state)
+            try:
+                tinygs_transmitter_data = await fetch_tinygs_transmitters(pool)
+                logger.info("Fetched %s TinyGS downlinks", len(tinygs_transmitter_data))
+                sync_state["completed_sources"].append("TinyGS Transmitters")
+                completed_phases.add("fetch_tinygs_transmitters")
+                progress_state = update_progress(
+                    "fetch_tinygs_transmitters",
+                    1,
+                    1,
+                    f"Fetched {len(tinygs_transmitter_data)} TinyGS downlinks",
+                )
+                await _emit(progress_state)
+            except (requests.exceptions.RequestException, ValueError) as e:
+                # TinyGS is supplemental; a failed request must not discard SatNOGS data.
+                error_msg = f"Failed to fetch TinyGS transmitter metadata: {e}"
+                logger.warning(error_msg)
+                sync_state["errors"].append(error_msg)
+            finally:
+                sync_state["active_sources"] = []
+                sync_state_manager.set_state(sync_state)
+
+        transmitter_metadata_data = satnogs_transmitter_data + tinygs_transmitter_data
+
         # Begin processing satellites and transmitters
         progress_state = update_progress(
             "process_satellites",
@@ -640,13 +672,13 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
             total_transmitters_to_process = 0
             for sat in celestrak_list:
                 norad_id = sat["norad_id"]
-                transmitters = get_transmitter_info_by_norad_id(norad_id, satnogs_transmitter_data)
+                transmitters = get_transmitter_info_by_norad_id(norad_id, transmitter_metadata_data)
                 total_transmitters_to_process += len(transmitters)
 
             # Add expected transmitters for manually-added satellites that are outside
             # the currently synchronized Celestrak set.
             for norad_id in manual_only_norad_ids:
-                transmitters = get_transmitter_info_by_norad_id(norad_id, satnogs_transmitter_data)
+                transmitters = get_transmitter_info_by_norad_id(norad_id, transmitter_metadata_data)
                 total_transmitters_to_process += len(transmitters)
 
             logger.info(
@@ -724,12 +756,12 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                         {"norad_id": norad_id, "name": satellite.name, "sat_id": satellite.sat_id}
                     )
 
-                # let's find transmitter info in the satnogs_transmitter_data list
-                satnogs_transmitter_info = get_transmitter_info_by_norad_id(
-                    norad_id, satnogs_transmitter_data
+                # Match both metadata providers to the orbit source's NORAD ID.
+                satellite_transmitters = get_transmitter_info_by_norad_id(
+                    norad_id, transmitter_metadata_data
                 )
 
-                for j, transmitter_info in enumerate(satnogs_transmitter_info):
+                for j, transmitter_info in enumerate(satellite_transmitters):
                     transmitter_uuid = normalize_external_transmitter_id(
                         transmitter_info.get("uuid", None)
                     )
@@ -739,7 +771,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
 
                     # Create transmitter object and get comparison data
                     transmitter, transmitter_data_for_comparison = (
-                        create_transmitter_from_satnogs_data(transmitter_info)
+                        create_transmitter_from_metadata_data(transmitter_info)
                     )
                     count_transmitters += 1
 
@@ -756,7 +788,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
 
                         # Every 20 transmitters, emit an update to avoid flooding
                         if count_transmitters % 20 == 0 or (
-                            i == total_satellites - 1 and j == len(satnogs_transmitter_info) - 1
+                            i == total_satellites - 1 and j == len(satellite_transmitters) - 1
                         ):
                             await _emit(progress_state)
 
@@ -797,18 +829,18 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
             for norad_id in manual_only_norad_ids:
                 manual_satellite = manual_satellites_by_norad.get(norad_id)
                 satellite_name = manual_satellite.name if manual_satellite else f"NORAD {norad_id}"
-                satnogs_transmitter_info = get_transmitter_info_by_norad_id(
-                    norad_id, satnogs_transmitter_data
+                satellite_transmitters = get_transmitter_info_by_norad_id(
+                    norad_id, transmitter_metadata_data
                 )
 
-                for transmitter_info in satnogs_transmitter_info:
+                for transmitter_info in satellite_transmitters:
                     transmitter_uuid = normalize_external_transmitter_id(
                         transmitter_info.get("uuid", None)
                     )
                     is_new_transmitter = transmitter_uuid not in processed_transmitter_uuids
 
                     transmitter, transmitter_data_for_comparison = (
-                        create_transmitter_from_satnogs_data(transmitter_info)
+                        create_transmitter_from_metadata_data(transmitter_info)
                     )
                     count_transmitters += 1
 
@@ -960,7 +992,7 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
 
             transmitters_by_norad: Dict[int, List[Dict[str, Any]]] = {}
             if transmitter_norad_ids:
-                for transmitter in satnogs_transmitter_data:
+                for transmitter in transmitter_metadata_data:
                     norad_id = transmitter.get("norad_cat_id")
                     if norad_id in transmitter_norad_ids:
                         normalized = dict(transmitter)

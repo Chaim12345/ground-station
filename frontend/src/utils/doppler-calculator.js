@@ -25,7 +25,7 @@ const normalizeSource = (source) => {
         return 'manual';
     }
     const lowered = source.toLowerCase();
-    if (lowered === 'manual' || lowered === 'satdump' || lowered === 'satnogs') {
+    if (lowered === 'manual' || lowered === 'satdump' || lowered === 'satnogs' || lowered === 'gr-satellites' || lowered === 'tinygs') {
         return lowered;
     }
     return 'manual';

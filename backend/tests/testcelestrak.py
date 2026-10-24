@@ -142,11 +142,15 @@ async def test_celestrak_failure_skips_later_celestrak_sources_but_processes_gen
     async def no_transmitter_import(**_kwargs):
         return {"success": True}
 
+    async def no_tinygs_transmitters(_pool):
+        return []
+
     monkeypatch.setattr(logic, "async_fetch_source_orbit_records", fetch_orbits)
     monkeypatch.setattr(logic, "async_fetch", fetch_metadata)
     monkeypatch.setattr(logic, "update_satellite_group_with_removal_detection", no_removed_items)
     monkeypatch.setattr(logic, "import_gr_satellites_transmitters", no_transmitter_import)
     monkeypatch.setattr(logic, "import_satdump_transmitters", no_transmitter_import)
+    monkeypatch.setattr(logic, "fetch_tinygs_transmitters", no_tinygs_transmitters)
     monkeypatch.setattr(logic, "get_all_tracker_managers", lambda: {})
 
     emitted_states = []

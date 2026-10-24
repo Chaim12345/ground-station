@@ -25,6 +25,7 @@
     "bookmark_source_satnogs": "SATNOGS",
     "bookmark_source_gr_satellites": "gr-satellites",
     "bookmark_source_satdump": "Satdump",
+    "bookmark_source_tinygs": "TinyGS",
     "leave_stream": "退出数据流"
   },
   "frequency": {

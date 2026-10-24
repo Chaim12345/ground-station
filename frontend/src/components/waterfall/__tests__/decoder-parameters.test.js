@@ -103,6 +103,9 @@ describe('LoRa decoder parameters', () => {
         });
         expect(mapParametersToBackend('lora', { lora_fldro: true }).ldro_mode).toBe(1);
         expect(mapParametersToBackend('lora', { lora_fldro: false }).ldro_mode).toBe(2);
+        const preamble = getDecoderParameters('lora').lora_preamble_len;
+        expect(preamble.options).toContainEqual({ value: 9, label: '9' });
+        expect(mapParametersToBackend('lora', { lora_preamble_len: 9 }).preamble_len).toBe(9);
         const sync = getDecoderParameters('lora').lora_sync_word.options;
         expect(sync.some(option => JSON.stringify(option.value) === '[52]')).toBe(true);
         expect(sync.some(option => JSON.stringify(option.value) === '[0,0]')).toBe(true);

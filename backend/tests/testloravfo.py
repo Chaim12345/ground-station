@@ -15,7 +15,7 @@ PARAMETERS = {
     "bw": 125000,
     "cr": 1,
     "sync_word": [52],
-    "preamble_len": 12,
+    "preamble_len": 9,
     "ldro_mode": 0,
     "implicit_header": True,
     "payload_length": 107,
@@ -93,6 +93,7 @@ async def test_changing_lora_controls_restarts_with_new_phy_settings(processes):
     await apply(**PARAMETERS)
     assert len(processes.starts) == 2
     assert processes.starts[-1].sf == 8
+    assert processes.starts[-1].preamble_len == 9
     assert processes.starts[-1].sync_word == [52]
     assert processes.starts[-1].has_crc is False
     assert processes.starts[-1].ldro_mode == 0

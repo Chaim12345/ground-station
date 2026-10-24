@@ -111,7 +111,7 @@ export const getLoraParameters = (t = englishFallback) => ({
         label: t('decoder_parameters.preamble_length', { defaultValue: 'Preamble Length' }),
         description: 'Number of preamble symbols.',
         type: 'select', default: 8,
-        options: [5, 6, 7, 8, 10, 12, 16, 24, 32, 64, 128, 256, 512, 1024].map(value => ({ value, label: String(value) }))
+        options: [5, 6, 7, 8, 9, 10, 12, 16, 24, 32, 64, 128, 256, 512, 1024].map(value => ({ value, label: String(value) }))
     },
     lora_ldro_mode: {
         label: t('decoder_parameters.low_data_rate_optimization', { defaultValue: 'Low Data Rate Optimization' }),

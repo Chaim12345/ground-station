@@ -82,8 +82,9 @@ const WaterfallToolbar = ({
         satdump: true,
         satnogs: true,
         'gr-satellites': true,
+        tinygs: true,
     };
-    const visibleSourceCount = BOOKMARK_SOURCE_KEYS.filter((source) => Boolean(bookmarkSourceState[source])).length;
+    const visibleSourceCount = BOOKMARK_SOURCE_KEYS.filter((source) => bookmarkSourceState[source] !== false).length;
     const hasSourceFiltering = visibleSourceCount < BOOKMARK_SOURCE_KEYS.length;
     const bookmarkButtonTitle = hasSourceFiltering
         ? `${t('toolbar.bookmark_source_filters', 'Bookmark source filters')} (${visibleSourceCount}/${BOOKMARK_SOURCE_KEYS.length} enabled)`
@@ -93,6 +94,7 @@ const WaterfallToolbar = ({
         { key: 'satnogs', label: t('toolbar.bookmark_source_satnogs', 'SATNOGS') },
         { key: 'gr-satellites', label: t('toolbar.bookmark_source_gr_satellites', 'gr-satellites') },
         { key: 'satdump', label: t('toolbar.bookmark_source_satdump', 'Satdump') },
+        { key: 'tinygs', label: t('toolbar.bookmark_source_tinygs', 'TinyGS') },
     ];
     const autoScalePreset = useSelector((state) => state.waterfall.autoScalePreset);
     const vfoLockedState = useSelector((state) => ({
@@ -119,7 +121,7 @@ const WaterfallToolbar = ({
     };
 
     const toggleBookmarkSource = (sourceKey) => {
-        const currentValue = bookmarkSourceState[sourceKey];
+        const currentValue = bookmarkSourceState[sourceKey] !== false;
         dispatch(setShowBookmarkSource({ source: sourceKey, value: !currentValue }));
     };
 
@@ -630,7 +632,7 @@ const WaterfallToolbar = ({
                         <ListItemIcon>
                             <Checkbox
                                 edge="start"
-                                checked={Boolean(bookmarkSourceState[sourceItem.key])}
+                                checked={bookmarkSourceState[sourceItem.key] !== false}
                                 tabIndex={-1}
                                 disableRipple
                             />

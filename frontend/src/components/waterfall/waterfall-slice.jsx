@@ -247,6 +247,7 @@ const initialState = {
         satdump: true,
         satnogs: true,
         'gr-satellites': true,
+        tinygs: true,
     },
 };
 
@@ -719,9 +720,10 @@ export const waterfallSlice = createSlice({
                     satdump: true,
                     satnogs: true,
                     'gr-satellites': true,
+                    tinygs: true,
                 };
             }
-            if (source && Object.prototype.hasOwnProperty.call(state.showBookmarkSources, source)) {
+            if (source && (source === 'tinygs' || Object.prototype.hasOwnProperty.call(state.showBookmarkSources, source))) {
                 state.showBookmarkSources[source] = value;
             }
         },

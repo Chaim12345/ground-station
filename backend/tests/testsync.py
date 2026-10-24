@@ -138,6 +138,9 @@ async def test_sync_imports_orbit_and_completes_with_metadata_unavailable(db_ses
     async def no_transmitter_import(**_kwargs):
         return {"success": True}
 
+    async def no_tinygs_transmitters(_pool):
+        return []
+
     emitted = []
     monkeypatch.setattr(logic, "fetch_orbital_source", fetch_sources)
     monkeypatch.setattr(logic, "async_fetch_source_orbit_records", fetch_orbits)
@@ -145,6 +148,7 @@ async def test_sync_imports_orbit_and_completes_with_metadata_unavailable(db_ses
     monkeypatch.setattr(logic, "update_satellite_group_with_removal_detection", no_removed_items)
     monkeypatch.setattr(logic, "import_gr_satellites_transmitters", no_transmitter_import)
     monkeypatch.setattr(logic, "import_satdump_transmitters", no_transmitter_import)
+    monkeypatch.setattr(logic, "fetch_tinygs_transmitters", no_tinygs_transmitters)
     monkeypatch.setattr(logic, "get_all_tracker_managers", lambda: {})
 
     result = await logic.synchronize_satellite_data_internal(
