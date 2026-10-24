@@ -134,6 +134,14 @@ export class MapRendererErrorBoundary extends React.Component {
         this.props.onError?.(error);
     }
 
+    componentDidUpdate(previousProps) {
+        // Clear a renderer failure when its configuration changes without
+        // remounting a healthy map just to reset the error boundary.
+        if (previousProps.resetKey !== this.props.resetKey && this.state.failed) {
+            this.setState({failed: false});
+        }
+    }
+
     render() {
         return this.state.failed ? null : this.props.children;
     }

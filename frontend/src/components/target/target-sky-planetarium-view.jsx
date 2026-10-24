@@ -359,6 +359,9 @@ const TargetSkyPlanetariumView = () => {
     const handleOpenSettings = useCallback(() => {
         dispatch(setOpenMapSettingsDialog(true));
     }, [dispatch]);
+    const handleUpdateBackend = useCallback(() => {
+        dispatch(setTargetMapSetting({socket, key: 'target-map-settings'}));
+    }, [dispatch, socket]);
 
     return (
         <Box
@@ -488,15 +491,9 @@ const TargetSkyPlanetariumView = () => {
                 ) : null}
             </Box>
             {isSatelliteTarget ? (
-                <TargetMapSettingsDialog updateBackend={() => {
-                    const key = 'target-map-settings';
-                    dispatch(setTargetMapSetting({socket, key}));
-                }}/>
+                <TargetMapSettingsDialog updateBackend={handleUpdateBackend}/>
             ) : (
-                <TargetSkyViewSettingsDialog updateBackend={() => {
-                    const key = 'target-map-settings';
-                    dispatch(setTargetMapSetting({socket, key}));
-                }}/>
+                <TargetSkyViewSettingsDialog updateBackend={handleUpdateBackend}/>
             )}
         </Box>
     );

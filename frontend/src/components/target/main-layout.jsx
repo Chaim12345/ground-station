@@ -18,7 +18,7 @@
  */
 
 
-import React, {useState, useEffect, useCallback, useRef} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {Responsive, useContainerWidth} from 'react-grid-layout';
 import L from 'leaflet';
 import 'react-grid-layout/css/styles.css';
@@ -38,7 +38,6 @@ import {useDispatch, useSelector} from "react-redux";
 import {useTranslation} from 'react-i18next';
 import {
     setSatGroupId,
-    setMapZoomLevel,
     setGridEditable,
     getTrackingStateFromBackend,
     setSatelliteId,
@@ -46,14 +45,6 @@ import {
 } from './target-slice.jsx'
 import TargetInfoIsland from "./target-info-island.jsx";
 import NextPassesIsland from "./next-passes.jsx";
-import {
-    satellitePositionSelector,
-    satelliteCoverageSelector,
-    satelliteDetailsSelector,
-    satelliteTrackingStateSelector,
-    satellitePathsSelector,
-    satelliteTransmittersSelector
-} from './state-selectors.jsx';
 import TargetViewRouter from './target-view-router.jsx';
 import SatellitePassTimeline from "./timeline-main.jsx";
 import TargetSelectorBar from "./target-selector-bar.jsx";
@@ -275,66 +266,46 @@ const MapSlider = function ({handleSliderChange}) {
 }
 
 
+// The timeline follows the selected target, while the grid layout itself does not.
+// Keep these subscriptions below Responsive so switching targets does not rebuild
+// every grid item and resize handle.
+const TrackingTimelineIsland = React.memo(function TrackingTimelineIsland() {
+    const {socket} = useSocket();
+    const dispatch = useDispatch();
+    const noradId = useSelector((state) => state.targetSatTrack.satelliteId);
+    const nextPassesHours = useSelector((state) => state.targetSatTrack.nextPassesHours);
+    const satelliteName = useSelector((state) => state.targetSatTrack.satelliteData?.details?.name || null);
+
+    const handleRefreshTimelinePasses = useCallback(() => {
+        if (noradId) {
+            dispatch(fetchNextPasses({
+                socket,
+                noradId,
+                hours: nextPassesHours,
+                forceRecalculate: true,
+            }));
+        }
+    }, [dispatch, socket, noradId, nextPassesHours]);
+
+    return (
+        <SatellitePassTimeline
+            timeWindowHours={nextPassesHours}
+            satelliteName={satelliteName}
+            labelType="peak"
+            onRefresh={handleRefreshTimelinePasses}
+            showGeostationarySatellites={true}
+        />
+    );
+});
+
 const TrackingLayout = React.memo(function TrackingLayout() {
     const {socket} = useSocket();
     const dispatch = useDispatch();
     const {t} = useTranslation('target');
-    const {
-        groupId,
-        satelliteId: noradId,
-        showPastOrbitPath,
-        showFutureOrbitPath,
-        showSatelliteCoverage,
-        showSunIcon,
-        showMoonIcon,
-        showTerminatorLine,
-        showTooltip,
-        terminatorLine,
-        daySidePolygon,
-        pastOrbitLineColor,
-        futureOrbitLineColor,
-        satelliteCoverageColor,
-        orbitProjectionDuration,
-        tileLayerID,
-        mapZoomLevel,
-        sunPos,
-        moonPos,
-        gridEditable,
-        sliderTimeOffset,
-        openMapSettingsDialog,
-        showGrid,
-        nextPassesHours,
-    } = useSelector(state => state.targetSatTrack);
-
-    const satellitePosition = useSelector(satellitePositionSelector);
-    const satelliteCoverage = useSelector(satelliteCoverageSelector);
-    const satelliteDetails = useSelector(satelliteDetailsSelector);
-    const satelliteTrackingState = useSelector(satelliteTrackingStateSelector);
-    const satellitePaths = useSelector(satellitePathsSelector);
-    const satelliteTransmitters = useSelector(satelliteTransmittersSelector);
-
-    const {location} = useSelector(state => state.location);
-    const satelliteName = useSelector((state) => state.targetSatTrack.satelliteData?.details?.name || null);
-    const [currentPastSatellitesPaths, setCurrentPastSatellitesPaths] = useState([]);
-    const [currentFutureSatellitesPaths, setCurrentFutureSatellitesPaths] = useState([]);
-    const [currentSatellitesPosition, setCurrentSatellitesPosition] = useState([]);
-    const [currentSatellitesCoverage, setCurrentSatellitesCoverage] = useState([]);
-    const coverageRef = useRef(null);
+    const gridEditable = useSelector(state => state.targetSatTrack.gridEditable);
 
     const {width, containerRef, mounted} = useContainerWidth({measureBeforeMount: true});
     const [deferredIslandCount, setDeferredIslandCount] = useState(0);
-
-    // Handler for refreshing timeline passes
-    const handleRefreshTimelinePasses = () => {
-        if (noradId) {
-            dispatch(fetchNextPasses({
-                socket,
-                noradId: noradId,
-                hours: nextPassesHours,
-                forceRecalculate: true
-            }));
-        }
-    };
 
     // default layout if none in localStorage
     const defaultLayouts = {
@@ -656,10 +627,6 @@ const TrackingLayout = React.memo(function TrackingLayout() {
         };
     }, [dispatch]);
 
-    const handleSetMapZoomLevel = useCallback((zoomLevel) => {
-        dispatch(setMapZoomLevel(zoomLevel));
-    }, [dispatch]);
-
     // we load any stored layouts from localStorage or fallback to default
     const [layouts, setLayouts] = useState(() => {
         const loaded = loadLayoutsFromLocalStorage();
@@ -741,13 +708,7 @@ const TrackingLayout = React.memo(function TrackingLayout() {
         </StyledIslandParentNoScrollbar>,
         <StyledIslandParentNoScrollbar key="timeline">
             {deferredIslandCount >= 4 ? (
-                <SatellitePassTimeline
-                    timeWindowHours={nextPassesHours}
-                    satelliteName={satelliteName}
-                    labelType="peak"
-                    onRefresh={handleRefreshTimelinePasses}
-                    showGeostationarySatellites={true}
-                />
+                <TrackingTimelineIsland />
             ) : <DeferredIslandPlaceholder/>}
         </StyledIslandParentNoScrollbar>,
         <StyledIslandParentScrollbar key="rotator-control">

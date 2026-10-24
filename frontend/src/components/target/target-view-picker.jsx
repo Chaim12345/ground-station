@@ -62,9 +62,11 @@ const TargetViewPicker = ({targetType}) => {
     const theme = useTheme();
     const isCompactHeader = useMediaQuery(theme.breakpoints.down('lg'));
     const isTightHeader = useMediaQuery(theme.breakpoints.down('md'));
-    const {mapEngine, autoSwitchPlanetariumByVisibility, targetViewMode} = useSelector(
-        (state) => state.targetSatTrack,
+    const mapEngine = useSelector((state) => state.targetSatTrack.mapEngine);
+    const autoSwitchPlanetariumByVisibility = useSelector(
+        (state) => state.targetSatTrack.autoSwitchPlanetariumByVisibility,
     );
+    const targetViewMode = useSelector((state) => state.targetSatTrack.targetViewMode);
     const isSatelliteTarget = targetType === 'satellite';
     const selectedViewId = useMemo(
         () => (isSatelliteTarget
@@ -213,4 +215,4 @@ const TargetViewPicker = ({targetType}) => {
     );
 };
 
-export default TargetViewPicker;
+export default React.memo(TargetViewPicker);

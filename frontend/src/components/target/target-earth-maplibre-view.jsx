@@ -670,6 +670,9 @@ const TargetEarthMapLibreView = ({projection = MAPLIBRE_PROJECTION_MERCATOR, eff
     const handleOpenSettings = useCallback(() => {
         dispatch(setOpenMapSettingsDialog(true));
     }, [dispatch]);
+    const handleUpdateBackend = useCallback(() => {
+        dispatch(setTargetMapSetting({socket, key: 'target-map-settings'}));
+    }, [dispatch, socket]);
 
     return (
         <Box sx={{height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0}}>
@@ -732,7 +735,8 @@ const TargetEarthMapLibreView = ({projection = MAPLIBRE_PROJECTION_MERCATOR, eff
                 }}
             >
                 <MapRendererErrorBoundary
-                    key={`${projection}:${selectedTileURL}:${mapLoadFailure.attempt}`}
+                    key={`${selectedTileURL}:${mapLoadFailure.attempt}`}
+                    resetKey={projection}
                     onError={mapLoadFailure.reportError}
                 >
                 <Map
@@ -1026,10 +1030,7 @@ const TargetEarthMapLibreView = ({projection = MAPLIBRE_PROJECTION_MERCATOR, eff
                     </Box>
                 ) : null}
 
-                <TargetMapSettingsDialog updateBackend={() => {
-                    const key = 'target-map-settings';
-                    dispatch(setTargetMapSetting({socket, key}));
-                }}/>
+                <TargetMapSettingsDialog updateBackend={handleUpdateBackend}/>
 
                 {!enableMapDragging && liveMap ? <MapArrowControls mapObject={liveMap} verticalOffset={25}/> : null}
                 <MapLoadErrorDialog

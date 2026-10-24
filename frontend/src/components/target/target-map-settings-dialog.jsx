@@ -19,7 +19,7 @@
 
 
 
-import {useDispatch, useSelector} from "react-redux";
+import {shallowEqual, useDispatch, useSelector} from "react-redux";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -98,7 +98,27 @@ function TargetMapSettingsDialog({updateBackend}) {
         enableMapDragging,
         enableMapZooming,
         autoSwitchPlanetariumByVisibility,
-    } = useSelector(state => state.targetSatTrack);
+    } = useSelector(state => ({
+        showPastOrbitPath: state.targetSatTrack.showPastOrbitPath,
+        showFutureOrbitPath: state.targetSatTrack.showFutureOrbitPath,
+        showSatelliteCoverage: state.targetSatTrack.showSatelliteCoverage,
+        showSunIcon: state.targetSatTrack.showSunIcon,
+        showMoonIcon: state.targetSatTrack.showMoonIcon,
+        showTerminatorLine: state.targetSatTrack.showTerminatorLine,
+        showTooltip: state.targetSatTrack.showTooltip,
+        lockOnTarget: state.targetSatTrack.lockOnTarget,
+        pastOrbitLineColor: state.targetSatTrack.pastOrbitLineColor,
+        futureOrbitLineColor: state.targetSatTrack.futureOrbitLineColor,
+        satelliteCoverageColor: state.targetSatTrack.satelliteCoverageColor,
+        orbitProjectionDuration: state.targetSatTrack.orbitProjectionDuration,
+        tileLayerID: state.targetSatTrack.tileLayerID,
+        mapEngine: state.targetSatTrack.mapEngine,
+        openMapSettingsDialog: state.targetSatTrack.openMapSettingsDialog,
+        showGrid: state.targetSatTrack.showGrid,
+        enableMapDragging: state.targetSatTrack.enableMapDragging,
+        enableMapZooming: state.targetSatTrack.enableMapZooming,
+        autoSwitchPlanetariumByVisibility: state.targetSatTrack.autoSwitchPlanetariumByVisibility,
+    }), shallowEqual);
 
     const handleCloseDialog = () => {
         dispatch(setOpenMapSettingsDialog(false));
@@ -211,4 +231,4 @@ function TargetMapSettingsDialog({updateBackend}) {
     );
 }
 
-export default TargetMapSettingsDialog;
+export default React.memo(TargetMapSettingsDialog);

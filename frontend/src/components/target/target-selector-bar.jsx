@@ -294,10 +294,8 @@ const TargetSelectorBar = React.memo(function TargetSelectorBar() {
     const isCompactHeader = useMediaQuery(theme.breakpoints.down('lg'));
     const isTightHeader = useMediaQuery(theme.breakpoints.down('md'));
 
-    const {
-        trackingState,
-        trackerId,
-    } = useSelector((state) => state.targetSatTrack);
+    const trackingState = useSelector((state) => state.targetSatTrack.trackingState);
+    const trackerId = useSelector((state) => state.targetSatTrack.trackerId);
     const trackerInstances = useSelector((state) => state.trackerInstances?.instances || []);
     const schedulerObservations = useSelector((state) => state.scheduler?.observations || []);
     const rigRows = useSelector((state) => state.rigs?.rigs || []);
