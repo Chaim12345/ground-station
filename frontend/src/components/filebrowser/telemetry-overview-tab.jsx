@@ -274,9 +274,9 @@ export default function OverviewTab({ metadata, file, telemetry, packet, ax25 })
                     {decoder.type === ModulationType.LORA ? (
                         <>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <CheckCircleIcon sx={{ color: theme.palette.success.main, fontSize: 20 }} />
+                                <CheckCircleIcon sx={{ color: decoder.crc_valid === true ? theme.palette.success.main : theme.palette.text.secondary, fontSize: 20 }} />
                                 <Typography variant="body2">
-                                    {t('telemetry_overview_tab.lora_crc_validated_by_phy_layer', { defaultValue: 'LoRa CRC validated by PHY layer' })}
+                                    {decoder.crc_valid === true ? 'LoRa payload CRC valid' : decoder.crc_present === false ? 'No payload CRC — unchecked' : 'CRC validation unavailable'}
                                 </Typography>
                             </Box>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -352,7 +352,7 @@ export default function OverviewTab({ metadata, file, telemetry, packet, ax25 })
                 <Box sx={{ mt: 2, p: 1.5, bgcolor: theme.palette.info.main + '30', borderRadius: 1, border: `1px solid ${theme.palette.info.main}60` }}>
                     <Typography variant="caption" sx={{ color: theme.palette.info.light, fontWeight: 500 }}>
                         {decoder.type === ModulationType.LORA ? (
-                            <>ℹ️ {getDecoderDisplay(decoder.type)} {t('telemetry_overview_tab.packets_include_phy_layer_crc_validation_and_forward_err', { defaultValue: 'packets include PHY-layer CRC validation and Forward Error Correction (FEC). Invalid packets are automatically discarded by the' })} {getDecoderDisplay(decoder.type)} {t('telemetry_overview_tab.decoder', { defaultValue: 'decoder.' })}</>
+                            <>LoRa uses forward error correction. Packets with a failed payload CRC are discarded; packets without a payload CRC are retained as unchecked.</>
                         ) : isGeoscan ? (
                             <>{t('telemetry_overview_tab.geoscan_frames_include_ti_cc11xx_crc_and_pn9_scrambling_', { defaultValue: 'ℹ️ GEOSCAN frames include TI CC11xx CRC and PN9 scrambling. The configured frame size typically includes a 2-byte CC11xx CRC that is removed after validation.' })}</>
                         ) : (

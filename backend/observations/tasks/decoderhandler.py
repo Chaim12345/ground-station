@@ -39,6 +39,11 @@ _BACKEND_OVERRIDE_KEYS = {
     "cr",
     "sync_word",
     "preamble_len",
+    "ldro_mode",
+    "implicit_header",
+    "payload_length",
+    "has_crc",
+    "invert_iq",
     "fldro",
     "gnss_sample_rate",
     "gnss_total_channels",
@@ -92,6 +97,11 @@ def map_scheduler_decoder_parameters(decoder_type: str, parameters: Any) -> Dict
             "lora_cr": "cr",
             "lora_sync_word": "sync_word",
             "lora_preamble_len": "preamble_len",
+            "lora_ldro_mode": "ldro_mode",
+            "lora_implicit_header": "implicit_header",
+            "lora_payload_length": "payload_length",
+            "lora_has_crc": "has_crc",
+            "lora_invert_iq": "invert_iq",
             "lora_fldro": "fldro",
         }
     elif decoder_type == "sstv":

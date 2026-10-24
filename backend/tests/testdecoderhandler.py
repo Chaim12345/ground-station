@@ -113,3 +113,25 @@ async def test_scheduled_aprs_parameters_reach_process_manager(monkeypatch):
         "af_carrier": 1810,
         "deviation": 565,
     }
+
+
+def test_maps_complete_lora_scheduler_parameters():
+    values = {
+        "sf": 8,
+        "bw": 125000,
+        "cr": 5,
+        "sync_word": [52],
+        "preamble_len": 8,
+        "ldro_mode": 0,
+        "implicit_header": True,
+        "payload_length": 107,
+        "has_crc": False,
+        "invert_iq": False,
+    }
+    assert (
+        map_scheduler_decoder_parameters(
+            "lora", {f"lora_{key}": value for key, value in values.items()}
+        )
+        == values
+    )
+    assert map_scheduler_decoder_parameters("lora", values) == values

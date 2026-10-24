@@ -236,7 +236,7 @@ export const DECODERS = {
         hasProgressDisplay: false,
         hasTextOutput: false,
         hasModeDisplay: true, // shows LoRa parameters (SF, BW, CR)
-        defaultBandwidth: 500000, // 500 kHz for LoRa (auto-detects 125/250/500 kHz signals)
+        defaultBandwidth: 125000, // Actual receiver bandwidth comes from LoRa parameters
         bandwidthType: 'center-only', // only show center line for raw IQ
         showBothEdges: false,
         allowLeftEdgeDrag: false,
@@ -723,13 +723,17 @@ export const getDefaultVFOConfig = () => {
 
         // Decoder-specific parameters (flat object, prefixed by decoder type)
         parameters: {
-            // LoRa parameters (defaults from TinyGS)
+            // LoRa parameters; select the satellite-specific PHY settings
             lora_sf: 7,                    // Spreading Factor (7-12)
             lora_bw: 125000,               // Bandwidth in Hz
             lora_cr: 1,                    // Coding Rate (1=4/5, 2=4/6, 3=4/7, 4=4/8)
-            lora_sync_word: [0x08, 0x10],  // Sync word (TinyGS default)
+            lora_sync_word: [0x12],        // Network byte (satellite-specific)
             lora_preamble_len: 8,          // Preamble length
-            lora_fldro: false,             // Low Data Rate Optimization
+            lora_ldro_mode: 2,            // Automatic low data rate optimization
+            lora_implicit_header: false,
+            lora_payload_length: 255,
+            lora_has_crc: true,
+            lora_invert_iq: false,
 
             // FSK/GMSK/GFSK parameters (future - TODO)
             // fsk_baudrate: 9600,

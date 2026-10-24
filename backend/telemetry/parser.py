@@ -187,6 +187,21 @@ class TelemetryParser:
                 return None
             return None
 
+        # LoRa is a PHY, not an application protocol. Keep arbitrary payloads
+        # opaque until a satellite-specific parser is explicitly selected.
+        if protocol_hint == "lora":
+            return {
+                "parser": "lora",
+                "protocol": "lora",
+                "success": True,
+                "telemetry": self._fallback_telemetry(packet_bytes),
+                "raw": {
+                    "packet_hex": packet_bytes.hex(),
+                    "payload_hex": packet_bytes.hex(),
+                    "payload_length": len(packet_bytes),
+                },
+            }
+
         # Choose protocol
         protocol = None
         if protocol_hint in ("ax25", "csp", "ccsds", "proprietary"):

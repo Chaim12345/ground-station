@@ -93,7 +93,7 @@ async def get_decoder_config(
         }
 
     # Validate decoder type
-    valid_types = ["gmsk", "bpsk", "aprs", "gfsk", "fsk", "geoscanimage", "gnss"]
+    valid_types = ["gmsk", "bpsk", "aprs", "gfsk", "fsk", "geoscanimage", "gnss", "lora"]
     if decoder_type not in valid_types:
         return {
             "success": False,

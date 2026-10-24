@@ -60,6 +60,12 @@ class DecoderConfig:
     preamble_len: Optional[int] = None  # Preamble length (default: 8)
     fldro: Optional[bool] = None  # Low Data Rate Optimization (default: False)
 
+    ldro_mode: Optional[int] = None
+    implicit_header: Optional[bool] = None
+    payload_length: Optional[int] = None
+    has_crc: Optional[bool] = None
+    invert_iq: Optional[bool] = None
+
     # Weather satellite specific parameters (SatDump)
     pipeline: Optional[str] = None  # SatDump pipeline name (e.g., 'noaa_apt', 'meteor_m2-x_lrpt')
     target_sample_rate: Optional[int] = (
@@ -115,6 +121,11 @@ class DecoderConfig:
             and self.sync_word == other.sync_word
             and self.preamble_len == other.preamble_len
             and self.fldro == other.fldro
+            and self.ldro_mode == other.ldro_mode
+            and self.implicit_header == other.implicit_header
+            and self.payload_length == other.payload_length
+            and self.has_crc == other.has_crc
+            and self.invert_iq == other.invert_iq
             and self.pipeline == other.pipeline
             and self.target_sample_rate == other.target_sample_rate
             and self.gnss_sample_rate == other.gnss_sample_rate
@@ -152,6 +163,11 @@ class DecoderConfig:
                 tuple(self.sync_word) if self.sync_word else None,
                 self.preamble_len,
                 self.fldro,
+                self.ldro_mode,
+                self.implicit_header,
+                self.payload_length,
+                self.has_crc,
+                self.invert_iq,
                 self.pipeline,
                 self.target_sample_rate,
                 self.gnss_sample_rate,
@@ -183,6 +199,11 @@ class DecoderConfig:
             "sync_word": self.sync_word,
             "preamble_len": self.preamble_len,
             "fldro": self.fldro,
+            "ldro_mode": self.ldro_mode,
+            "implicit_header": self.implicit_header,
+            "payload_length": self.payload_length,
+            "has_crc": self.has_crc,
+            "invert_iq": self.invert_iq,
             "pipeline": self.pipeline,
             "target_sample_rate": self.target_sample_rate,
             "gnss_sample_rate": self.gnss_sample_rate,

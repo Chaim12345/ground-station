@@ -287,6 +287,10 @@ class IQBroadcaster(threading.Thread):
                         self.stats["queue_timeouts"] += 1
                     continue
 
+                # All subscribers see the same monotonically increasing sequence.
+                # A gap reveals a dropped queue item to stateful stream decoders.
+                iq_message["iq_sequence"] = self.stats["messages_in"]
+
                 # Broadcast to all subscribers
                 fanout_started = self.timing.start()
                 captured_at_ns = iq_message.get("pipeline_captured_at_ns")

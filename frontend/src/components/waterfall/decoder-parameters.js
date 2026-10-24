@@ -75,6 +75,7 @@ export const getLoraParameters = (t = englishFallback) => ({
         type: 'select',
         default: 125000,
         options: [
+            ...[7800, 10400, 15600, 20800, 31250, 41700].map(value => ({ value, label: `${value / 1000} kHz` })),
             { value: 62500, label: '62.5 kHz' },
             { value: 125000, label: '125 kHz' },
             { value: 250000, label: '250 kHz' },
@@ -83,7 +84,7 @@ export const getLoraParameters = (t = englishFallback) => ({
     },
     lora_cr: {
         label: t('decoder_parameters.coding_rate', { defaultValue: 'Coding Rate' }),
-        description: t('decoder_parameters.forward_error_correction_ratio', { defaultValue: 'Forward error correction ratio' }),
+        description: 'Coding rate (TinyGS cr=5–8 means 4/5–4/8). Read from explicit headers; configured here for implicit headers.',
         type: 'select',
         default: 1,
         options: [
@@ -95,35 +96,47 @@ export const getLoraParameters = (t = englishFallback) => ({
     },
     lora_sync_word: {
         label: t('decoder_parameters.sync_word', { defaultValue: 'Sync Word' }),
-        description: t('decoder_parameters.network_identifier_for_packet_filtering', { defaultValue: 'Network identifier for packet filtering' }),
-        type: 'select',
-        default: [0x08, 0x10],
+        description: 'Satellite-specific network byte. KOSAR uses 0x34 (52).',
+        type: 'select', default: [0x12],
         options: [
-            { value: [0x12], label: '0x12 (18) - LoRaWAN Private Networks (also for Meshtastic)' },
-            { value: [0x34], label: '0x34 (52) - LoRaWAN Public Networks' },
-            { value: [0x08, 0x10], label: '0x08 0x10 (8, 16) - TinyGS Satellite Network' },
-            { value: [], label: t('decoder_parameters.auto_detect_accept_all_sync_words', { defaultValue: 'Auto-detect (accept all sync words)' }) }
+            { value: [0, 0], label: 'Accept any sync word' },
+            { value: [8, 16], label: 'Legacy symbols [8, 16] (0x12)' },
+            ...Array.from({ length: 256 }, (_, value) => ({
+                value: [value], label: `0x${value.toString(16).padStart(2, '0').toUpperCase()} (${value})`
+            }))
         ],
-        // Custom comparator for array values
         compare: (a, b) => JSON.stringify(a) === JSON.stringify(b)
     },
     lora_preamble_len: {
         label: t('decoder_parameters.preamble_length', { defaultValue: 'Preamble Length' }),
-        description: t('decoder_parameters.number_of_preamble_symbols', { defaultValue: 'Number of preamble symbols' }),
-        type: 'select',
-        default: 8,
-        options: [
-            { value: 6, label: '6' },
-            { value: 8, label: '8' },
-            { value: 12, label: '12' },
-            { value: 16, label: '16' }
-        ]
+        description: 'Number of preamble symbols.',
+        type: 'select', default: 8,
+        options: [5, 6, 7, 8, 10, 12, 16, 24, 32, 64, 128, 256, 512, 1024].map(value => ({ value, label: String(value) }))
     },
-    lora_fldro: {
+    lora_ldro_mode: {
         label: t('decoder_parameters.low_data_rate_optimization', { defaultValue: 'Low Data Rate Optimization' }),
-        description: t('decoder_parameters.enable_for_sf11_sf12_with_bw_500khz', { defaultValue: 'Enable for SF11/SF12 with BW < 500kHz' }),
-        type: 'switch',
-        default: false
+        description: 'Automatic follows symbol duration. TinyGS fldro=true forces it on.',
+        type: 'select', default: 2,
+        options: [{ value: 2, label: 'Automatic' }, { value: 0, label: 'Off' }, { value: 1, label: 'On (forced)' }]
+    },
+    lora_implicit_header: {
+        label: 'Implicit Header', description: 'Enable for packets without a transmitted header. Coding rate, CRC and payload length must match the transmitter.',
+        type: 'switch', default: false
+    },
+    lora_payload_length: {
+        label: 'Implicit Payload Length', description: 'Payload bytes, excluding CRC. Used only with implicit headers.',
+        type: 'select', default: 255,
+        visibleWhen: parameters => parameters.lora_implicit_header,
+        options: Array.from({ length: 255 }, (_, index) => ({ value: index + 1, label: `${index + 1} bytes` }))
+    },
+    lora_has_crc: {
+        label: 'Implicit Payload CRC', description: 'Used only with implicit headers. Explicit headers announce CRC presence. Packets with a failed CRC are discarded; packets without CRC are marked unchecked.',
+        type: 'switch', default: true,
+        visibleWhen: parameters => parameters.lora_implicit_header
+    },
+    lora_invert_iq: {
+        label: 'Invert IQ', description: 'Enable for inverted LoRa modulation (TinyGS: iq).',
+        type: 'switch', default: false
     }
 });
 
@@ -549,7 +562,7 @@ export const DECODER_SUPPORT = {
     gfsk: true,
     bpsk: true,
     apt: true,
-    lora: false,
+    lora: true,
     morse: false,
     afsk: false,
     aprs: true,
@@ -661,7 +674,11 @@ export function mapParametersToBackend(decoder, parameters) {
             cr: parameters.lora_cr,
             sync_word: parameters.lora_sync_word,
             preamble_len: parameters.lora_preamble_len,
-            fldro: parameters.lora_fldro
+            ldro_mode: parameters.lora_ldro_mode ?? (parameters.lora_fldro ? 1 : 2),
+            implicit_header: parameters.lora_implicit_header,
+            payload_length: parameters.lora_payload_length,
+            has_crc: parameters.lora_has_crc,
+            invert_iq: parameters.lora_invert_iq
         };
     }
 

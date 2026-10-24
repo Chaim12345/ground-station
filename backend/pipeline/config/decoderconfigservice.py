@@ -19,6 +19,7 @@ from typing import Dict, Optional
 
 from constants import FramingType
 from constants.framing import FSK_DECODER_FRAMINGS
+from demodulators.loraconfig import lora_metadata, normalize_lora
 from pipeline.config.decoderconfig import DecoderConfig
 from satconfig.config import SatelliteConfigService
 
@@ -90,6 +91,22 @@ class DecoderConfigService:
         satellite = satellite or {}
         transmitter = transmitter or {}
         overrides = overrides or {}
+
+        if decoder_type == "lora":
+            detected = lora_metadata(transmitter)
+            params = normalize_lora({**detected, **overrides})
+            return DecoderConfig(
+                baudrate=0,
+                framing="lora",
+                config_source=(
+                    "manual"
+                    if overrides
+                    else ("transmitter_metadata" if detected else "smart_default")
+                ),
+                satellite=satellite or None,
+                transmitter=transmitter or None,
+                **params,
+            )
 
         # GNSS-SDR configuration is intentionally explicit and does not rely on
         # satellite framing/metadata detection used by packet decoders.

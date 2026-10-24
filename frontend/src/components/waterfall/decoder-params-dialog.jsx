@@ -181,9 +181,11 @@ const DecoderParamsDialog = ({
                 if (config.deviation !== null && config.deviation !== undefined) parameters.aprs_deviation = config.deviation;
                 if (config.af_carrier) parameters.aprs_af_carrier = config.af_carrier;
             } else if (decoder === 'lora') {
-                if (config.sf) parameters.lora_sf = config.sf;
-                if (config.bw) parameters.lora_bw = config.bw;
-                if (config.cr) parameters.lora_cr = config.cr;
+                for (const key of ['sf', 'bw', 'cr', 'sync_word', 'preamble_len', 'ldro_mode', 'implicit_header', 'payload_length', 'has_crc', 'invert_iq']) {
+                    if (config[key] !== null && config[key] !== undefined) {
+                        parameters[`lora_${key}`] = config[key];
+                    }
+                }
             }
 
             // Suggested values must be active for the decoder to consume them.

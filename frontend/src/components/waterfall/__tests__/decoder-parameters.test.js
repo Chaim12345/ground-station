@@ -88,3 +88,23 @@ describe('GNSS decoder parameters', () => {
         expect(mapParametersToBackend('gnss', defaults)).toMatchObject(defaults);
     });
 });
+
+describe('LoRa decoder parameters', () => {
+    it('enables LoRa and maps complete PHY controls, preserving false and zero', () => {
+        expect(DECODER_SUPPORT.lora).toBe(true);
+        const defaults = getDecoderDefaultParameters('lora');
+        expect(mapParametersToBackend('lora', {
+            ...defaults, lora_sf: 8, lora_sync_word: [52], lora_ldro_mode: 0,
+            lora_implicit_header: true, lora_payload_length: 107, lora_has_crc: false,
+        })).toEqual({
+            sf: 8, bw: 125000, cr: 1, sync_word: [52], preamble_len: 8,
+            ldro_mode: 0, implicit_header: true, payload_length: 107, has_crc: false,
+            invert_iq: false,
+        });
+        expect(mapParametersToBackend('lora', { lora_fldro: true }).ldro_mode).toBe(1);
+        expect(mapParametersToBackend('lora', { lora_fldro: false }).ldro_mode).toBe(2);
+        const sync = getDecoderParameters('lora').lora_sync_word.options;
+        expect(sync.some(option => JSON.stringify(option.value) === '[52]')).toBe(true);
+        expect(sync.some(option => JSON.stringify(option.value) === '[0,0]')).toBe(true);
+    });
+});

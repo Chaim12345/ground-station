@@ -47,7 +47,7 @@ jobs:
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace/backend \
             ground-station-backend:test \
-            /bin/bash -lc "/app/venv/bin/python -m pip install --no-cache-dir -r requirements-dev.txt && ALEMBIC_CONTEXT=1 /app/venv/bin/pytest"
+            /bin/bash -lc "/app/venv/bin/python -m pip install --no-cache-dir -r requirements-dev.txt && ALEMBIC_CONTEXT=1 GS_REQUIRE_LORA=1 /app/venv/bin/pytest"
 
       - name: Check configurable Nginx listener
         run: |

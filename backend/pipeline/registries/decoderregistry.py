@@ -86,6 +86,17 @@ except Exception as error:
     GNSSSdrDecoder = None
 
 
+LoRaDecoder: Optional[Type] = None
+try:
+    from demodulators.loradecoder import LoRaDecoder as _LoRaDecoder
+
+    LoRaDecoder = _LoRaDecoder
+except Exception as error:
+    logger.warning("LoRa decoder is unavailable: %s", error)
+    unavailable_decoder_reasons["lora"] = f"{type(error).__name__}: {error}"
+    LoRaDecoder = None
+
+
 @dataclass
 class DecoderCapabilities:
     """Capabilities and requirements for a decoder"""
@@ -133,6 +144,31 @@ class DecoderRegistry:
 
         # Define capabilities for each decoder (only when class imports succeeded)
         self._decoders = {}
+
+        if LoRaDecoder is not None:
+            self._decoders["lora"] = DecoderCapabilities(
+                name="lora",
+                decoder_class=LoRaDecoder,
+                needs_raw_iq=True,
+                required_demodulator=None,
+                demodulator_mode=None,
+                default_bandwidth=125000,
+                supports_transmitter_config=True,
+                restart_on_params=[
+                    "sf",
+                    "bw",
+                    "cr",
+                    "sync_word",
+                    "preamble_len",
+                    "fldro",
+                    "ldro_mode",
+                    "implicit_header",
+                    "payload_length",
+                    "has_crc",
+                    "invert_iq",
+                ],
+                description="Streaming LoRa PHY receiver (TinyGS-compatible settings)",
+            )
 
         if APRSDecoder is not None:
             self._decoders["aprs"] = DecoderCapabilities(

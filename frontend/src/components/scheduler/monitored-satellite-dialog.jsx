@@ -81,6 +81,7 @@ const DECODER_TYPES = [
     { value: 'bpsk', labelKey: 'decoder_type_bpsk' },
     { value: 'aprs', labelKey: 'decoder_type_aprs' },
     { value: 'sstv', labelKey: 'decoder_type_sstv' },
+    { value: 'lora', label: 'LoRa', labelKey: 'decoder_type_lora' },
 ];
 
 const SSTV_DEFAULT_BANDWIDTH = 12500;
@@ -751,8 +752,8 @@ export default function MonitoredSatelliteDialog() {
         const currentValue = currentParams[paramKey] ?? paramDef.default;
 
         if (paramDef.type === 'select') {
-            // For null values, use a special string key that won't conflict with actual values
-            const displayValue = currentValue === null ? '__auto__' : currentValue;
+            // JSON values preserve LoRa sync arrays when loading saved tasks.
+            const displayValue = JSON.stringify(currentValue);
             
             return (
                 <FormControl fullWidth size="small" key={paramKey}>
@@ -760,7 +761,7 @@ export default function MonitoredSatelliteDialog() {
                     <Select
                         value={displayValue}
                         onChange={(e) => {
-                            const newValue = e.target.value === '__auto__' ? null : e.target.value;
+                            const newValue = JSON.parse(e.target.value);
                             handleDecoderParameterChange(taskIndex, paramKey, newValue);
                         }}
                         label={paramDef.label}
@@ -768,7 +769,7 @@ export default function MonitoredSatelliteDialog() {
                         {paramDef.options.map((option) => (
                             <MenuItem
                                 key={JSON.stringify(option.value)}
-                                value={option.value === null ? '__auto__' : option.value}
+                                value={JSON.stringify(option.value)}
                             >
                                 {option.label}
                             </MenuItem>
@@ -2124,7 +2125,7 @@ export default function MonitoredSatelliteDialog() {
                                                                     >
                                                                         {DECODER_TYPES.map((type) => (
                                                                             <MenuItem key={type.value} value={type.value}>
-                                                                                {t(`scheduler_dialogs.shared.${type.labelKey}`)}
+                                                                                {type.label || t(`scheduler_dialogs.shared.${type.labelKey}`)}
                                                                             </MenuItem>
                                                                         ))}
                                                                     </Select>
@@ -2179,9 +2180,11 @@ export default function MonitoredSatelliteDialog() {
                                                                             }
                                                                             if (config.af_carrier) newParams.aprs_af_carrier = config.af_carrier;
                                                                         } else if (decoderType === 'lora') {
-                                                                            if (config.sf) newParams.lora_sf = config.sf;
-                                                                            if (config.bw) newParams.lora_bw = config.bw;
-                                                                            if (config.cr) newParams.lora_cr = config.cr;
+                                                                            for (const key of ['sf', 'bw', 'cr', 'sync_word', 'preamble_len', 'ldro_mode', 'implicit_header', 'payload_length', 'has_crc', 'invert_iq']) {
+                                                                                if (config[key] !== null && config[key] !== undefined) {
+                                                                                    newParams[`lora_${key}`] = config[key];
+                                                                                }
+                                                                            }
                                                                         }
 
                                                                         // Update the task parameters
@@ -2292,7 +2295,7 @@ export default function MonitoredSatelliteDialog() {
                                                                 >
                                                                     {DEMODULATOR_TYPES.map((type) => (
                                                                         <MenuItem key={type.value} value={type.value}>
-                                                                            {t(`scheduler_dialogs.shared.${type.labelKey}`)}
+                                                                            {type.label || t(`scheduler_dialogs.shared.${type.labelKey}`)}
                                                                         </MenuItem>
                                                                     ))}
                                                                 </Select>
@@ -2383,7 +2386,7 @@ export default function MonitoredSatelliteDialog() {
                                                                 >
                                                                     {MODULATION_TYPES.map((type) => (
                                                                         <MenuItem key={type.value} value={type.value}>
-                                                                            {t(`scheduler_dialogs.shared.${type.labelKey}`)}
+                                                                            {type.label || t(`scheduler_dialogs.shared.${type.labelKey}`)}
                                                                         </MenuItem>
                                                                     ))}
                                                                 </Select>
