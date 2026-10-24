@@ -27,12 +27,46 @@ import TuneIcon from '@mui/icons-material/Tune';
 import { useTranslation } from 'react-i18next';
 import { getFrequencyBand } from '../../common/common.jsx';
 import { selectRunningRigTransmitters } from '../../target/transmitter-selectors.js';
+import { parseTargetSlotNumber } from '../../target/celestial-target-utils.js';
+import TargetNumberIcon from '../../common/target-number-icon.jsx';
 
 const sameIdentifier = (left, right) => {
     if (left == null || right == null) {
         return false;
     }
     return String(left) === String(right);
+};
+
+const getTransmitterOptionValue = (transmitter) => (
+    transmitter.uiId || (transmitter.trackerId
+        ? `${transmitter.trackerId}:${transmitter.id}`
+        : String(transmitter.id))
+);
+
+const TransmitterTargetLabel = ({ transmitter, sx = {} }) => {
+    const targetNumber = parseTargetSlotNumber(transmitter.trackerId);
+    const targetName = transmitter.trackerTargetName || '';
+
+    return (
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.65, minWidth: 0, maxWidth: '100%', ...sx }}>
+            {targetNumber != null ? (
+                <TargetNumberIcon targetNumber={targetNumber} size={14} sx={{ flexShrink: 0 }} />
+            ) : transmitter.trackerLabel ? (
+                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 700, flexShrink: 0 }}>
+                    {transmitter.trackerLabel}
+                </Box>
+            ) : null}
+            {targetName && (
+                <Box
+                    component="span"
+                    title={targetName}
+                    sx={{ color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                    {targetName}
+                </Box>
+            )}
+        </Box>
+    );
 };
 
 /**
@@ -55,17 +89,22 @@ export const TransmitterLockSelect = ({
     const [pendingTransmitter, setPendingTransmitter] = useState(null);
 
     const handleChange = (e) => {
-        const transmitterId = e.target.value === 'none' ? 'none' : e.target.value;
+        const optionValue = e.target.value;
 
-        if (transmitterId !== 'none') {
+        if (optionValue !== 'none') {
             // Locking to a transmitter - set frequency and lock, but don't change mode
             // Menu data is intentionally stable during tracking. Resolve the
             // current observed frequency when the user locks a VFO so doppler
             // correction and the retune decision always use live data.
-            const transmitter = selectRunningRigTransmitters(store.getState()).find((tx) => (
-                sameIdentifier(tx.id, transmitterId)
-            )) || transmitters.find((tx) => sameIdentifier(tx.id, transmitterId));
+            const selectedOption = transmitters.find((tx) => getTransmitterOptionValue(tx) === optionValue);
+            const transmitter = selectedOption && (
+                selectRunningRigTransmitters(store.getState()).find((tx) => (
+                    sameIdentifier(tx.id, selectedOption.id)
+                    && (!selectedOption.trackerId || sameIdentifier(tx.trackerId, selectedOption.trackerId))
+                )) || selectedOption
+            );
             if (transmitter) {
+                const transmitterId = transmitter.id;
                 const txFrequency = transmitter.downlink_observed_freq;
                 const parsedSampleRate = typeof sampleRate === 'number' ? sampleRate : Number(sampleRate);
                 const safeSampleRate = Number.isFinite(parsedSampleRate) ? parsedSampleRate : 0;
@@ -132,10 +171,9 @@ export const TransmitterLockSelect = ({
         setPendingTransmitter(null);
     };
 
-    const currentValue = (() => {
-        if (!lockedTransmitterId || lockedTransmitterId === 'none') return 'none';
-        // Check if the current value exists in the transmitters list
-        const exists = transmitters.some((tx) => {
+    const selectedTransmitter = !lockedTransmitterId || lockedTransmitterId === 'none'
+        ? null
+        : transmitters.find((tx) => {
             if (!sameIdentifier(tx.id, lockedTransmitterId)) {
                 return false;
             }
@@ -144,8 +182,7 @@ export const TransmitterLockSelect = ({
             }
             return sameIdentifier(tx.trackerId, lockedTransmitterTrackerId);
         });
-        return exists ? lockedTransmitterId : 'none';
-    })();
+    const currentValue = selectedTransmitter ? getTransmitterOptionValue(selectedTransmitter) : 'none';
 
     const isLocked = lockedTransmitterId && lockedTransmitterId !== 'none';
 
@@ -192,6 +229,14 @@ export const TransmitterLockSelect = ({
                         label={`\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0${t('vfo.lock_to_transmitter', 'Lock to Transmitter')}`}
                         onChange={handleChange}
                         sx={{ fontSize: '0.875rem' }}
+                        renderValue={() => selectedTransmitter ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+                                <TransmitterTargetLabel transmitter={selectedTransmitter} sx={{ maxWidth: '55%' }} />
+                                <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {selectedTransmitter.description}
+                                </Box>
+                            </Box>
+                        ) : t('vfo.none', 'None')}
                     >
                         <MenuItem value="none" sx={{ fontSize: '0.875rem' }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -204,7 +249,7 @@ export const TransmitterLockSelect = ({
                                 {band}
                             </ListSubheader>,
                             ...groupTx.map((tx) => (
-                                <MenuItem key={tx.uiId || tx.id} value={tx.id} sx={{ fontSize: '0.875rem', pl: 3 }}>
+                                <MenuItem key={getTransmitterOptionValue(tx)} value={getTransmitterOptionValue(tx)} sx={{ fontSize: '0.875rem', pl: 3 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
                                         <Box
                                             sx={{
@@ -218,14 +263,17 @@ export const TransmitterLockSelect = ({
                                                 flexShrink: 0,
                                             }}
                                         />
-                                        <Box sx={{ flex: 1 }}>
+                                        <Box sx={{ flex: 1, minWidth: 0 }}>
                                             <Box sx={{ fontWeight: 600 }}>{tx.description}</Box>
-                                            <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                                                {[
-                                                    tx.trackerLabel || null,
-                                                    `Source: ${tx.source || 'Unknown'}`,
-                                                    `${(tx.downlink_low / 1e6).toFixed(6)} MHz (${tx.mode})`,
-                                                ].filter(Boolean).join(' • ')}
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, mt: 0.3, minWidth: 0, whiteSpace: 'nowrap', fontSize: '0.75rem', color: 'text.secondary' }}>
+                                                <TransmitterTargetLabel transmitter={tx} sx={{ flexShrink: 0, maxWidth: '50%' }} />
+                                                <Box component="span" sx={{ flexShrink: 0 }}>•</Box>
+                                                <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                    {[
+                                                        `${(tx.downlink_low / 1e6).toFixed(6)} MHz (${tx.mode})`,
+                                                        tx.source || 'Unknown',
+                                                    ].filter(Boolean).join(' • ')}
+                                                </Box>
                                             </Box>
                                         </Box>
                                     </Box>

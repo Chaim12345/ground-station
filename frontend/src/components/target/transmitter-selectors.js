@@ -1,4 +1,5 @@
 import { createSelector } from '@reduxjs/toolkit';
+import { resolveTargetDisplayName } from './celestial-target-utils.js';
 
 const TARGET_TRACKER_ID_PATTERN = /^target-(\d+)$/;
 
@@ -98,14 +99,16 @@ export const selectRunningTrackerIds = createSelector(
 );
 
 export const selectRunningRigTransmitters = createSelector(
-    [selectTargetState, selectRunningTrackerIds],
-    (targetState, runningTrackerIds) => {
+    [selectTargetState, selectRunningTrackerIds, selectTrackerInstances],
+    (targetState, runningTrackerIds, trackerInstances) => {
         const trackerViews = targetState?.trackerViews || {};
         const activeTrackerId = normalizeTrackerId(targetState?.trackerId);
         const activeRigTransmitters = Array.isArray(targetState?.rigData?.transmitters)
             ? targetState.rigData.transmitters
             : [];
-        const activeSatelliteName = targetState?.satelliteData?.details?.name || '';
+        const instanceById = new Map((trackerInstances || []).map((instance) => [
+            normalizeTrackerId(instance?.tracker_id), instance,
+        ]));
 
         const seen = new Set();
         const transmitters = [];
@@ -113,9 +116,23 @@ export const selectRunningRigTransmitters = createSelector(
         runningTrackerIds.forEach((trackerId) => {
             const trackerView = trackerViews?.[trackerId] || {};
             const trackerLabel = getTrackerShortLabel(trackerId);
-            const trackerSatelliteName = trackerView?.satelliteData?.details?.name
-                || (trackerId === activeTrackerId ? activeSatelliteName : '')
-                || '';
+            const instanceTracking = instanceById.get(trackerId)?.tracking_state || {};
+            const viewTracking = trackerView?.trackingState || {};
+            const activeTracking = trackerId === activeTrackerId ? targetState?.trackingState || {} : {};
+            const trackerTargetName = resolveTargetDisplayName({
+                // Instance snapshots fill gaps while a tracker view is first loading.
+                trackingState: {
+                    ...activeTracking,
+                    ...instanceTracking,
+                    ...viewTracking,
+                    target_name: viewTracking.target_name || instanceTracking.target_name || activeTracking.target_name,
+                },
+                satelliteDetails: {
+                    name: trackerView?.satelliteData?.details?.name
+                        || (trackerId === activeTrackerId ? targetState?.satelliteData?.details?.name : '')
+                        || '',
+                },
+            });
             const trackerTransmitters = Array.isArray(trackerView?.rigData?.transmitters)
                 ? trackerView.rigData.transmitters
                 : (trackerId === activeTrackerId ? activeRigTransmitters : []);
@@ -133,7 +150,7 @@ export const selectRunningRigTransmitters = createSelector(
                     ...transmitter,
                     trackerId,
                     trackerLabel,
-                    trackerSatelliteName,
+                    trackerTargetName,
                     uiId: key,
                 });
             });
@@ -148,7 +165,7 @@ const transmitterOptionFields = [
     'uiId',
     'trackerId',
     'trackerLabel',
-    'trackerSatelliteName',
+    'trackerTargetName',
     'description',
     'source',
     'mode',
