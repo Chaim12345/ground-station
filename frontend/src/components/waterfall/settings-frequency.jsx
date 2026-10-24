@@ -7,14 +7,17 @@ import {
 import Typography from '@mui/material/Typography';
 import {
     Box,
+    Button,
     FormControl,
     InputLabel,
+    Menu,
     MenuItem,
     Select,
     TextField,
     ListSubheader,
 } from "@mui/material";
-import TuneIcon from '@mui/icons-material/Tune';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import NearMeIcon from '@mui/icons-material/NearMe';
 
 import { getFrequencyBand } from "../common/common.jsx";
 import FrequencyDisplay from "./frequency-dial.jsx";
@@ -27,8 +30,7 @@ const FrequencyControlAccordion = ({
                                        centerFrequency,
                                        onCenterFrequencyChange,
                                        availableTransmitters,
-                                       getProperTransmitterId,
-                                       onTransmitterChange,
+                                       onGoToTransmitter,
                                        selectedOffsetMode,
                                        onOffsetModeChange,
                                        selectedOffsetValue,
@@ -38,7 +40,14 @@ const FrequencyControlAccordion = ({
                                        isStreaming,
 }) => {
     const { t } = useTranslation('waterfall');
-    const selectedTransmitter = availableTransmitters.find(t => t.id === getProperTransmitterId());
+    const [menuAnchor, setMenuAnchor] = React.useState(null);
+    const menuOpen = Boolean(menuAnchor);
+
+    const handleMenuItemClick = (transmitter) => {
+        // Different targets can publish the same transmitter ID; use the exact menu choice.
+        onGoToTransmitter(transmitter);
+        setMenuAnchor(null);
+    };
     // Check if we're playing back a SigMF recording
     const isPlayingback = selectedSDRId === 'sigmf-playback' && isStreaming;
 
@@ -89,41 +98,32 @@ const FrequencyControlAccordion = ({
                     />
                 </Box>
 
-                <FormControl
-                    disabled={isRecording || isPlayingback}
-                    sx={{ mt: 1 }}
-                    fullWidth
-                    variant="outlined"
-                    size="small"
-                >
-                    <InputLabel id="frequency-transmitter-label">{t('frequency.go_to_transmitter')}</InputLabel>
-                    <Select
-                        labelId="frequency-transmitter-label"
-                        value={getProperTransmitterId()}
-                        onChange={onTransmitterChange}
-                        label={t('frequency.go_to_transmitter')}
-                        size="small"
-                        sx={{ fontSize: '0.875rem' }}
-                        renderValue={() => selectedTransmitter ? (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
-                                <TransmitterTargetLabel transmitter={selectedTransmitter} sx={{ maxWidth: '55%' }} />
-                                <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {selectedTransmitter.description}
-                                </Box>
-                            </Box>
-                        ) : t('settings_frequency.tune_or_pick_one', { defaultValue: 'Tune or pick one' })}
+                <Box sx={{ mt: 1.5 }}>
+                    <Button
+                        id="go-to-transmitter-button"
+                        variant="contained"
+                        fullWidth
+                        disabled={isRecording || isPlayingback || availableTransmitters.length === 0}
+                        startIcon={<NearMeIcon />}
+                        endIcon={<ArrowDropDownIcon />}
+                        onClick={(event) => setMenuAnchor(event.currentTarget)}
+                        aria-haspopup="menu"
+                        aria-controls={menuOpen ? 'go-to-transmitter-menu' : undefined}
+                        aria-expanded={menuOpen ? 'true' : undefined}
+                        sx={{ py: 1, fontWeight: 700, letterSpacing: 0.5, justifyContent: 'space-between' }}
                     >
-                        <MenuItem value="none" sx={{ fontSize: '0.875rem' }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <TuneIcon fontSize="small" />
-                                <Box>
-                                    <Box sx={{ fontWeight: 600 }}>{t('frequency.no_frequency_selected')}</Box>
-                                    <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                                        {t('settings_frequency.manual_control', { defaultValue: 'Manual control' })}
-                                    </Box>
-                                </Box>
-                            </Box>
-                        </MenuItem>
+                        {t('frequency.go_to_transmitter')}
+                    </Button>
+                    <Menu
+                        id="go-to-transmitter-menu"
+                        anchorEl={menuAnchor}
+                        open={menuOpen}
+                        onClose={() => setMenuAnchor(null)}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+                        MenuListProps={{ 'aria-labelledby': 'go-to-transmitter-button' }}
+                        PaperProps={{ sx: { maxHeight: 400, minWidth: menuAnchor?.clientWidth || 300 } }}
+                    >
                         {groupedTransmitters.map(({ band, transmitters: groupTx }) => [
                             <ListSubheader key={`header-${band}`} sx={{ fontSize: '0.75rem', fontWeight: 'bold', lineHeight: '32px' }}>
                                 {band}
@@ -131,7 +131,7 @@ const FrequencyControlAccordion = ({
                             ...groupTx.map((transmitter) => (
                                 <MenuItem
                                     key={transmitter.uiId || transmitter.id}
-                                    value={transmitter.id}
+                                    onClick={() => handleMenuItemClick(transmitter)}
                                     sx={{ fontSize: '0.875rem', pl: 3 }}
                                 >
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
@@ -164,8 +164,8 @@ const FrequencyControlAccordion = ({
                                 </MenuItem>
                             ))
                         ])}
-                    </Select>
-                </FormControl>
+                    </Menu>
+                </Box>
 
                 <FormControl
                     disabled={isRecording || isPlayingback}
@@ -265,8 +265,7 @@ function areFrequencyControlAccordionPropsEqual(prevProps, nextProps) {
         prevProps.centerFrequency === nextProps.centerFrequency &&
         prevProps.onCenterFrequencyChange === nextProps.onCenterFrequencyChange &&
         prevProps.availableTransmitters === nextProps.availableTransmitters &&
-        prevProps.getProperTransmitterId === nextProps.getProperTransmitterId &&
-        prevProps.onTransmitterChange === nextProps.onTransmitterChange &&
+        prevProps.onGoToTransmitter === nextProps.onGoToTransmitter &&
         prevProps.selectedOffsetMode === nextProps.selectedOffsetMode &&
         prevProps.onOffsetModeChange === nextProps.onOffsetModeChange &&
         prevProps.selectedOffsetValue === nextProps.selectedOffsetValue &&

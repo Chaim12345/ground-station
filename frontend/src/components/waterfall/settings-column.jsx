@@ -64,7 +64,6 @@ import {
     restoreSdrSelection,
     setSelectedAntenna,
     setSdrSoapyAgc,
-    setSelectedTransmitterId,
     setSelectedOffsetMode,
     setSelectedOffsetValue,
     startRecording,
@@ -175,7 +174,6 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         antennasList,
         selectedAntenna,
         hasSoapyAgc,
-        selectedTransmitterId,
         fftAveraging,
         bandscopeSmoothing,
         isRecording,
@@ -229,7 +227,6 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
             antennasList: state.waterfall.antennasList,
             selectedAntenna: state.waterfall.selectedAntenna,
             hasSoapyAgc: state.waterfall.hasSoapyAgc,
-            selectedTransmitterId: state.waterfall.selectedTransmitterId,
             fftAveraging: state.waterfall.fftAveraging,
             bandscopeSmoothing: state.waterfall.bandscopeSmoothing,
             isRecording: state.waterfall.isRecording,
@@ -913,22 +910,11 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         return sendSDRConfigToBackend({soapyAgc: enabled});
     };
 
-    const handleTransmitterChange = useCallback((event) => {
-        // If a transmitter was selected, then set the SDR center frequency
-        const transmitterId = event.target.value;
-
-        // Handle "none" selection - don't update frequency
-        if (transmitterId === "none") {
-            dispatch(setSelectedTransmitterId(transmitterId));
+    const handleGoToTransmitter = useCallback((transmitter) => {
+        const targetFrequency = Number(transmitter?.downlink_low);
+        if (!Number.isFinite(targetFrequency) || targetFrequency <= 0) {
             return;
         }
-
-        const selectedTransmitterMetadata = (runningTransmitters || []).find((t) => t.id === transmitterId);
-        if (!selectedTransmitterMetadata) {
-            return;
-        }
-
-        const targetFrequency = selectedTransmitterMetadata['downlink_low'] || 0;
 
         // Calculate offset to avoid DC spike at center.
         // If sample rate is unset (e.g., "none"), fall back to no offset.
@@ -937,10 +923,8 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         const newCenterFrequency = targetFrequency + offsetHz;
 
         dispatch(setCenterFrequency(newCenterFrequency));
-        sendSDRConfigToBackend({centerFrequency: newCenterFrequency}).then((response) => {
-            if (response?.success) dispatch(setSelectedTransmitterId(transmitterId));
-        });
-    }, [dispatch, runningTransmitters, sampleRate, sendSDRConfigToBackend]);
+        return sendSDRConfigToBackend({centerFrequency: newCenterFrequency});
+    }, [dispatch, sampleRate, sendSDRConfigToBackend]);
 
     const handleOffsetModeChange = useCallback((event) => {
         const offsetValue = event.target.value;
@@ -964,19 +948,6 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
         dispatch(setSelectedOffsetValue(offsetValue));
         return sendSDRConfigToBackend({offsetFrequency: parseInt(offsetValue)});
     }, [dispatch, sendSDRConfigToBackend]);
-
-    const getProperTransmitterId = useCallback(() => {
-        const transmitters = runningTransmitters || [];
-        if (transmitters.length > 0 && selectedTransmitterId) {
-            if (transmitters.find(t => t.id === selectedTransmitterId)) {
-                return selectedTransmitterId;
-            } else {
-                return "none";
-            }
-        } else {
-            return "none";
-        }
-    }, [runningTransmitters, selectedTransmitterId]);
 
     const handleSdrAccordionChange = useCallback((event, isExpanded) => {
         const panel = 'sdr';
@@ -1746,8 +1717,7 @@ const WaterfallSettings = forwardRef(function WaterfallSettings({ playbackRemain
                     centerFrequency={centerFrequency}
                     onCenterFrequencyChange={handleFrequencyDialChange}
                     availableTransmitters={runningTransmitters || []}
-                    getProperTransmitterId={getProperTransmitterId}
-                    onTransmitterChange={handleTransmitterChange}
+                    onGoToTransmitter={handleGoToTransmitter}
                     selectedOffsetMode={selectedOffsetMode}
                     onOffsetModeChange={handleOffsetModeChange}
                     selectedOffsetValue={selectedOffsetValue}

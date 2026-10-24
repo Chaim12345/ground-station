@@ -193,7 +193,6 @@ const initialState = {
     showLeftSideWaterFallAccessories: true,
     expandedPanels: ['recording', 'playback', 'sdr', 'freqControl', 'fft', 'vfo'],
     selectedSDRId: "none",
-    selectedTransmitterId: "none",
     startStreamingLoading: false,
     gettingSDRParameters: false,
     gainValues: [],
@@ -518,9 +517,6 @@ export const waterfallSlice = createSlice({
         setHasSoapyAgc(state, action) {
             state.hasSoapyAgc = action.payload;
         },
-        setSelectedTransmitterId(state, action) {
-            state.selectedTransmitterId = action.payload;
-        },
         setFFTdataOverflow: (state, action) => {
             state.fftDataOverflow = action.payload;
         },
@@ -834,7 +830,6 @@ export const {
     clearStartStreamValidationErrors,
     clearStartStreamValidationError,
     setHasSoapyAgc,
-    setSelectedTransmitterId,
     setSelectedOffsetMode,
     setSelectedOffsetValue,
     setShowRotatorDottedLines,
