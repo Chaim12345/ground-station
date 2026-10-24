@@ -62,6 +62,7 @@ from tlesync.utils import (
     get_satellite_by_norad_id,
     get_transmitter_info_by_norad_id,
     normalize_external_transmitter_id,
+    orbit_fingerprint,
     query_existing_data,
     resolve_sync_source_urls,
     update_satellite_group_with_removal_detection,
@@ -692,6 +693,14 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
                     satellite, satnogs_sat_info
                 )
 
+                existing_orbit = await dbsession.get(SatelliteOrbits, (norad_id, "earth"))
+                orbit = create_satellite_orbit_from_source_data(
+                    sat,
+                    norad_id,
+                    existing_orbit=existing_orbit,
+                )
+                satellite_data_for_comparison["orbit"] = orbit_fingerprint(orbit)
+
                 # Check if satellite was modified (not new but has changes)
                 if not is_new_satellite:
                     detect_satellite_modifications(
@@ -704,12 +713,6 @@ async def synchronize_satellite_data_internal(dbsession, logger, emit_callback):
 
                 # add to dbsession
                 await dbsession.merge(satellite)
-                existing_orbit = await dbsession.get(SatelliteOrbits, (norad_id, "earth"))
-                orbit = create_satellite_orbit_from_source_data(
-                    sat,
-                    norad_id,
-                    existing_orbit=existing_orbit,
-                )
                 dbsession.add(orbit)
 
                 # commit session

@@ -14,6 +14,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
+import hashlib
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,26 @@ TRANSMITTER_ID_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuv
 TRANSMITTER_ID_ALPHABET_SET = set(TRANSMITTER_ID_ALPHABET)
 TRANSMITTER_ID_BASE = len(TRANSMITTER_ID_ALPHABET)
 TRANSMITTER_ID_LENGTH = 22
+
+
+def orbit_fingerprint(orbit: Optional[SatelliteOrbits]) -> Optional[str]:
+    """Compare canonical elements without putting large OMM payloads in sync events."""
+    if orbit is None:
+        return None
+    epoch = orbit.epoch
+    if isinstance(epoch, datetime):
+        if epoch.tzinfo is None:
+            epoch = epoch.replace(tzinfo=timezone.utc)
+        epoch = epoch.astimezone(timezone.utc).isoformat()
+    content = {
+        "model_kind": orbit.model_kind,
+        "epoch": epoch,
+        "tle1": orbit.tle1,
+        "tle2": orbit.tle2,
+        "omm_payload": orbit.omm_payload,
+    }
+    encoded = json.dumps(content, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def uuid_to_short_transmitter_id(value: uuid.UUID | str) -> str:
@@ -358,7 +379,17 @@ async def query_existing_data(dbsession, logger):
                 "operator": row.operator,
                 "countries": row.countries,
                 "is_frequency_violator": row.is_frequency_violator,
+                "orbit": None,
             }
+
+        # Snapshot the canonical row before sync mutates it in this session.
+        orbit_result = await dbsession.execute(
+            select(SatelliteOrbits).where(SatelliteOrbits.central_body == "earth")
+        )
+        for orbit in orbit_result.scalars().all():
+            existing = existing_satellites.get(orbit.satellite_norad_id)
+            if existing is not None:
+                existing["orbit"] = orbit_fingerprint(orbit)
 
         # Query existing transmitters
         transmitter_result = await dbsession.execute(select(Transmitters))

@@ -207,6 +207,17 @@ const normalizeSatelliteData = (satelliteData = {}) => ({
     transmitters: normalizeTransmitters(satelliteData.transmitters || []),
 });
 
+const mergeSatelliteDetails = (previous = {}, incoming = {}) => {
+    // Preserve catalog metadata for the same target, but never carry orbital
+    // fields from a previous target into a newly streamed satellite.
+    const sameTarget = previous.norad_id != null && incoming.norad_id != null
+        && String(previous.norad_id) === String(incoming.norad_id);
+    return {
+        ...(sameTarget ? previous : cloneDefaultSatelliteData().details),
+        ...incoming,
+    };
+};
+
 const transmitterIdentity = (tx = {}) =>
     String(
         tx.id
@@ -250,6 +261,11 @@ const cloneDefaultSatelliteData = () => ({
         countries: '',
         tle1: "",
         tle2: "",
+        orbit_format: "",
+        orbit_model_kind: "",
+        orbit_central_body: "earth",
+        orbit_epoch: null,
+        orbit_payload: null,
         launched: null,
         deployed: null,
         decayed: null,
@@ -950,10 +966,9 @@ const targetSatTrackSlice = createSlice({
                 const hasNextPass = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'nextPass');
 
                 if (hasDetails) {
-                    trackerView.satelliteData.details = {
-                        ...(trackerView.satelliteData.details || {}),
-                        ...(normalizedSatelliteData.details || {}),
-                    };
+                    trackerView.satelliteData.details = mergeSatelliteDetails(
+                        trackerView.satelliteData.details, normalizedSatelliteData.details,
+                    );
                 }
                 if (hasPosition) {
                     trackerView.satelliteData.position = normalizedSatelliteData.position;
@@ -1030,10 +1045,9 @@ const targetSatTrackSlice = createSlice({
                 const hasNextPass = Object.prototype.hasOwnProperty.call(rawSatelliteData, 'nextPass');
 
                 if (hasDetails) {
-                    state.satelliteData.details = {
-                        ...(state.satelliteData.details || {}),
-                        ...(normalizedSatelliteData.details || {}),
-                    };
+                    state.satelliteData.details = mergeSatelliteDetails(
+                        state.satelliteData.details, normalizedSatelliteData.details,
+                    );
                 }
                 if (hasPosition) {
                     state.satelliteData.position = normalizedSatelliteData.position;

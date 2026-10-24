@@ -7,6 +7,7 @@ from queue import Queue
 import pytest
 
 from orbits import CentralBody, build_satellite_ephemeris_payload, get_propagation_input
+from tracker.data import _is_geostationary_orbit
 from tracker.ipc import TRACKER_MSG_SET_SATELLITE_EPHEMERIS
 from tracker.logic import SatelliteTracker
 from tracking.doppler import (
@@ -112,11 +113,34 @@ def test_tracker_compiles_six_digit_omm_ephemeris_without_tle():
     assert context is not None
     assert context["satellite_data"]["error"] is False
     assert context["satellite_data"]["details"]["norad_id"] == 100000
+    assert context["satellite_data"]["details"]["orbit_format"] == "omm"
+    assert context["satellite_data"]["details"]["orbit_payload"] == OMM_PAYLOAD
     assert context["satellite_tles"] is None
     assert math.isfinite(context["range_rate_km_s"])
     assert context["range_rate_km_s"] != 0
     assert all(math.isfinite(value) for value in context["skypoint"])
     assert all(math.isfinite(value) for value in context["command_skypoint"])
+
+
+def test_geostationary_classification_uses_canonical_omm_elements():
+    geo_payload = {
+        **OMM_PAYLOAD,
+        "NORAD_CAT_ID": "25544",
+        "MEAN_MOTION": "1.0027",
+        "INCLINATION": "0.2",
+        "ECCENTRICITY": "0.0001",
+    }
+    orbit = {
+        "norad_id": 25544,
+        "orbit_format": "omm",
+        "orbit_payload": geo_payload,
+        # A compatibility cache must not override the canonical OMM classification.
+        "tle1": "1 25544U 98067A   25001.50000000  .00012345  00000-0  21914-3 0  9999",
+        "tle2": "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.50000000999999",
+    }
+    assert _is_geostationary_orbit(get_propagation_input(orbit))
+    inclined = {**orbit, "orbit_payload": {**geo_payload, "INCLINATION": "12.0"}}
+    assert not _is_geostationary_orbit(get_propagation_input(inclined))
 
 
 @pytest.mark.asyncio

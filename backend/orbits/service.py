@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Mapping, Optional
 
@@ -28,6 +28,7 @@ from sgp4.api import Satrec
 from sqlalchemy import select
 
 import crud
+from common.orbitcompat import normalize_omm_fields as _normalize_omm_fields
 from db.models import SatelliteOrbits, Satellites
 
 
@@ -210,7 +211,17 @@ class OrbitService:
         except (TypeError, ValueError) as e:
             raise OrbitServiceError(f"Invalid norad_id: {object_id_raw}") from e
 
-        model_kind = _resolve_model_kind(satellite.get("orbit_format"))
+        model_kind_raw = satellite.get("orbit_model_kind")
+        orbit_format_raw = satellite.get("orbit_format")
+        if model_kind_raw and orbit_format_raw:
+            if _resolve_model_kind(model_kind_raw) != _resolve_model_kind(orbit_format_raw):
+                raise OrbitServiceError("Conflicting orbit_model_kind and orbit_format")
+        model_kind = _resolve_model_kind(model_kind_raw or orbit_format_raw)
+        record_body = str(satellite.get("orbit_central_body") or central_body.value).strip().lower()
+        if record_body != central_body.value:
+            raise OrbitServiceError(
+                f"Orbit body mismatch: expected={central_body.value} actual={record_body}"
+            )
         return OrbitState(
             object_id=object_id,
             object_name=_coerce_optional_string(satellite.get("name")),
@@ -311,20 +322,19 @@ def build_satellite_ephemeris_payload(
     TLE fields are retained only for legacy consumers.  OMM-capable consumers
     receive the canonical payload and must not depend on a TLE being present.
     """
-    propagation_input = get_propagation_input(satellite, central_body=central_body)
+    orbit_state = get_orbit_state(satellite, central_body=central_body)
+    propagation_input = orbit_service.get_propagation_input_from_state(orbit_state)
     payload: Dict[str, Any] = {
         "norad_id": propagation_input.object_id,
         "name": propagation_input.object_name,
         "tle1": propagation_input.tle1,
         "tle2": propagation_input.tle2,
+        "orbit_format": orbit_state.model_kind.value,
+        "orbit_model_kind": orbit_state.model_kind.value,
+        "orbit_central_body": orbit_state.central_body.value,
+        "orbit_epoch": orbit_state.epoch.isoformat() if orbit_state.epoch else None,
+        "orbit_payload": orbit_state.omm_payload,
     }
-    if propagation_input.model_kind == OrbitModelKind.OMM:
-        # Use the satellite record field names: the worker feeds this payload
-        # back through get_propagation_input() on every tracking iteration.
-        payload["orbit_format"] = OrbitModelKind.OMM.value
-        payload["orbit_payload"] = orbit_service.get_orbit_state_from_satellite_record(
-            satellite, central_body
-        ).omm_payload
     return payload
 
 
@@ -351,7 +361,12 @@ def build_skyfield_satellite(propagation_input: PropagationInput, timescale):
 
 def _resolve_model_kind(raw_orbit_format: Any) -> OrbitModelKind:
     value = str(raw_orbit_format or "").strip().lower()
-    return OrbitModelKind.OMM if value == OrbitModelKind.OMM.value else OrbitModelKind.TLE
+    if not value:
+        return OrbitModelKind.TLE
+    try:
+        return OrbitModelKind(value)
+    except ValueError as error:
+        raise OrbitServiceError(f"Unsupported orbit model kind: {raw_orbit_format}") from error
 
 
 def _coerce_optional_string(value: Any) -> Optional[str]:
@@ -380,49 +395,3 @@ def _coerce_datetime(value: Any) -> Optional[datetime]:
         except ValueError:
             return None
     return None
-
-
-def _normalize_omm_fields(raw_fields: Mapping[str, Any]) -> Dict[str, str]:
-    """Prepare persisted OMM fields for sgp4 without changing their meaning."""
-    fields: Dict[str, str] = {}
-    for key, value in raw_fields.items():
-        if key is None or value is None:
-            continue
-        normalized_key = str(key).strip().upper()
-        normalized_value = str(value).strip()
-        if normalized_key and normalized_value:
-            fields[normalized_key] = normalized_value
-
-    required = {
-        "OBJECT_ID",
-        "NORAD_CAT_ID",
-        "EPOCH",
-        "INCLINATION",
-        "RA_OF_ASC_NODE",
-        "ECCENTRICITY",
-        "ARG_OF_PERICENTER",
-        "MEAN_ANOMALY",
-        "MEAN_MOTION",
-    }
-    missing = sorted(required - set(fields))
-    if missing:
-        raise ValueError(f"OMM row missing required fields: {missing}")
-
-    epoch = _coerce_datetime(fields["EPOCH"])
-    if epoch is None:
-        raise ValueError(f"Invalid OMM epoch value: {fields['EPOCH']}")
-    if epoch.tzinfo is None:
-        # OMM timestamps without an offset are defined in the stated TIME_SYSTEM (UTC here),
-        # never in the host machine's local timezone.
-        epoch = epoch.replace(tzinfo=timezone.utc)
-    fields["EPOCH"] = (
-        epoch.astimezone(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S.%f")
-    )
-    fields.setdefault("CLASSIFICATION_TYPE", "U")
-    fields.setdefault("EPHEMERIS_TYPE", "0")
-    fields.setdefault("ELEMENT_SET_NO", "0")
-    fields.setdefault("REV_AT_EPOCH", "0")
-    fields.setdefault("MEAN_MOTION_DOT", "0.0")
-    fields.setdefault("MEAN_MOTION_DDOT", "0.0")
-    fields.setdefault("BSTAR", "0.0")
-    return fields

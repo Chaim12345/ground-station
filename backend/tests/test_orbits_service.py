@@ -154,7 +154,27 @@ def test_build_satellite_ephemeris_payload_preserves_tracker_shape():
         "name": "ISS (ZARYA)",
         "tle1": LEGACY_SATELLITE["tle1"],
         "tle2": LEGACY_SATELLITE["tle2"],
+        "orbit_format": "tle",
+        "orbit_model_kind": "tle",
+        "orbit_central_body": "earth",
+        "orbit_epoch": None,
+        "orbit_payload": None,
     }
+
+
+def test_orbit_model_alias_and_conflict_are_explicit():
+    omm_row = {
+        "norad_id": 25544,
+        "orbit_model_kind": "omm",
+        "orbit_payload": OMM_PAYLOAD,
+    }
+    assert get_propagation_input(omm_row).model_kind == OrbitModelKind.OMM
+
+    with pytest.raises(OrbitServiceError, match="Conflicting"):
+        get_propagation_input({**omm_row, "orbit_format": "tle"})
+
+    with pytest.raises(OrbitServiceError, match="Unsupported"):
+        get_propagation_input({**LEGACY_SATELLITE, "orbit_format": "unknown"})
 
 
 def test_get_orbit_state_rejects_non_earth_body_for_now():

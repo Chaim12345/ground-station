@@ -16,12 +16,15 @@
 
 import hashlib
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, TypedDict, Union
 
+from sgp4.api import Satrec
+
 import crud
-from common.common import is_geostationary, serialize_object
+from common.common import serialize_object
 from db import AsyncSessionLocal
 from orbits import CentralBody, PropagationInput, get_propagation_input
 from tracker.contracts import get_tracking_state_name
@@ -37,9 +40,11 @@ class SatelliteDetails(TypedDict):
     """Type definition for satellite details."""
 
     name: str
-    tle1: str
-    tle2: str
+    tle1: Optional[str]
+    tle2: Optional[str]
     norad_id: int
+    orbit_format: str
+    orbit_payload: Optional[Dict[str, Any]]
     is_geostationary: bool
 
 
@@ -193,13 +198,18 @@ def _orbit_cache_keys(propagation_input: PropagationInput) -> tuple[str, str]:
 
 
 def _is_geostationary_orbit(propagation_input: PropagationInput) -> bool:
-    """Classify OMM directly; retain the existing TLE classifier for legacy rows."""
-    if propagation_input.tle1 and propagation_input.tle2:
-        return bool(is_geostationary([propagation_input.tle1, propagation_input.tle2]))
-    if propagation_input.satrec is None:
+    """Apply one element-based GEO rule to the canonical orbit in either format."""
+    satrec = propagation_input.satrec
+    if satrec is None and propagation_input.tle1 and propagation_input.tle2:
+        satrec = Satrec.twoline2rv(propagation_input.tle1, propagation_input.tle2)
+    if satrec is None or satrec.error:
         return False
-    mean_motion_rev_per_day = propagation_input.satrec.no_kozai * 1440.0 / (2.0 * 3.141592653589793)
-    return bool(0.99 <= mean_motion_rev_per_day <= 1.01)
+    mean_motion_rev_per_day = satrec.no_kozai * 1440.0 / (2.0 * math.pi)
+    return bool(
+        0.995 <= mean_motion_rev_per_day <= 1.005
+        and abs(math.degrees(satrec.inclo)) <= 3.0
+        and satrec.ecco <= 0.01
+    )
 
 
 def _resolve_min_future_buffer_seconds(step_minutes: float) -> float:
@@ -455,6 +465,13 @@ def compiled_satellite_data_from_inputs(
             "tle1": propagation_input.tle1,
             "tle2": propagation_input.tle2,
             "norad_id": satellite.get("norad_id"),
+            # Include the canonical orbit in the stream, including explicit nulls
+            # when a target switches from OMM to TLE.
+            "orbit_format": propagation_input.model_kind.value,
+            "orbit_model_kind": propagation_input.model_kind.value,
+            "orbit_central_body": satellite.get("orbit_central_body") or "earth",
+            "orbit_epoch": satellite.get("orbit_epoch"),
+            "orbit_payload": satellite.get("orbit_payload"),
         }
         satellite_details["is_geostationary"] = _is_geostationary_orbit(propagation_input)
         satellite_data["details"] = satellite_details

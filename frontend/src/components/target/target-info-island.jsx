@@ -1043,10 +1043,29 @@ const TargetInfoIsland = () => {
 
                 <Divider sx={{ my: 1, borderColor: 'border.main' }} />
 
-                {/* TLE Data */}
+                {/* OMM is the canonical orbit even when a compatibility TLE exists. */}
+                {satelliteData?.details?.orbit_format === 'omm' && satelliteData?.details?.orbit_payload && (
+                    <>
+                        <Section title={t('target_info_island.omm_data', { defaultValue: 'OMM Orbit Data' })} icon={SatelliteAltIcon}>
+                            <Box component="pre" sx={{
+                                m: 0, p: 1, maxHeight: 220, overflow: 'auto',
+                                bgcolor: 'overlay.light', borderRadius: 1,
+                                color: 'text.primary', fontSize: '0.65rem', whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-all',
+                            }}>
+                                {JSON.stringify(satelliteData.details.orbit_payload, null, 2)}
+                            </Box>
+                        </Section>
+                        <Divider sx={{ my: 1, borderColor: 'border.main' }} />
+                    </>
+                )}
+
+                {/* Compatibility TLE or the canonical TLE for older records. */}
                 {satelliteData && satelliteData['details'] && satelliteData['details']['tle1'] && (
                     <>
-                        <Section title={t('target_info_island.tle_data', { defaultValue: 'TLE Data' })} icon={SatelliteAltIcon}>
+                        <Section title={satelliteData.details.orbit_format === 'omm'
+                            ? t('target_info_island.compatibility_tle', { defaultValue: 'Compatibility TLE' })
+                            : t('target_info_island.tle_data', { defaultValue: 'TLE Data' })} icon={SatelliteAltIcon}>
                             <Box sx={{
                                 p: 1,
                                 bgcolor: 'overlay.light',

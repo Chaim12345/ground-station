@@ -23,7 +23,13 @@ import numpy as np
 from skyfield.api import Loader, Topos
 
 from common.common import ModelEncoder
-from orbits import CentralBody, OrbitServiceError, build_skyfield_satellite, get_propagation_input
+from orbits import (
+    CentralBody,
+    OrbitModelKind,
+    OrbitServiceError,
+    build_skyfield_satellite,
+    get_propagation_input,
+)
 
 logger = logging.getLogger("passes-worker")
 
@@ -315,17 +321,22 @@ def calculate_next_events(
 
         for tle_group in tle_groups:
             norad_id, line1, line2 = tle_group
+            orbit_record = satellite_info.get(
+                norad_id,
+                {"norad_id": norad_id, "tle1": line1, "tle2": line2},
+            )
+            propagation_input = get_propagation_input(orbit_record, central_body=CentralBody.EARTH)
 
-            # Check for extreme orbital decay indicators in TLE
+            # This legacy fixed-column guard applies only when TLE is canonical.
             # The First Derivative of Mean Motion (columns 34-43) indicates orbital decay rate
             # High values (>0.01) indicate rapid orbital decay and will cause propagation issues
-            if line1:
+            if propagation_input.model_kind == OrbitModelKind.TLE and propagation_input.tle1:
                 try:
                     # Extract first derivative of mean motion (columns 34-43, 0-indexed: 33-42)
                     # Format: ±.dddddddd (decimal value with explicit decimal point)
                     # Example: " .11903621" = 0.11903621
                     # Example: " .00013419" = 0.00013419 (normal)
-                    ndot_str = line1[33:43].strip()
+                    ndot_str = propagation_input.tle1[33:43].strip()
                     if ndot_str:
                         ndot = float(ndot_str)
                         ndot_threshold = 0.01
@@ -343,11 +354,6 @@ def calculate_next_events(
                     )
                     # Continue anyway - if we can't parse, let Skyfield try.
 
-            orbit_record = satellite_info.get(
-                norad_id,
-                {"norad_id": norad_id, "tle1": line1, "tle2": line2},
-            )
-            propagation_input = get_propagation_input(orbit_record, central_body=CentralBody.EARTH)
             satellite = build_skyfield_satellite(propagation_input, ts)
 
             # Check if it is geostationary or geosynchronous

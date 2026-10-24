@@ -13,6 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+"""Satellite geometry; TLE-argument functions are legacy compatibility entry points.
+
+New tracking callers use the PropagationInput variants below.
+"""
 
 import math
 from datetime import datetime, timedelta, timezone

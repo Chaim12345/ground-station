@@ -21,6 +21,9 @@
 import * as satellite from 'satellite.js';
 import { toast } from "../../utils/toast-with-timestamp.jsx";
 
+// TLE-argument exports in this module are legacy compatibility helpers.
+// Active orbit views use createSatelliteRecord in hooks/liveorbit.js.
+
 // Keep tracking propagation notifications quiet during high-frequency map refreshes.
 // We show one user-visible toast, then suppress the rest.
 let hasShownTrackingPropagationToast = false;

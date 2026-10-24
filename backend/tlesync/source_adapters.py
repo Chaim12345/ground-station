@@ -27,9 +27,9 @@ from urllib.parse import unquote, urlparse
 
 import requests
 from sgp4 import omm
-from sgp4.api import Satrec
-from sgp4.exporter import export_tle
 
+from common.orbitcompat import export_omm_tle
+from common.orbitcompat import normalize_omm_fields as _normalize_omm_fields
 from tlesync.celestrak import get_celestrak_gp, is_celestrak_url, validate_celestrak_source
 from tlesync.utils import parse_norad_id_from_line1, simple_parse_3le
 
@@ -300,13 +300,8 @@ def _normalize_omm_records(content: str, source: Dict[str, Any]) -> List[Dict[st
         norad_id = int(fields["NORAD_CAT_ID"])
         tle1 = None
         tle2 = None
-        if norad_id <= 99999:
-            # TLE remains a compatibility cache for consumers such as SatDump.
-            # Never attempt this conversion for six-digit catalogue numbers:
-            # their five-character TLE field would be lossy or invalid.
-            satrec = Satrec()
-            omm.initialize(satrec, fields)
-            tle1, tle2 = (line.strip() for line in export_tle(satrec))
+        # TLE remains an optional compatibility cache for consumers such as SatDump.
+        tle1, tle2 = export_omm_tle(fields, norad_id)
         epoch = _parse_epoch_datetime(fields.get("EPOCH"))
         name = (
             _clean_optional_text(fields.get("OBJECT_NAME"))
@@ -355,58 +350,6 @@ def _parse_omm_rows(content: str) -> List[Dict[str, Any]]:
         return [dict(row) for row in omm.parse_xml(io.StringIO(text))]
 
     return [dict(row) for row in omm.parse_csv(io.StringIO(text))]
-
-
-def _normalize_omm_fields(raw_fields: Dict[str, Any]) -> Dict[str, str]:
-    normalized: Dict[str, str] = {}
-    for key, value in raw_fields.items():
-        if key is None:
-            continue
-        clean_key = str(key).strip().upper()
-        if not clean_key:
-            continue
-        if value is None:
-            continue
-        normalized[clean_key] = str(value).strip()
-
-    if "EPOCH" not in normalized:
-        raise ValueError("OMM row missing EPOCH")
-
-    # sgp4.omm.initialize expects fixed epoch format without timezone suffix.
-    normalized["EPOCH"] = _normalize_epoch_for_sgp4(normalized["EPOCH"])
-
-    # Some providers omit these; default values keep initialization stable.
-    normalized.setdefault("CLASSIFICATION_TYPE", "U")
-    normalized.setdefault("EPHEMERIS_TYPE", "0")
-    normalized.setdefault("ELEMENT_SET_NO", "0")
-    normalized.setdefault("REV_AT_EPOCH", "0")
-    normalized.setdefault("MEAN_MOTION_DOT", "0.0")
-    normalized.setdefault("MEAN_MOTION_DDOT", "0.0")
-    normalized.setdefault("BSTAR", "0.0")
-
-    required = {
-        "OBJECT_ID",
-        "NORAD_CAT_ID",
-        "EPOCH",
-        "INCLINATION",
-        "RA_OF_ASC_NODE",
-        "ECCENTRICITY",
-        "ARG_OF_PERICENTER",
-        "MEAN_ANOMALY",
-        "MEAN_MOTION",
-    }
-    missing = sorted(field for field in required if field not in normalized)
-    if missing:
-        raise ValueError(f"OMM row missing required fields: {missing}")
-
-    return normalized
-
-
-def _normalize_epoch_for_sgp4(epoch_value: str) -> str:
-    dt = _parse_epoch_datetime(epoch_value)
-    if dt is None:
-        raise ValueError(f"Invalid OMM epoch value: {epoch_value}")
-    return dt.astimezone(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 
 def _parse_epoch_datetime(value: Optional[str]) -> Optional[datetime]:

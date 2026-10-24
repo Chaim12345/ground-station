@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 from skyfield.api import EarthSatellite, load
 
+import tracking.passes as passes_module
 from tracking.passes import (
     analyze_satellite_orbit,
     calculate_azimuth_path,
@@ -407,6 +408,30 @@ class TestCalculateNextEventsIntegration:
     Note: These tests require Skyfield library and may take longer to run.
     They're marked as integration tests and can be run separately.
     """
+
+    def test_omm_with_compatibility_tle_is_not_rejected_by_tle_decay_guard(self, monkeypatch):
+        from tests.testommtracking import OMM_PAYLOAD
+
+        reached_canonical_propagator = []
+
+        def capture_propagation(_input, _timescale):
+            reached_canonical_propagator.append(True)
+            raise RuntimeError("canonical propagator reached")
+
+        monkeypatch.setattr(passes_module, "build_skyfield_satellite", capture_propagation)
+        result = calculate_next_events(
+            satellite_data={
+                "norad_id": 100000,
+                "orbit_format": "omm",
+                "orbit_payload": OMM_PAYLOAD,
+                "tle1": "1 25544U 98067A   25001.50000000  .11903621  00000-0  21914-3 0  9999",
+                "tle2": "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.50000000999999",
+            },
+            home_location={"lat": 37.7749, "lon": -122.4194},
+            hours=1,
+        )
+        assert reached_canonical_propagator
+        assert result["error"] == "canonical propagator reached"
 
     @pytest.mark.integration
     def test_calculate_next_events_single_satellite_dict(self, iss_tle):

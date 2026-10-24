@@ -47,9 +47,15 @@ export const createSatelliteRecord = (satelliteData = {}) => {
         return { record: null, source: null, error: `Unsupported central body: ${centralBody}` };
     }
 
-    const modelKind = String(
-        satelliteData?.orbit_model_kind || satelliteData?.orbit_format || 'tle'
-    ).trim().toLowerCase();
+    const declaredModel = String(satelliteData?.orbit_model_kind || '').trim().toLowerCase();
+    const declaredFormat = String(satelliteData?.orbit_format || '').trim().toLowerCase();
+    if (declaredModel && declaredFormat && declaredModel !== declaredFormat) {
+        return { record: null, source: null, error: 'Conflicting orbit model and format' };
+    }
+    const modelKind = declaredModel || declaredFormat || 'tle';
+    if (modelKind !== 'tle' && modelKind !== 'omm') {
+        return { record: null, source: null, error: `Unsupported orbit model: ${modelKind}` };
+    }
     const tle1 = String(satelliteData?.tle1 || '').trim();
     const tle2 = String(satelliteData?.tle2 || '').trim();
 
@@ -66,12 +72,9 @@ export const createSatelliteRecord = (satelliteData = {}) => {
     };
 
     try {
-        // Prefer the canonical database model while retaining TLE compatibility
-        // for migrated OMM rows that still include representable TLE lines.
-        const result = modelKind === 'omm'
-            ? (createFromOmm() || createFromTle())
-            : (createFromTle() || createFromOmm());
-        return result || { record: null, source: null, error: 'No usable TLE or OMM elements' };
+        // A bad canonical orbit must not silently turn into an older cache orbit.
+        const result = modelKind === 'omm' ? createFromOmm() : createFromTle();
+        return result || { record: null, source: null, error: `No usable ${modelKind.toUpperCase()} elements` };
     } catch (error) {
         return { record: null, source: null, error: error?.message || 'Invalid orbital elements' };
     }

@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.common import logger, serialize_object
+from common.orbitcompat import export_omm_tle
 from crud.groups import fetch_satellite_group
 from db.models import Groups, SatelliteGroupType, SatelliteOrbits, Satellites, Transmitters
 
@@ -149,8 +150,11 @@ def _normalize_orbit_payload(
             f"Invalid orbit central_body '{central_body}'. Expected one of: {sorted(SUPPORTED_CENTRAL_BODIES)}"
         )
 
-    tle1 = str(payload.get("tle1") or fallback_tle1 or "").strip()
-    tle2 = str(payload.get("tle2") or fallback_tle2 or "").strip()
+    # An explicitly empty field clears the previous compatibility cache.
+    raw_tle1 = payload["tle1"] if "tle1" in payload else fallback_tle1
+    raw_tle2 = payload["tle2"] if "tle2" in payload else fallback_tle2
+    tle1: Optional[str] = str(raw_tle1 or "").strip() or None
+    tle2: Optional[str] = str(raw_tle2 or "").strip() or None
     epoch = _coerce_datetime(payload.get("epoch") or payload.get("orbit_epoch"))
     omm_payload = _coerce_optional_json_dict(payload.get("omm_payload"))
     source_id = _coerce_optional_uuid(payload.get("source_id"))
@@ -166,6 +170,12 @@ def _normalize_orbit_payload(
     else:
         if omm_payload is None:
             raise ValueError("Missing required field: orbit.omm_payload")
+        # Never retain TLE lines from the previous orbit when OMM becomes canonical.
+        # For representable catalogue numbers, derive the cache from these OMM elements.
+        if central_body == "earth":
+            tle1, tle2 = export_omm_tle(omm_payload, satellite_id)
+        else:
+            tle1, tle2 = None, None
 
     return {
         "central_body": central_body,

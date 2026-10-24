@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
+from common.orbitcompat import export_omm_tle
 from crud.groups import add_satellite_group, fetch_satellite_group
 from crud.satellites import (
     add_satellite,
@@ -1015,8 +1016,19 @@ class TestSatellitesCRUD:
             },
         )
 
-        updated_tle1 = "1 77901U 24001A   26010.50000000  .00001000  00000-0  10000-3 0  9992"
-        updated_tle2 = "2 77901  97.4000 221.0000 0001000  30.0000 330.0000 14.90000000123456"
+        omm_payload = {
+            "NORAD_CAT_ID": str(norad_id),
+            "OBJECT_NAME": "OMM Test Satellite",
+            "OBJECT_ID": "2024-001A",
+            "EPOCH": "2026-01-10T12:00:00Z",
+            "INCLINATION": "97.4",
+            "RA_OF_ASC_NODE": "221.0",
+            "ECCENTRICITY": "0.0001",
+            "ARG_OF_PERICENTER": "30.0",
+            "MEAN_ANOMALY": "330.0",
+            "MEAN_MOTION": "14.9",
+        }
+        expected_tle1, expected_tle2 = export_omm_tle(omm_payload, norad_id)
 
         edit_result = await edit_satellite(
             db_session,
@@ -1024,12 +1036,9 @@ class TestSatellitesCRUD:
             orbit={
                 "central_body": "earth",
                 "model_kind": "omm",
-                "tle1": updated_tle1,
-                "tle2": updated_tle2,
-                "omm_payload": {
-                    "NORAD_CAT_ID": str(norad_id),
-                    "OBJECT_NAME": "OMM Test Satellite",
-                },
+                "tle1": "",
+                "tle2": "",
+                "omm_payload": omm_payload,
             },
         )
 
@@ -1044,8 +1053,8 @@ class TestSatellitesCRUD:
         ).scalar_one_or_none()
         assert orbit_row is not None
         assert orbit_row.model_kind == "omm"
-        assert orbit_row.tle1 == updated_tle1
-        assert orbit_row.tle2 == updated_tle2
+        assert orbit_row.tle1 == expected_tle1
+        assert orbit_row.tle2 == expected_tle2
         assert isinstance(orbit_row.omm_payload, dict)
         assert orbit_row.omm_payload.get("NORAD_CAT_ID") == str(norad_id)
 
@@ -1054,5 +1063,5 @@ class TestSatellitesCRUD:
         assert len(fetched["data"]) == 1
         projected = fetched["data"][0]
         assert projected["orbit_format"] == "omm"
-        assert projected["tle1"] == updated_tle1
-        assert projected["tle2"] == updated_tle2
+        assert projected["tle1"] == expected_tle1
+        assert projected["tle2"] == expected_tle2

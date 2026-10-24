@@ -17,6 +17,7 @@
 Tests for tlesync/utils.py utility functions.
 """
 
+import logging
 from datetime import datetime, timezone
 
 import pytest
@@ -31,11 +32,13 @@ from tlesync.utils import (
     create_satellite_from_tle_data,
     create_satellite_orbit_from_source_data,
     detect_duplicate_satellites,
+    detect_satellite_modifications,
     get_norad_id_from_tle,
     get_norad_ids,
     get_satellite_by_norad_id,
     get_transmitter_info_by_norad_id,
     normalize_satellite_ids,
+    orbit_fingerprint,
     parse_date,
     parse_norad_id_from_line1,
     resolve_sync_source_urls,
@@ -773,3 +776,27 @@ class TestResolveSyncSourceUrls:
     def test_list_filters_invalid_entries(self):
         value = ["http://one", "", "  ", 123, "http://two"]
         assert resolve_sync_source_urls(value, "http://default") == ["http://one", "http://two"]
+
+
+def test_omm_only_element_change_appears_in_modified_sync_results():
+    first = {
+        "model_kind": "omm",
+        "central_body": "earth",
+        "orbit_epoch": "2026-10-01T00:00:00Z",
+        "orbit_payload": {"NORAD_CAT_ID": "100000", "MEAN_MOTION": "15.0"},
+    }
+    orbit = create_satellite_orbit_from_source_data(first, 100000)
+    old_fingerprint = orbit_fingerprint(orbit)
+    updated = {**first, "orbit_payload": {**first["orbit_payload"], "MEAN_MOTION": "15.1"}}
+    create_satellite_orbit_from_source_data(updated, 100000, existing_orbit=orbit)
+
+    state = create_initial_sync_state()
+    changed = detect_satellite_modifications(
+        100000,
+        {"name": "OMM only", "orbit": orbit_fingerprint(orbit)},
+        {100000: {"name": "OMM only", "orbit": old_fingerprint}},
+        state,
+        logging.getLogger(__name__),
+    )
+    assert changed
+    assert list(state["modified"]["satellites"][0]["changes"]) == ["orbit"]

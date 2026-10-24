@@ -31,6 +31,23 @@ const ommSatellite = {
     },
 };
 
+describe('canonical orbit selection', () => {
+    it('does not propagate a stale TLE when declared OMM is invalid', () => {
+        const result = createSatelliteRecord({
+            ...ommSatellite,
+            orbit_payload: {NORAD_CAT_ID: '100000'},
+            tle1: '1 25544U 98067A   25001.50000000  .00012345  00000-0  21914-3 0  9999',
+            tle2: '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.50000000999999',
+        });
+        expect(result.record).toBeNull();
+        expect(result.source).toBeNull();
+    });
+
+    it('rejects conflicting model labels', () => {
+        expect(createSatelliteRecord({...ommSatellite, orbit_format: 'tle'}).record).toBeNull();
+    });
+});
+
 describe('OMM-only browser orbit consumers', () => {
     it('propagates Earth View positions and paths and notices element updates', () => {
         const station = {lat: 37.9838, lon: 23.7275, alt: 100};

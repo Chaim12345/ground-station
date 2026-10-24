@@ -32,6 +32,21 @@ const command = (id, scope = 'rotator', status = 'submitted', revision = 1) => (
 });
 
 describe('tracker command lifecycle', () => {
+    it('clears a previous target orbit when the tracker changes satellites', () => {
+        let state = {...reducer(undefined, {type: '@@init'}), trackerId: 'target-1'};
+        state = reducer(state, setSatelliteData({
+            tracker_id: 'target-1',
+            satellite_data: {details: {norad_id: 100000, orbit_format: 'omm', orbit_payload: {EPOCH: '2026-10-01'}}},
+        }));
+        state = reducer(state, setSatelliteData({
+            tracker_id: 'target-1',
+            satellite_data: {details: {norad_id: 25544, name: 'New target', tle1: '1 new'}},
+        }));
+        expect(state.satelliteData.details.norad_id).toBe(25544);
+        expect(state.satelliteData.details.orbit_payload).toBeNull();
+        expect(state.satelliteData.details.orbit_format).toBe('');
+    });
+
     it('starts feedback synchronously and cannot regress after a late acknowledgement', async () => {
         const {store, socket, requests} = setup();
         const result = store.dispatch(setTrackingStateInBackend({socket, data: {tracker_id: 'target-1'}, changes: {rotator_state: 'connected'}}));

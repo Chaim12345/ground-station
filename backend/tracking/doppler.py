@@ -13,6 +13,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+"""Doppler geometry; calculate_doppler_shift is a legacy TLE-only helper.
+
+Active tracking uses range rate from PropagationInput.
+"""
+
 import math
 from datetime import datetime, timezone
 

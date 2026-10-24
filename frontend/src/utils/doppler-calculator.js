@@ -35,6 +35,7 @@ const normalizeSource = (source) => {
  * Calculate the Doppler shift for a satellite at a given time.
  *
  * This is a JavaScript port of backend/tracking/doppler.py
+ * @deprecated New callers should pass createSatelliteRecord output to calculateDopplerShiftForRecord.
  *
  * @param {string} tleLine1 - TLE line 1
  * @param {string} tleLine2 - TLE line 2
