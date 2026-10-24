@@ -110,6 +110,34 @@ def test_identical_tinygs_receiver_profiles_do_not_create_duplicate_rows():
     assert len({row["uuid"] for row in rows}) == 2
 
 
+def test_tle_identity_corrects_reused_tianqi_receiver_norad():
+    tianqi_18 = _tinygs_satellite(62367)
+    tianqi_18["displayName"] = "Tianqi-18"
+    tianqi_18["tle"] = [
+        "TIANQI 18",
+        "1 64060U 25105C   26296.92363436  .00000062  00000-0  13037-3 0  9995",
+        "2 64060  44.9834 169.4577 0010269 282.1871  77.7811 13.99172842 73227",
+    ]
+    tianqi_34 = _tinygs_satellite(62367)
+    tianqi_34["displayName"] = "Tianqi-34"
+
+    rows = tinygs.parse_tinygs_transmitters([tianqi_18, tianqi_34])
+
+    assert len(rows) == 4
+    assert {row["norad_cat_id"] for row in rows if "Tianqi-18" in row["description"]} == {64060}
+    assert {row["norad_cat_id"] for row in rows if "Tianqi-34" in row["description"]} == {62367}
+    assert len({row["uuid"] for row in rows}) == 4
+
+
+def test_mismatched_tle_lines_fall_back_to_configuration_norad():
+    satellite = _tinygs_satellite(44001)
+    satellite["tle"] = ["1 64060U", "2 62367 "]
+
+    rows = tinygs.parse_tinygs_transmitters([satellite])
+
+    assert {row["norad_cat_id"] for row in rows} == {44001}
+
+
 def test_tinygs_fetch_sends_webapp_timestamp_header(monkeypatch):
     monkeypatch.setattr(tinygs.time, "time", lambda: 1700000000.0)
     calls = []

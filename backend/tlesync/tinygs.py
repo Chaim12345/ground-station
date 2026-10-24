@@ -17,6 +17,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 import requests
+from sgp4.alpha5 import from_alpha5
 
 from demodulators.loraconfig import normalize_lora
 from tlesync.utils import uuid_to_short_transmitter_id
@@ -46,6 +47,23 @@ def _frequency_hz(value: Any) -> int | None:
         return frequency_hz if 0 < frequency_hz <= 2**63 - 1 else None
     except (InvalidOperation, ValueError, TypeError):
         return None
+
+
+def _tle_norad(satellite: dict[str, Any]) -> int | None:
+    """Use a satellite's TLE identity when both element lines agree."""
+    tle = satellite.get("tle")
+    if not isinstance(tle, (list, tuple)):
+        return None
+    line1 = next((line for line in tle if isinstance(line, str) and line.startswith("1 ")), None)
+    line2 = next((line for line in tle if isinstance(line, str) and line.startswith("2 ")), None)
+    if not line1 or not line2 or len(line1) < 7 or len(line2) < 7:
+        return None
+    try:
+        first = from_alpha5(line1[2:7])
+        second = from_alpha5(line2[2:7])
+    except (ValueError, TypeError):
+        return None
+    return first if first == second and first > 0 and first != 99999 else None
 
 
 def _lora_config(configuration: dict[str, Any]) -> dict[str, Any] | None:
@@ -100,22 +118,28 @@ def parse_tinygs_transmitters(satellites: Any) -> list[dict[str, Any]]:
         configurations = satellite.get("configurations")
         if not isinstance(configurations, list):
             continue
+        # TinyGS can reuse a radio configuration across satellites without
+        # updating its embedded NORAD (Tianqi-18 is a live example).
+        satellite_norad = _tle_norad(satellite)
 
         for configuration in configurations:
             if not isinstance(configuration, dict):
                 continue
-            raw_norad = configuration.get("NORAD")
-            if isinstance(raw_norad, bool) or not isinstance(raw_norad, (int, str)):
-                continue
-            if isinstance(raw_norad, str) and not raw_norad.isdecimal():
-                continue
-            try:
-                norad = int(raw_norad)
-            except (TypeError, ValueError):
-                continue
-            # TinyGS uses 99999 for satellites without a catalog identity.
-            if norad <= 0 or norad == 99999:
-                continue
+            if satellite_norad is not None:
+                norad = satellite_norad
+            else:
+                raw_norad = configuration.get("NORAD")
+                if isinstance(raw_norad, bool) or not isinstance(raw_norad, (int, str)):
+                    continue
+                if isinstance(raw_norad, str) and not raw_norad.isdecimal():
+                    continue
+                try:
+                    norad = int(raw_norad)
+                except (TypeError, ValueError):
+                    continue
+                # TinyGS uses 99999 for satellites without a catalog identity.
+                if norad <= 0 or norad == 99999:
+                    continue
 
             frequency_hz = _frequency_hz(configuration.get("freq"))
             mode = configuration.get("mode")
