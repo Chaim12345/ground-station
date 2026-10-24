@@ -23,6 +23,41 @@ describe('mapOutputsToRows', () => {
             Array.from({ length: 50 }, (_, index) => index + 51),
         );
     });
+
+    it('shows the available LoRa PHY settings beside SF and bandwidth', () => {
+        const rows = mapOutputsToRows([{
+            ...packet(1),
+            decoder_type: 'lora',
+            vfo: 2,
+            output: {
+                callsigns: {},
+                parameters: 'SF8, BW 125 kHz',
+                decoder_config: {
+                    cr: 1,
+                    sync_word: [0x34],
+                    implicit_header: false,
+                    has_crc: true,
+                    ldro_mode: 2,
+                    invert_iq: true,
+                },
+            },
+        }]);
+
+        expect(rows[0].parameters).toBe(
+            'SF8 · BW 125 kHz · CR 4/5 · Sync 0x34 · Explicit header · CRC cfg on · LDRO auto · IQ inverted',
+        );
+        expect(rows[0].vfo).toBe(2);
+    });
+
+    it('keeps existing parameter text when LoRa configuration is unavailable', () => {
+        const rows = mapOutputsToRows([{
+            ...packet(1),
+            decoder_type: 'lora',
+            output: { callsigns: {}, parameters: 'SF7, BW 125 kHz' },
+        }]);
+
+        expect(rows[0].parameters).toBe('SF7 · BW 125 kHz');
+    });
 });
 
 describe('resolveDecodedAssetUrl', () => {

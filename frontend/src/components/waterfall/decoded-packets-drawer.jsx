@@ -18,7 +18,7 @@
  */
 
 import React, { startTransition, useMemo, useRef, useState, useEffect, useCallback } from 'react';
-import { Box, Typography, Chip, useTheme, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, Alert } from '@mui/material';
+import { Box, Typography, Chip, Tooltip, useTheme, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, Alert } from '@mui/material';
 import { DataGrid, gridClasses } from '@mui/x-data-grid';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
@@ -28,7 +28,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
-import { alpha } from '@mui/material/styles';
+import { alpha, darken, lighten } from '@mui/material/styles';
 import { setPacketsDrawerOpen, setPacketsDrawerHeight } from './waterfall-slice';
 import { getDecoderDisplay, getModulationDisplay, ModulationType } from '../../constants/modulations';
 import TelemetryViewerDialog from '../filebrowser/telemetry-viewer-dialog.jsx';
@@ -78,6 +78,67 @@ const TimeFormatter = React.memo(function TimeFormatter({ value, nowMs, timezone
 const LIVE_DRAWER_REFRESH_MS = 500;
 const LIVE_DRAWER_ROW_LIMIT = 50;
 const DEFAULT_DRAWER_ROW_LIMIT = 100;
+const EMPTY_VFO_COLORS = Object.freeze([]);
+
+const formatLoraParameters = (output = {}) => {
+    const config = output.decoder_config || {};
+    const summary = String(output.parameters || '').trim();
+    const parts = summary ? [summary.replace(/,\s*/g, ' · ')] : [];
+    if (!summary) {
+        if (config.sf != null) parts.push(`SF${config.sf}`);
+        const bandwidth = Number(config.bw);
+        if (Number.isFinite(bandwidth) && bandwidth > 0) parts.push(`BW ${bandwidth / 1000} kHz`);
+    }
+
+    // LoRa's configured CR is an offset (1–4); older profiles may store the denominator (5–8).
+    const codingRate = Number(config.cr);
+    if (Number.isInteger(codingRate) && codingRate >= 1 && codingRate <= 8) {
+        parts.push(`CR 4/${codingRate <= 4 ? codingRate + 4 : codingRate}`);
+    }
+
+    const syncWord = config.sync_word;
+    if (Array.isArray(syncWord) && syncWord.length > 0) {
+        const syncLabel = syncWord.length === 2
+            ? (syncWord.every((value) => Number(value) === 0) ? 'any' : syncWord.join('/'))
+            : `0x${Number(syncWord[0]).toString(16).padStart(2, '0').toUpperCase()}`;
+        parts.push(`Sync ${syncLabel}`);
+    } else if (syncWord != null && syncWord !== '') {
+        parts.push(`Sync ${syncWord}`);
+    }
+
+    if (config.implicit_header != null) parts.push(config.implicit_header ? 'Implicit header' : 'Explicit header');
+    if (config.has_crc != null) parts.push(`CRC cfg ${config.has_crc ? 'on' : 'off'}`);
+    if (config.ldro_mode != null) {
+        const ldroMode = { 0: 'off', 1: 'on', 2: 'auto' }[config.ldro_mode];
+        if (ldroMode) parts.push(`LDRO ${ldroMode}`);
+    }
+    if (config.invert_iq) parts.push('IQ inverted');
+    return parts.join(' · ') || '-';
+};
+
+const ParametersCell = React.memo(function ParametersCell({ value, isLora }) {
+    const content = (
+        <Typography
+            variant="caption"
+            sx={{
+                fontFamily: 'monospace',
+                fontSize: '0.65rem',
+                lineHeight: 1.2,
+                color: isLora ? 'text.secondary' : 'text.disabled',
+                ...(isLora ? {
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 2,
+                    overflow: 'hidden',
+                    overflowWrap: 'anywhere',
+                } : null),
+            }}
+        >
+            {value || '-'}
+        </Typography>
+    );
+    return isLora ? <Tooltip title={value || '-'}>{content}</Tooltip> : content;
+});
 
 const encodeAssetPath = (path) => path
     .split('/')
@@ -133,8 +194,10 @@ export const mapOutputsToRows = (outputs, rowLimit = DEFAULT_DRAWER_ROW_LIMIT) =
             const noradId = output.output.callsigns?.identified_norad_id || output.output.satellite?.norad_id;
             const satelliteName = output.output.callsigns?.identified_satellite || output.output.satellite?.name || '-';
 
-            // For SSTV, use mode as parameters, for others use existing parameters
-            const parameters = isImage ? output.output.mode : output.output.parameters;
+            // Image modes have their own label; LoRa rows expand the live decoder configuration.
+            const parameters = isImage
+                ? output.output.mode
+                : (isLora ? formatLoraParameters(output.output) : output.output.parameters);
 
             // File size from output
             const fileSize = output.output.filesize || output.output.packet_length;
@@ -176,6 +239,7 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
     const store = useStore();
     const { socket } = useSocket();
     const { packetsDrawerOpen, packetsDrawerHeight, isStreaming } = useSelector((state) => state.waterfall);
+    const vfoColors = useSelector((state) => state.vfo?.vfoColors || EMPTY_VFO_COLORS);
     const { timezone, locale } = useUserTimeSettings();
 
     const [isDragging, setIsDragging] = useState(false);
@@ -363,6 +427,28 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
         }
     };
 
+    const renderVfoCell = useCallback((params) => {
+        const vfoNumber = Number(params.value);
+        if (!Number.isInteger(vfoNumber) || vfoNumber <= 0) return '-';
+        const vfoColor = vfoColors[vfoNumber - 1] || theme.palette.info.main;
+        return (
+            <Chip
+                label={`VFO${vfoNumber}`}
+                size="small"
+                sx={{
+                    height: 22,
+                    borderRadius: 1,
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    color: theme.palette.mode === 'dark' ? lighten(vfoColor, 0.45) : darken(vfoColor, 0.2),
+                    backgroundColor: alpha(vfoColor, theme.palette.mode === 'dark' ? 0.2 : 0.13),
+                    border: `1px solid ${alpha(vfoColor, 0.55)}`,
+                    '& .MuiChip-label': { px: 0.8 },
+                }}
+            />
+        );
+    }, [theme, vfoColors]);
+
     const columns = useMemo(() => ([
         {
             field: 'timestamp',
@@ -461,11 +547,7 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
             flex: 0.5,
             align: 'center',
             headerAlign: 'center',
-            renderCell: (params) => params.value ? (
-                <Typography variant="caption" sx={{ color: 'info.main', fontWeight: 700 }}>
-                    {`VFO${params.value}`}
-                </Typography>
-            ) : '-'
+            renderCell: renderVfoCell
         },
         {
             field: 'hasTelemetry',
@@ -483,13 +565,9 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
         {
             field: 'parameters',
             headerName: 'Parameters',
-            minWidth: 200,
+            minWidth: 250,
             flex: 2.6,
-            renderCell: (params) => (
-                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.65rem', color: 'text.disabled' }}>
-                    {params.value || '-'}
-                </Typography>
-            )
+            renderCell: (params) => <ParametersCell value={params.value} isLora={params.row.decoderType === ModulationType.LORA} />
         },
         {
             field: 'actions',
@@ -527,7 +605,7 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
                 </>
             )
         },
-    ]), [theme, handleOpenTelemetry, handleDeletePacket, timeNowMs, timezone, locale]);
+    ]), [theme, handleOpenTelemetry, handleDeletePacket, renderVfoCell, timeNowMs, timezone, locale]);
 
     const liveColumns = useMemo(() => ([
         {
@@ -627,11 +705,7 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
             flex: 0.5,
             align: 'center',
             headerAlign: 'center',
-            renderCell: (params) => (
-                <Typography variant="caption" sx={{ color: 'info.main', fontWeight: 700 }}>
-                    {params.value ? `VFO${params.value}` : '-'}
-                </Typography>
-            )
+            renderCell: renderVfoCell
         },
         {
             field: 'hasTelemetry',
@@ -649,13 +723,9 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
         {
             field: 'parameters',
             headerName: 'Parameters',
-            minWidth: 200,
+            minWidth: 250,
             flex: 2.6,
-            renderCell: (params) => (
-                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.65rem', color: 'text.disabled' }}>
-                    {params.value || '-'}
-                </Typography>
-            )
+            renderCell: (params) => <ParametersCell value={params.value} isLora={params.row.decoderType === ModulationType.LORA} />
         },
         {
             field: 'actions',
@@ -683,7 +753,7 @@ const DecodedPacketsDrawer = React.memo(function DecodedPacketsDrawer({ embedded
                 </>
             )
         },
-    ]), [handleOpenTelemetry, handleDeletePacket, timeNowMs, timezone, locale]);
+    ]), [handleOpenTelemetry, handleDeletePacket, renderVfoCell, timeNowMs, timezone, locale]);
 
     const displayedColumns = liveMode ? liveColumns : columns;
 
