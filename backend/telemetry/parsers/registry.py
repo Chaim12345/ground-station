@@ -14,6 +14,7 @@ from typing import Any, Iterable, Tuple, Type
 
 from .colibri_s import ColibriSGeoscanAx25Parser
 from .rs52s import RS52SGeoscanAx25Parser
+from .usp import USPParser
 
 logger = logging.getLogger("telemetry.parsers.registry")
 
@@ -25,6 +26,7 @@ def _iter_builtin_ax25_parsers() -> Iterable[Tuple[str, Type[Any]]]:
     Keys are matched by TelemetryParser against AX.25 source callsign variants.
     """
     return (
+        ("RS40S", USPParser),
         ("RS52S", RS52SGeoscanAx25Parser),
         ("RS67S", ColibriSGeoscanAx25Parser),
         ("COLIBRI-S", ColibriSGeoscanAx25Parser),
