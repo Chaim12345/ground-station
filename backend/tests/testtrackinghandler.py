@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from common.constants import RigStates
+from common.constants import RigStates, SocketEvents
 from common.events import EventBroker
 from handlers.entities import tracking as tracking_handler
 from handlers.entities.tracking import (
@@ -21,6 +21,77 @@ class _SessionContext:
 
     async def __aexit__(self, exc_type, exc, traceback):
         return None
+
+
+@pytest.mark.asyncio
+async def test_tracking_read_targets_requester_and_state_change_broadcasts(monkeypatch):
+    class _TwoClientSocket:
+        def __init__(self):
+            self.received = {"existing-client": [], "joining-client": []}
+
+        async def emit(self, event, data, to=None):
+            recipients = [to] if to is not None else self.received
+            for recipient in recipients:
+                self.received[recipient].append((event, data))
+
+    class _Logger:
+        def debug(self, *args):
+            pass
+
+        def info(self, *args):
+            pass
+
+    async def _get_state(_session, name):
+        assert name == "satellite-tracking:target-1"
+        return {"success": True, "data": {"value": {"norad_id": 25544, "group_id": 1}}}
+
+    async def _satellite_data(_session, _norad_id):
+        return {"details": {"name": "ISS"}}
+
+    async def _ui_state(_group_id, _norad_id, _tracker_id):
+        return {"data": {"groups": [], "satellites": []}}
+
+    async def _sky_bodies(**_kwargs):
+        return []
+
+    async def _update_state(**_kwargs):
+        return {"success": True, "result": {"success": True, "data": {"value": {}}}}
+
+    async def _emit_instances(_sio):
+        return None
+
+    monkeypatch.setattr(tracking_handler, "AsyncSessionLocal", _SessionContext)
+    monkeypatch.setattr(tracking_handler.crud.trackingstate, "get_tracking_state", _get_state)
+    monkeypatch.setattr(tracking_handler, "compiled_satellite_data", _satellite_data)
+    monkeypatch.setattr(tracking_handler, "get_ui_tracker_state", _ui_state)
+    monkeypatch.setattr(tracking_handler, "build_observer_sky_bodies", _sky_bodies)
+    monkeypatch.setattr(tracking_handler, "update_tracking_state_with_ownership", _update_state)
+    monkeypatch.setattr(tracking_handler, "emit_tracker_instances", _emit_instances)
+    monkeypatch.setattr(
+        tracking_handler,
+        "get_tracker_instances_payload",
+        lambda: {"instances": [{"tracker_id": "target-1"}]},
+    )
+
+    sio = _TwoClientSocket()
+    logger = _Logger()
+    read_reply = await tracking_handler.get_tracking_state(
+        sio, {"tracker_id": "target-1"}, logger, "joining-client"
+    )
+
+    assert read_reply["success"] is True
+    assert sio.received["existing-client"] == []
+    expected_events = [SocketEvents.SATELLITE_TRACKING, SocketEvents.UI_TRACKER_STATE]
+    assert [event for event, _ in sio.received["joining-client"]] == expected_events
+    assert all(data["tracker_id"] == "target-1" for _, data in sio.received["joining-client"])
+
+    write_reply = await tracking_handler.set_tracking_state(
+        sio, {"tracker_id": "target-1", "value": {}}, logger, "existing-client"
+    )
+
+    assert write_reply["success"] is True
+    assert [event for event, _ in sio.received["existing-client"]] == expected_events
+    assert [event for event, _ in sio.received["joining-client"]] == expected_events * 2
 
 
 @pytest.mark.asyncio

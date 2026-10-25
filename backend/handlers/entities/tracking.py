@@ -246,7 +246,9 @@ def _resolve_max_target_slots() -> int:
     return max(1, configured_limit)
 
 
-async def emit_tracker_data(dbsession, sio, logger, tracker_id: str):
+async def emit_tracker_data(
+    dbsession, sio, logger, tracker_id: str, recipient_sid: Optional[str] = None
+):
     """
     Emits satellite tracking data to the provided Socket.IO instance. This function retrieves the
     current state of satellite tracking from the database, processes the relevant satellite data,
@@ -259,6 +261,7 @@ async def emit_tracker_data(dbsession, sio, logger, tracker_id: str):
     :type sio: AsyncServer
     :param logger: Logger object for logging errors or exceptions.
     :type logger: Any
+    :param recipient_sid: Send a requested snapshot only to this socket; broadcast changes otherwise.
     :return: This function does not return any value as it emits data asynchronously.
     :rtype: None
     """
@@ -326,21 +329,26 @@ async def emit_tracker_data(dbsession, sio, logger, tracker_id: str):
                 logger=logger,
             ),
         }
-        await sio.emit("satellite-tracking", data)
-        await sio.emit(SocketEvents.SATELLITE_TRACKING_V2, data)
+        if recipient_sid is None:
+            await sio.emit(SocketEvents.SATELLITE_TRACKING, data)
+        else:
+            await sio.emit(SocketEvents.SATELLITE_TRACKING, data, to=recipient_sid)
 
     except Exception as e:
         logger.error(f"Error emitting tracker data: {e}")
         logger.exception(e)
 
 
-async def emit_ui_tracker_values(dbsession, sio, logger, tracker_id: str):
+async def emit_ui_tracker_values(
+    dbsession, sio, logger, tracker_id: str, recipient_sid: Optional[str] = None
+):
     """
     Call this when UI tracker values are updated
 
     :param dbsession:
     :param sio:
     :param logger:
+    :param recipient_sid: Send a requested snapshot only to this socket; broadcast changes otherwise.
     :return:
     """
 
@@ -395,8 +403,10 @@ async def emit_ui_tracker_values(dbsession, sio, logger, tracker_id: str):
             }
         if isinstance(data, dict):
             data["tracker_id"] = tracker_id
-        await sio.emit("ui-tracker-state", data)
-        await sio.emit(SocketEvents.UI_TRACKER_STATE_V2, data)
+        if recipient_sid is None:
+            await sio.emit(SocketEvents.UI_TRACKER_STATE, data)
+        else:
+            await sio.emit(SocketEvents.UI_TRACKER_STATE, data, to=recipient_sid)
 
     except Exception as e:
         logger.error(f"Error emitting UI tracker values: {e}")
@@ -426,8 +436,11 @@ async def get_tracking_state(
     async with AsyncSessionLocal() as dbsession:
         logger.debug(f"Fetching tracking state, data: {data}")
         tracking_state = await crud.trackingstate.get_tracking_state(dbsession, name=state_name)
-        await emit_tracker_data(dbsession, sio, logger, requested_tracker_id)
-        await emit_ui_tracker_values(dbsession, sio, logger, requested_tracker_id)
+        # Initial state is private to the requester; subsequent changes still broadcast.
+        await emit_tracker_data(dbsession, sio, logger, requested_tracker_id, recipient_sid=sid)
+        await emit_ui_tracker_values(
+            dbsession, sio, logger, requested_tracker_id, recipient_sid=sid
+        )
         response = {"success": tracking_state["success"], "data": tracking_state.get("data", [])}
         response["tracker_id"] = requested_tracker_id
         return response

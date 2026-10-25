@@ -24,6 +24,7 @@ import {
 } from '../common/common.jsx';
 import DeferredIslandPlaceholder from '../common/deferredplaceholder.jsx';
 import {
+    fetchCelestialTracks,
     fetchSolarSystemScene,
     getCelestialMapSettings,
     refreshMonitoredCelestialNow,
@@ -398,44 +399,55 @@ const CelestialMainLayout = () => {
     useEffect(() => {
         if (!socket) return;
         let cancelled = false;
+        let connectionGeneration = 0;
 
-        dispatch(fetchMonitoredCelestial({ socket }));
         const loadInitialScene = async () => {
+            const generation = ++connectionGeneration;
+            dispatch(fetchMonitoredCelestial({ socket }));
             // Wait for persisted projection settings before requesting the scene.
             // Otherwise a new browser first fills the defaults, then immediately
             // starts another Horizons batch for the user's saved window.
             const settingsResult = await dispatch(getCelestialMapSettings({ socket }));
-            if (cancelled) return;
+            if (cancelled || generation !== connectionGeneration) return;
 
             const mapSettings = getCelestialMapSettings.fulfilled.match(settingsResult)
                 ? settingsResult.payload || mapSettingsRef.current || {}
                 : mapSettingsRef.current || {};
+            const projection = {
+                past_hours: parsePastProjectionHours(
+                    mapSettings.pastHours,
+                    DEFAULT_PAST_HOURS,
+                ),
+                future_hours: parseFutureProjectionHours(
+                    mapSettings.futureHours,
+                    DEFAULT_FUTURE_HOURS,
+                ),
+                step_minutes: parsePositiveNumber(
+                    mapSettings.stepMinutes,
+                    DEFAULT_STEP_MINUTES,
+                ),
+            };
             await dispatch(fetchSolarSystemScene({
                 socket,
                 payload: {
-                    past_hours: parsePastProjectionHours(
-                        mapSettings.pastHours,
-                        DEFAULT_PAST_HOURS,
-                    ),
-                    future_hours: parseFutureProjectionHours(
-                        mapSettings.futureHours,
-                        DEFAULT_FUTURE_HOURS,
-                    ),
-                    step_minutes: parsePositiveNumber(
-                        mapSettings.stepMinutes,
-                        DEFAULT_STEP_MINUTES,
-                    ),
+                    ...projection,
                     // Initial page load must fill missing Horizons-backed system bodies
                     // for the selected projection; cache-only loads can leave planets
                     // present only as non-renderable metadata rows.
                     allow_network_fetch: true,
                 },
             }));
+            if (cancelled || generation !== connectionGeneration) return;
+            // Full tracks are fetched when the page connects; the scheduler's
+            // frequent broadcasts now contain only live pointing deltas.
+            await dispatch(fetchCelestialTracks({ socket, payload: projection }));
         };
 
-        loadInitialScene();
+        socket.on('connect', loadInitialScene);
+        if (socket.connected) loadInitialScene();
         return () => {
             cancelled = true;
+            socket.off('connect', loadInitialScene);
         };
     }, [socket, dispatch]);
 

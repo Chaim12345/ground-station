@@ -395,6 +395,26 @@ const celestialSlice = createSlice({
             state.error = null;
             state.lastUpdated = new Date().toISOString();
         },
+        applyCelestialTracksLiveDelta: (state, action) => {
+            // A full snapshot owns rows and pass lists. Pointing ticks update
+            // existing rows only, so a new target waits for its full snapshot.
+            if (!state.celestialTracks) return;
+            const payload = action.payload || {};
+            const updates = new Map(
+                (Array.isArray(payload.celestial) ? payload.celestial : [])
+                    .filter((row) => row?.target_key)
+                    .map((row) => [row.target_key, row]),
+            );
+            state.celestialTracks.celestial = (state.celestialTracks.celestial || [])
+                .map((row) => ({ ...row, ...(updates.get(row.target_key) || {}) }));
+            if (Array.isArray(payload.observer_bodies)) {
+                state.celestialTracks.observer_bodies = payload.observer_bodies;
+            }
+            if (payload.timestamp_utc) {
+                state.celestialTracks.timestamp_utc = payload.timestamp_utc;
+            }
+            state.lastUpdated = new Date().toISOString();
+        },
         upsertCelestialTrackRowLive: (state, action) => {
             applyCelestialTrackRowUpdates(state, [action.payload || {}]);
         },
@@ -790,6 +810,7 @@ export const {
     setCelestialSceneLive,
     setSolarSceneLive,
     setCelestialTracksLive,
+    applyCelestialTracksLiveDelta,
     upsertCelestialTrackRowLive,
     upsertCelestialTrackRowsLive,
     upsertSolarSystemBodyLive,

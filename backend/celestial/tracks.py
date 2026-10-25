@@ -387,6 +387,7 @@ async def _build_celestial_tracks_single_projection(
     register_targets: bool = True,
     use_computed_cache: bool = True,
     force_refresh_earth: Optional[bool] = None,
+    include_passes: bool = True,
 ) -> Dict[str, Any]:
     """Build only Horizons-backed tracked celestial objects."""
     epoch = _parse_epoch(data)
@@ -443,16 +444,22 @@ async def _build_celestial_tracks_single_projection(
         )
         if earth_relative is not None:
             row["earth_relative"] = earth_relative
-    celestial_passes = _build_celestial_passes(
-        rows=celestial,
-        epoch=epoch,
-        past_hours=past_hours,
-        future_hours=future_hours,
-        step_minutes=step_minutes,
-        observer_location=observer_location,
-        earth_position_xyz_au=earth_position_xyz_au,
-        earth_orbit_samples=earth_orbit_samples,
-        logger=logger,
+    # Live pointing ticks keep positions fresh without recalculating forecast
+    # windows. Full scene requests and periodic snapshots still include passes.
+    celestial_passes = (
+        _build_celestial_passes(
+            rows=celestial,
+            epoch=epoch,
+            past_hours=past_hours,
+            future_hours=future_hours,
+            step_minutes=step_minutes,
+            observer_location=observer_location,
+            earth_position_xyz_au=earth_position_xyz_au,
+            earth_orbit_samples=earth_orbit_samples,
+            logger=logger,
+        )
+        if include_passes
+        else []
     )
     observer_bodies = [
         _build_observer_sun(
@@ -512,6 +519,7 @@ async def build_celestial_tracks(
     per_row_callback: Optional[Any] = None,
     register_targets: bool = True,
     use_computed_cache: bool = True,
+    include_passes: bool = True,
 ) -> Dict[str, Any]:
     """Build tracked objects, honoring optional projection settings on each target."""
     targets = _normalize_targets(data)
@@ -528,6 +536,7 @@ async def build_celestial_tracks(
             per_row_callback=per_row_callback,
             register_targets=register_targets,
             use_computed_cache=use_computed_cache,
+            include_passes=include_passes,
         )
 
     fallback_past, fallback_future, fallback_step = _parse_projection_options(data)
@@ -601,6 +610,7 @@ async def build_celestial_tracks(
             per_row_callback=group_callback,
             register_targets=False,
             use_computed_cache=use_computed_cache,
+            include_passes=include_passes,
             # One fresh Earth trajectory is enough. Later groups reuse it when
             # compatible while their own target vectors still force-refresh.
             force_refresh_earth=force_refresh if group_index == 0 else False,
@@ -627,6 +637,7 @@ async def build_celestial_tracks(
             per_row_callback=per_row_callback,
             register_targets=False,
             use_computed_cache=use_computed_cache,
+            include_passes=include_passes,
         )
 
     target_order = {

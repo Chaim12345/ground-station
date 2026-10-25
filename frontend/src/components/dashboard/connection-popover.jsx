@@ -27,12 +27,17 @@ import { setDialogOpen } from '../performance/performance-slice.jsx';
 function ConnectionStatus() {
     const { t } = useTranslation('dashboard');
     const dispatch = useDispatch();
-    const { socket, trafficStatsRef } = useSocket();
+    const { socket, trafficStatsRef, setCollectStats } = useSocket();
     const [anchorEl, setAnchorEl] = useState(null);
     const [, forceUpdate] = useState(0);
     const systemInfoRef = React.useRef(useSelector(state => state.systemInfo));
 
     const open = Boolean(anchorEl);
+
+    useEffect(() => {
+        setCollectStats(open);
+        return () => setCollectStats(false);
+    }, [open, setCollectStats]);
 
     // Update system info ref and force update stats every second (only when popover is open)
     const systemInfo = useSelector(state => state.systemInfo);

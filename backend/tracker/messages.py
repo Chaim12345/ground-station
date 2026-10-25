@@ -255,8 +255,6 @@ async def handle_tracker_messages(sockio):
                     if event == SocketEvents.SATELLITE_TRACKING:
                         _publish_target_visibility(tracker_id, data)
                     await sockio.emit(event, data)
-                    if event == SocketEvents.SATELLITE_TRACKING:
-                        await sockio.emit(SocketEvents.SATELLITE_TRACKING_V2, data)
 
                     # Handle VFO updates for SDR tracking
                     if event == "satellite-tracking" and data.get("rig_data"):

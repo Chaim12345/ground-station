@@ -32,6 +32,38 @@ class _DummyLogger:
         return None
 
 
+@pytest.mark.asyncio
+async def test_live_tracks_skip_pass_forecast_without_losing_current_row(monkeypatch):
+    async def observer_location():
+        return None
+
+    async def earth_vectors(**_kwargs):
+        return None, []
+
+    async def celestial_rows(*_args, **_kwargs):
+        return [{"target_key": "mission:voyager-1", "sky_position": {"az_deg": 42.0}}]
+
+    def unexpected_pass_build(**_kwargs):
+        raise AssertionError("live ticks must not rebuild pass forecasts")
+
+    monkeypatch.setattr(tracks, "_load_observer_location", observer_location)
+    monkeypatch.setattr(tracks, "_load_earth_observer_vectors", earth_vectors)
+    monkeypatch.setattr(tracks, "_fetch_celestial_with_cache", celestial_rows)
+    monkeypatch.setattr(tracks, "_build_celestial_passes", unexpected_pass_build)
+
+    result = await tracks.build_celestial_tracks(
+        data={"celestial": [{"target_type": "mission", "command": "Voyager 1"}]},
+        logger=_DummyLogger(),
+        register_targets=False,
+        allow_network_fetch=False,
+        include_passes=False,
+    )
+
+    assert result["success"] is True
+    assert result["data"]["celestial"][0]["sky_position"]["az_deg"] == 42.0
+    assert result["data"]["celestial_passes"] == []
+
+
 def test_projection_options_use_operational_defaults_and_limits():
     assert settings._parse_projection_options(None) == (1, 24, 60)
 

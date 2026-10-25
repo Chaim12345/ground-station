@@ -240,6 +240,75 @@ async def test_cached_celestial_broadcast_clears_clients_without_targets(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_cached_celestial_broadcast_sends_live_deltas_between_full_forecasts(monkeypatch):
+    emitted = []
+    build_calls = []
+    revision = ["vector-1"]
+
+    class _Sio:
+        async def emit(self, event, payload):
+            emitted.append((event, payload))
+
+    async def setup_complete(**_kwargs):
+        return False
+
+    async def monitored_payload():
+        return {"celestial": [{"target_type": "mission", "command": "Voyager 1"}]}
+
+    async def build_tracks(**kwargs):
+        build_calls.append(kwargs["include_passes"])
+        return {
+            "success": True,
+            "data": {
+                "timestamp_utc": "2026-10-25T12:00:00Z",
+                "celestial": [
+                    {
+                        "target_key": "mission:voyager-1",
+                        "fetched_at_utc": revision[0],
+                        "orbit_sample_times_utc": ["first", "last"],
+                        "orbit_samples_xyz_au": [[1, 2, 3], [4, 5, 6]],
+                        "sky_position": {"az_deg": 20.0},
+                    }
+                ],
+                "celestial_passes": [{"id": "pass-1"}] if kwargs["include_passes"] else [],
+                "observer_bodies": [{"target_key": "body:sun"}],
+                "meta": {"observer_location": {"lat": 42.0, "lon": 23.0}},
+            },
+        }
+
+    monkeypatch.setattr(scheduler_module.authsvc, "is_setup_required", setup_complete)
+    monkeypatch.setattr(
+        scheduler_module, "_build_enabled_monitored_celestial_payload", monitored_payload
+    )
+    monkeypatch.setattr(scheduler_module, "build_celestial_tracks", build_tracks)
+    monkeypatch.setattr(scheduler_module, "_celestial_last_full_signature", None)
+    monkeypatch.setattr(scheduler_module, "_celestial_last_full_at", 0.0)
+
+    await scheduler_module.emit_cached_celestial_tracks_job(_Sio())
+    await scheduler_module.emit_cached_celestial_tracks_job(_Sio())
+    revision[0] = "vector-2"
+    await scheduler_module.emit_cached_celestial_tracks_job(_Sio())
+    monkeypatch.setattr(
+        scheduler_module,
+        "_celestial_last_full_at",
+        scheduler_module.time.monotonic()
+        - scheduler_module.CELESTIAL_FULL_TRACKS_INTERVAL_SECONDS
+        - 1,
+    )
+    await scheduler_module.emit_cached_celestial_tracks_job(_Sio())
+
+    assert build_calls == [True, False, False, True, True]
+    assert [event for event, _payload in emitted] == [
+        "celestial-tracks-update",
+        "celestial-tracks-live-update",
+        "celestial-tracks-update",
+        "celestial-tracks-update",
+    ]
+    assert "orbit_samples_xyz_au" not in emitted[1][1]["celestial"][0]
+    assert "celestial_passes" not in emitted[1][1]
+
+
+@pytest.mark.asyncio
 async def test_cached_celestial_payload_uses_each_targets_projection(monkeypatch):
     class _SessionContext:
         async def __aenter__(self):

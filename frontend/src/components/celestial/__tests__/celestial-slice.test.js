@@ -9,6 +9,7 @@ import celestialReducer, {
   setCelestialEphemerisSyncStarted,
   setTargetCelestialLivePointing,
   setCelestialTracksLive,
+  applyCelestialTracksLiveDelta,
   refreshMonitoredCelestialNow,
   upsertCelestialTrackRowsLive,
   upsertSolarSystemBodyLive,
@@ -122,6 +123,24 @@ describe('target celestial scenes', () => {
     expect(state.celestialTracks.celestial).toEqual([]);
     expect(state.celestialTracks.celestial_passes).toEqual([]);
     expect(state.celestialTracks.observer_bodies).toEqual([]);
+  });
+
+  it('updates live pointing without replacing forecast curves or passes', () => {
+    let state = celestialReducer(undefined, setCelestialTracksLive({
+      celestial: [{ target_key: 'body:mars', name: 'Mars', orbit_samples_xyz_au: [[1, 2, 3]], sky_position: { az_deg: 1 } }],
+      celestial_passes: [{ id: 'mars-pass' }],
+      observer_bodies: [],
+    }));
+    state = celestialReducer(state, applyCelestialTracksLiveDelta({
+      timestamp_utc: '2026-10-25T12:00:00Z',
+      celestial: [{ target_key: 'body:mars', sky_position: { az_deg: 2 } }],
+      observer_bodies: [{ target_key: 'body:sun' }],
+    }));
+
+    expect(state.celestialTracks.celestial[0].sky_position.az_deg).toBe(2);
+    expect(state.celestialTracks.celestial[0].orbit_samples_xyz_au).toEqual([[1, 2, 3]]);
+    expect(state.celestialTracks.celestial_passes).toEqual([{ id: 'mars-pass' }]);
+    expect(state.celestialTracks.observer_bodies).toEqual([{ target_key: 'body:sun' }]);
   });
 
   it('survive a monitored-target live broadcast', () => {

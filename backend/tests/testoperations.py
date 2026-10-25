@@ -210,7 +210,6 @@ async def test_partial_telemetry_cannot_complete_any_command(monkeypatch):
     update_vfos.assert_awaited_once()
     assert [call.args[0] for call in sockio.emit.await_args_list] == [
         "satellite-tracking",
-        "satellite-tracking-v2",
     ]
 
 

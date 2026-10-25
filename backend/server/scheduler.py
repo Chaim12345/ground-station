@@ -1,7 +1,9 @@
 """Background task scheduler for the ground station."""
 
 import asyncio
+import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -32,6 +34,11 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 scheduler: Optional[AsyncIOScheduler] = None
 CELESTIAL_TRACKS_BROADCAST_JOB_ID = "emit_cached_celestial_tracks"
 CELESTIAL_TRACKS_BROADCAST_INTERVAL_SECONDS = 5
+# Periodic full snapshots refresh the rolling projection edges even when the
+# stored vector revision and observer configuration have not changed.
+CELESTIAL_FULL_TRACKS_INTERVAL_SECONDS = 60
+_celestial_last_full_signature: Optional[str] = None
+_celestial_last_full_at = 0.0
 # Per-target future projections may be as short as one hour. Refresh a little
 # before that minimum window expires so a successful sync can replace it
 # without a coverage gap in the UI.
@@ -109,14 +116,71 @@ async def _build_enabled_monitored_celestial_payload() -> Dict[str, Any]:
     return payload
 
 
+def _celestial_forecast_signature(payload: Dict[str, Any], scene: Dict[str, Any]) -> str:
+    """Identify changes that require new curves and pass forecasts."""
+    rows = scene.get("celestial") or []
+    meta = scene.get("meta") or {}
+    return json.dumps(
+        {
+            "targets": payload,
+            "observer": meta.get("observer_location"),
+            "vectors": [
+                {
+                    "target_key": row.get("target_key"),
+                    "fetched_at_utc": row.get("fetched_at_utc"),
+                    "horizons_signature": row.get("horizons_signature"),
+                    "sample_count": len(row.get("orbit_sample_times_utc") or []),
+                    "source": row.get("source"),
+                    "stale": row.get("stale"),
+                    "calculation_usable": row.get("calculation_usable"),
+                }
+                for row in rows
+                if isinstance(row, dict)
+            ],
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _celestial_live_update(scene: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip stable orbit curves and pass lists from frequent pointing ticks."""
+    live_keys = (
+        "target_key",
+        "sky_position",
+        "visibility",
+        "position_xyz_au",
+        "velocity_xyz_au_per_day",
+        "earth_relative",
+        "stale",
+        "current_position_usable",
+        "calculation_usable",
+        "error",
+        "error_code",
+    )
+    rows = scene.get("celestial") or []
+    return {
+        "timestamp_utc": scene.get("timestamp_utc"),
+        "celestial": [
+            {key: row[key] for key in live_keys if key in row}
+            for row in rows
+            if isinstance(row, dict) and row.get("target_key")
+        ],
+        "observer_bodies": scene.get("observer_bodies") or [],
+    }
+
+
 async def emit_cached_celestial_tracks_job(sio):
     """Broadcast current monitored celestial tracks using cached vectors only."""
+    global _celestial_last_full_signature, _celestial_last_full_at
     try:
         if await authsvc.is_setup_required(force_refresh=False):
             return
 
         payload = await _build_enabled_monitored_celestial_payload()
         if not payload["celestial"]:
+            _celestial_last_full_signature = None
+            _celestial_last_full_at = 0.0
             # Clients retain their last Redux payload until it is replaced. Send
             # an explicit empty state after the final target is removed/disabled.
             await sio.emit(
@@ -129,6 +193,11 @@ async def emit_cached_celestial_tracks_job(sio):
             )
             return
 
+        now = time.monotonic()
+        full_due = (
+            _celestial_last_full_signature is None
+            or now - _celestial_last_full_at >= CELESTIAL_FULL_TRACKS_INTERVAL_SECONDS
+        )
         tracks = await build_celestial_tracks(
             data=payload,
             logger=logger,
@@ -136,6 +205,7 @@ async def emit_cached_celestial_tracks_job(sio):
             allow_network_fetch=False,
             register_targets=False,
             use_computed_cache=False,
+            include_passes=full_due,
         )
         if not tracks.get("success"):
             logger.debug("Cached celestial tracks broadcast skipped: %s", tracks.get("error"))
@@ -153,7 +223,38 @@ async def emit_cached_celestial_tracks_job(sio):
             logger.debug("Cached celestial tracks broadcast skipped: no cached sky positions")
             return
 
-        await sio.emit("celestial-tracks-update", scene_data)
+        signature = _celestial_forecast_signature(payload, scene_data)
+        if not full_due and signature != _celestial_last_full_signature:
+            # A vector refresh, target edit, or observer change needs a full
+            # forecast even between periodic full snapshots.
+            tracks = await build_celestial_tracks(
+                data=payload,
+                logger=logger,
+                force_refresh=False,
+                allow_network_fetch=False,
+                register_targets=False,
+                use_computed_cache=False,
+                include_passes=True,
+            )
+            if not tracks.get("success"):
+                return
+            scene_data_obj = tracks.get("data")
+            scene_data = scene_data_obj if isinstance(scene_data_obj, dict) else {}
+            full_rows = scene_data.get("celestial") or []
+            if not any(
+                isinstance(row, dict) and isinstance(row.get("sky_position"), dict)
+                for row in full_rows
+            ):
+                return
+            full_due = True
+            signature = _celestial_forecast_signature(payload, scene_data)
+
+        if full_due:
+            await sio.emit("celestial-tracks-update", scene_data)
+            _celestial_last_full_signature = signature
+            _celestial_last_full_at = now
+        else:
+            await sio.emit("celestial-tracks-live-update", _celestial_live_update(scene_data))
     except Exception as e:
         logger.error(f"Error broadcasting cached celestial tracks: {e}")
         logger.exception(e)

@@ -42,8 +42,11 @@ export const redactSocketDebugArgs = (eventName, args) => {
 // Provider component
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
-    //const [collectStats, setCollectStats] = useState(import.meta.env.PROD);
-    const [collectStats, setCollectStats] = useState(true);
+    const [collectStats, setCollectStats] = useState(false);
+    // The connection callback outlives a popover opening. Read its current
+    // collection state without reconnecting the socket when that state changes.
+    const collectStatsRef = useRef(false);
+    collectStatsRef.current = collectStats;
     // Authentication now relies on HttpOnly cookies. We still track an epoch key so
     // the socket reconnects after login/logout/setup transitions.
     const [authEpoch, setAuthEpoch] = useState('anonymous');
@@ -377,13 +380,20 @@ export const SocketProvider = ({ children }) => {
                 timestamp: now
             };
 
-            // Update session start time in ref
+            // Totals and rates describe this popover viewing window. The
+            // connection duration remains tied to the actual socket session.
             trafficStatsRef.current = {
                 ...trafficStatsRef.current,
-                session: {
-                    start: now,
-                    duration: 0,
-                    lastUpdate: now
+                engine: {
+                    ...trafficStatsRef.current.engine,
+                    bytesReceived: 0,
+                    bytesSent: 0,
+                    packetsReceived: 0,
+                    packetsSent: 0
+                },
+                rates: {
+                    bytesPerSecond: { sent: 0, received: 0 },
+                    packetsPerSecond: { sent: 0, received: 0 }
                 },
                 collecting: true
             };
@@ -451,7 +461,7 @@ export const SocketProvider = ({ children }) => {
             console.info('Socket connected - resetting traffic stats');
 
             // Reset application stats if collecting
-            if (collectStats) {
+            if (collectStatsRef.current) {
                 applicationStats.current = {
                     bytesReceived: 0,
                     bytesSent: 0,
@@ -491,7 +501,7 @@ export const SocketProvider = ({ children }) => {
                     reconnecting: false,
                     reconnectAttempts: 0
                 },
-                collecting: collectStats
+                collecting: collectStatsRef.current
             };
         });
 
@@ -537,7 +547,7 @@ export const SocketProvider = ({ children }) => {
             console.info('Closing socket connection');
             newSocket.close();
         };
-    }, [collectStats, authEpoch]);
+    }, [authEpoch]);
 
     const providerValue = {
         socket,

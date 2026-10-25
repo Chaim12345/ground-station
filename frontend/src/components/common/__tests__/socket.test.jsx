@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useSocket, SocketProvider, redactSocketDebugArgs } from '../socket';
 
 // Mock socket.io-client - define the mock inline in the factory function
@@ -78,5 +78,27 @@ describe('SocketProvider', () => {
     expect(() => {
       result.current.socket.emit('test-event', { data: 'test' });
     }).not.toThrow();
+  });
+
+  it('measures incoming payloads only while enabled without reconnecting', () => {
+    const wrapper = ({ children }) => <SocketProvider>{children}</SocketProvider>;
+    const { result } = renderHook(() => useSocket(), { wrapper });
+    const socket = result.current.socket;
+    let serializations = 0;
+    const payload = { toJSON: () => { serializations += 1; return { large: 'payload' }; } };
+
+    const incoming = () => socket.onAny.mock.calls.at(-1)[0];
+    act(() => incoming()('sample', payload));
+    expect(serializations).toBe(0);
+
+    act(() => result.current.setCollectStats(true));
+    act(() => incoming()('sample', payload));
+    expect(serializations).toBe(1);
+    expect(result.current.socket).toBe(socket);
+    expect(socket.close).not.toHaveBeenCalled();
+
+    act(() => result.current.setCollectStats(false));
+    act(() => incoming()('sample', payload));
+    expect(serializations).toBe(1);
   });
 });
