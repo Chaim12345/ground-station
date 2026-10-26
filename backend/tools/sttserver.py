@@ -15,6 +15,9 @@ import io
 import os
 import threading
 import time
+import wave
+
+import numpy as np
 
 import uvicorn
 from fastapi import FastAPI, File, Form, UploadFile
@@ -45,6 +48,40 @@ def model() -> WhisperModel:
     return _model
 
 
+WHISPER_RATE = 16_000
+
+
+def load_audio(data: bytes) -> np.ndarray:
+    """Decode PCM WAV (what the app sends) to 16 kHz mono float32.
+
+    Avoids PyAV for the common case: its API drifts between releases and
+    faster-whisper's call into it breaks (seen: metadata_errors TypeError).
+    Non-WAV input still goes through faster-whisper's decoder.
+    """
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            rate, channels, width = w.getframerate(), w.getnchannels(), w.getsampwidth()
+            raw = w.readframes(w.getnframes())
+    except wave.Error:
+        from faster_whisper.audio import decode_audio
+
+        return decode_audio(io.BytesIO(data), sampling_rate=WHISPER_RATE)
+    dtype = {1: np.uint8, 2: np.int16, 4: np.int32}[width]
+    pcm = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+    if width == 1:
+        pcm = (pcm - 128.0) / 128.0
+    else:
+        pcm /= float(np.iinfo(dtype).max)
+    if channels > 1:
+        pcm = pcm.reshape(-1, channels).mean(axis=1)
+    if rate != WHISPER_RATE:
+        from scipy.signal import resample_poly
+
+        g = np.gcd(rate, WHISPER_RATE)
+        pcm = resample_poly(pcm, WHISPER_RATE // g, rate // g).astype(np.float32)
+    return pcm
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "model": MODEL_NAME, "loaded": _model is not None}
@@ -57,7 +94,7 @@ def transcribe(
     language: str | None = Form(None),
     response_format: str = Form("json"),
 ):
-    audio = io.BytesIO(file.file.read())
+    audio = load_audio(file.file.read())
     started = time.monotonic()
     with _infer_lock:
         segments, info = model().transcribe(
