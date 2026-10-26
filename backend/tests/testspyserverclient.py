@@ -67,6 +67,8 @@ class MockSpyServer(threading.Thread):
     def __init__(self, samples_between=256):
         super().__init__(daemon=True)
         self.settings = {}
+        self.setting_order = []
+        self.drop_every = 0  # >0: skip a sequence number every N IQ messages
         self.streaming_enabled = threading.Event()
         self.stream_active = threading.Event()
         self.received_hello = None
@@ -97,6 +99,13 @@ class MockSpyServer(threading.Thread):
                 elif command == 2:  # SET_SETTING
                     setting, value = struct.unpack("<II", body[:8])
                     self.settings[setting] = value
+                    self.setting_order.append(setting)
+                    if setting == SETTING_IQ_FREQUENCY:
+                        # Report the new tuning like real servers do.
+                        sync = struct.pack(
+                            "<11I", 1, 10, value, value, value, 0, 30_000_000, 0, 30_000_000, 1, 2
+                        )
+                        self._send(conn, 1, 0, sync)
                     if setting == SETTING_STREAMING_ENABLED and value:
                         self.streaming_enabled.set()
                 elif command == 3:  # PING
@@ -117,7 +126,9 @@ class MockSpyServer(threading.Thread):
             raw[0::2] = (np.arange(n) * 3 % 255)
             raw[1::2] = (np.arange(n) * 7 % 255)
             self._send(conn, MSG_UINT8_IQ | (0 << 16), 1, raw.tobytes())
-            self._seq += 1
+            self._iq_count = getattr(self, "_iq_count", 0) + 1
+            if self.drop_every and self._iq_count % self.drop_every == 0:
+                self._seq += 2  # server dropped two messages for this client
 
     def _device_info_bytes(self):
         return struct.pack("<12I", *MOCK_DEVICE_INFO.values())
@@ -196,6 +207,76 @@ def test_start_stream_sends_expected_settings(mock_server):
     assert wait_for_setting(mock_server, SETTING_IQ_FORMAT) == 2  # INT16 for 16-bit device
     assert wait_for_setting(mock_server, SETTING_STREAMING_ENABLED) == 1
     client.close()
+
+
+def test_stream_settings_sent_in_order_servers_require(mock_server):
+    """Real servers only retune hardware with mode -> fmt -> freq -> dec -> on."""
+    client = SpyServerClient("127.0.0.1", mock_server.port)
+    client.connect()
+    client.sample_rate = 200_000  # configured before streaming: deferred
+    client.center_freq = 10_000_000
+    assert mock_server.setting_order == []  # nothing sent before start_stream
+    client.start_stream()
+    wait_for_setting(mock_server, SETTING_STREAMING_ENABLED)
+    assert mock_server.setting_order == [
+        SETTING_STREAMING_MODE,
+        SETTING_IQ_FORMAT,
+        SETTING_IQ_FREQUENCY,
+        SETTING_IQ_DECIMATION,
+        SETTING_STREAMING_ENABLED,
+    ]
+    report = client.wait_for_tuning(timeout=5)
+    assert report["ok"] is True
+    assert report["iq_center"] == 10_000_000
+    client.close()
+
+
+def test_retune_while_streaming_is_sent_immediately():
+    client = SpyServerClient("127.0.0.1")
+    client.device_info = dict(MOCK_DEVICE_INFO)
+    sent = []
+    client.set_setting = lambda setting, value: sent.append((setting, value))
+    client.center_freq = 10_000_000
+    assert sent == []  # deferred until start_stream
+    client._streaming = True
+    client.center_freq = 12_000_000
+    assert sent == [(SETTING_IQ_FREQUENCY, 12_000_000)]
+
+
+def test_sequence_gaps_are_zero_filled_and_counted():
+    client = SpyServerClient("127.0.0.1")
+    assert client._account_sequence(10, 100) == 0
+    assert client._account_sequence(11, 100) == 0
+    # two messages missing -> two messages worth of zero samples
+    assert client._account_sequence(14, 100) == 200
+    assert client.stream_stats["gaps"] == 1
+    assert client.stream_stats["missing_messages"] == 2
+    assert client.stream_stats["zero_filled_samples"] == 200
+    # huge jump = counter reset, never zero-filled
+    assert client._account_sequence(1_000_000, 100) == 0
+    # 32-bit wrap-around is a normal step
+    client._last_iq_seq = 0xFFFFFFFF
+    assert client._account_sequence(0, 100) == 0
+
+
+def test_dropped_server_messages_keep_stream_timing(mock_server):
+    mock_server.drop_every = 5
+    client = SpyServerClient("127.0.0.1", mock_server.port)
+    client.connect()
+    client.start_stream()
+    samples = client.read_samples(256 * 40, timeout=10)
+    stats = client.stream_stats
+    assert stats["gaps"] >= 1
+    assert stats["zero_filled_samples"] == stats["missing_messages"] * 256
+    # zero-filled blocks are present in the stream
+    assert np.count_nonzero(samples == 0) >= 256
+    client.close()
+
+
+def test_client_sync_parses_short_bodies():
+    sync = SpyServerClient._parse_client_sync(struct.pack("<9I", 1, 45, 1, 2, 3, 4, 5, 6, 7))
+    assert sync["can_control"] == 1 and sync["iq_center_frequency"] == 2
+    assert "iq_decimation" not in sync
 
 
 def test_read_samples_returns_complex64(mock_server):

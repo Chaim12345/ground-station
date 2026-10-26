@@ -138,6 +138,23 @@ class SpyServerClient:
         self._center_freq: Optional[float] = None
         self._gain_index: Optional[int] = None
         self._agc_enabled: Optional[bool] = None
+        self._decimation: Optional[int] = None
+        self._streaming = False
+
+        # Stream integrity: SpyServer numbers every message. A jump in the
+        # sequence means the server dropped IQ blocks for this client (slow
+        # link / overloaded server). Gaps are zero-filled so the recording
+        # keeps wall-clock timing (Doppler, frame timing) and are counted.
+        self.stream_stats: Dict[str, int] = {
+            "iq_messages": 0,
+            "missing_messages": 0,
+            "gaps": 0,
+            "zero_filled_samples": 0,
+            "samples": 0,
+        }
+        self._last_iq_seq: Optional[int] = None
+        self._last_iq_len = 0
+        self._sync_count = 0
 
         # Sample buffer shared between the reader thread and read_samples()
         self._buffer = bytearray()
@@ -296,7 +313,9 @@ class SpyServerClient:
             "iq_decimation",
             "iq_format",
         ]
-        fields = struct.unpack("<11I", body[:44]) if len(body) >= 44 else []
+        # Server builds send 9, 10 or 11 fields; parse whatever is present.
+        count = min(len(body) // 4, len(names))
+        fields = struct.unpack(f"<{count}I", body[: count * 4]) if count else ()
         return dict(zip(names, fields))
 
     # ------------------------------------------------------------------
@@ -324,7 +343,10 @@ class SpyServerClient:
                     if mtype == MSG_DEVICE_INFO:
                         self.device_info = self._parse_device_info(body)
                     else:
-                        self.client_sync = self._parse_client_sync(body)
+                        with self._buffer_cond:
+                            self.client_sync = self._parse_client_sync(body)
+                            self._sync_count += 1
+                            self._buffer_cond.notify_all()
                     continue
                 elif mtype == MSG_PONG:
                     continue
@@ -334,7 +356,10 @@ class SpyServerClient:
                     continue
 
                 if samples is not None and len(samples):
+                    fill = self._account_sequence(_seq, len(samples))
                     with self._buffer_cond:
+                        if fill:
+                            self._buffer.extend(bytes(fill * 8))
                         self._buffer.extend(samples.tobytes())
                         self._buffer_cond.notify_all()
         except (SpyServerError, OSError) as e:
@@ -348,6 +373,27 @@ class SpyServerClient:
             self._reader_error = e
             with self._buffer_cond:
                 self._buffer_cond.notify_all()
+
+    # Never zero-fill more than this many messages for one gap: a jump this
+    # large is a server restart / counter reset, not dropped blocks.
+    MAX_FILL_MESSAGES = 256
+
+    def _account_sequence(self, seq: int, n_samples: int) -> int:
+        """Update stream stats; return how many zero samples to insert."""
+        stats = self.stream_stats
+        stats["iq_messages"] += 1
+        stats["samples"] += n_samples
+        fill = 0
+        if self._last_iq_seq is not None:
+            missing = (seq - self._last_iq_seq - 1) & 0xFFFFFFFF
+            if 0 < missing <= self.MAX_FILL_MESSAGES:
+                stats["gaps"] += 1
+                stats["missing_messages"] += missing
+                fill = missing * (self._last_iq_len or n_samples)
+                stats["zero_filled_samples"] += fill
+        self._last_iq_seq = seq
+        self._last_iq_len = n_samples
+        return fill
 
     @staticmethod
     def _decode_uint8_iq(body: bytes, gain_db: int) -> np.ndarray:
@@ -420,14 +466,69 @@ class SpyServerClient:
         return best if best is not None else max(stages, min_decimation)
 
     def start_stream(self) -> None:
-        """Configure and enable the IQ stream with current settings."""
+        """Configure and enable the IQ stream.
+
+        Order matters on real servers: mode -> format -> frequency ->
+        decimation -> enable (the order SDR#/SatDump use). Sending frequency
+        and decimation before the streaming mode makes several public servers
+        move only the IQ window label while the hardware stays on its old
+        frequency (verified live: device_center stayed at 100 MHz while
+        iq_center said 145.935 MHz), so the recording holds the wrong band.
+        """
         self._iq_format = self._select_iq_format()
-        self.set_setting(SETTING_IQ_FORMAT, self._iq_format)
         self.set_setting(SETTING_STREAMING_MODE, STREAM_MODE_IQ_ONLY)
+        self.set_setting(SETTING_IQ_FORMAT, self._iq_format)
+        if self._center_freq is not None:
+            self.set_setting(SETTING_IQ_FREQUENCY, int(self._center_freq))
+        if self._decimation is not None:
+            self.set_setting(SETTING_IQ_DECIMATION, self._decimation)
         self.set_setting(SETTING_STREAMING_ENABLED, 1)
+        self._streaming = True
 
     def stop_stream(self) -> None:
+        self._streaming = False
         self.set_setting(SETTING_STREAMING_ENABLED, 0)
+
+    def wait_for_tuning(self, timeout: float = 5.0) -> Dict[str, Any]:
+        """Wait for the server's CLIENT_SYNC after tuning and report it.
+
+        Returns {"ok", "can_control", "device_center", "iq_center",
+        "requested", "reason"}. ok=False means the server is not delivering
+        the requested frequency (no control and target outside the window
+        the current hardware tuning allows), so recording would be useless.
+        """
+        requested = int(self._center_freq or 0)
+        deadline = time.monotonic() + timeout
+        with self._buffer_cond:
+            start = self._sync_count
+            while time.monotonic() < deadline:
+                sync = self.client_sync
+                if self._sync_count > start and sync.get("iq_center_frequency") == requested:
+                    break
+                if self._reader_error is not None:
+                    break
+                self._buffer_cond.wait(timeout=max(0.05, deadline - time.monotonic()))
+            sync = dict(self.client_sync)
+        iq_center = sync.get("iq_center_frequency")
+        report = {
+            "ok": True,
+            "can_control": sync.get("can_control"),
+            "device_center": sync.get("device_center_frequency"),
+            "iq_center": iq_center,
+            "requested": requested,
+            "reason": "",
+        }
+        if not sync:
+            report["reason"] = "server sent no CLIENT_SYNC; tuning unverified"
+            return report
+        if iq_center is not None and requested and abs(int(iq_center) - requested) > 1000:
+            report["ok"] = False
+            report["reason"] = (
+                f"server streams {iq_center} Hz instead of {requested} Hz "
+                f"(can_control={sync.get('can_control')}, device at "
+                f"{sync.get('device_center_frequency')} Hz)"
+            )
+        return report
 
     # ------------------------------------------------------------------
     # Device control (properties mirror RtlSdrTcpClient)
@@ -449,8 +550,10 @@ class SpyServerClient:
             raise SpyServerError(
                 f"Center frequency {freq_int} Hz outside device range {freq_min}-{freq_max} Hz"
             )
-        self.set_setting(SETTING_IQ_FREQUENCY, freq_int)
         self._center_freq = float(freq_int)
+        # Before streaming, start_stream() sends it in the order servers need.
+        if self._streaming:
+            self.set_setting(SETTING_IQ_FREQUENCY, freq_int)
         self._logger.info(f"Set IQ center frequency to {freq_int} Hz")
 
     @property
@@ -461,7 +564,10 @@ class SpyServerClient:
     def sample_rate(self, rate_sps: float) -> None:
         decimation = self._choose_decimation(rate_sps)
         max_rate = self.device_info.get("maximum_sample_rate", 0)
-        self.set_setting(SETTING_IQ_DECIMATION, decimation)
+        self._decimation = decimation
+        # Before streaming, start_stream() sends it in the order servers need.
+        if self._streaming:
+            self.set_setting(SETTING_IQ_DECIMATION, decimation)
         self._effective_sample_rate = (
             max_rate / (2**decimation) if max_rate else float(rate_sps)
         )

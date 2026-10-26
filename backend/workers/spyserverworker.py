@@ -146,6 +146,15 @@ def spyserver_worker_process(
         # Prefer the effective (decimated) rate the server actually delivers.
         sample_rate = sdr.sample_rate or sample_rate
 
+        # Verify the server really streams the requested frequency. Shared
+        # servers controlled by another listener keep their own tuning; a
+        # recording from them would contain the wrong band, so fail loudly.
+        stage = "verifying tuning"
+        tuning = sdr.wait_for_tuning()
+        logger.info(f"SpyServer tuning report: {tuning}")
+        if not tuning["ok"]:
+            raise RuntimeError(f"SpyServer not tuned to the requested frequency: {tuning['reason']}")
+
         logger.info(
             "SpyServer configured: "
             f"device={sdr.device_type_name}, sample_rate={sample_rate}, "
@@ -203,7 +212,7 @@ def spyserver_worker_process(
                         "type": "stats",
                         "client_id": client_id,
                         "sdr_id": sdr_id,
-                        "stats": stats.copy(),
+                        "stats": {**stats, "stream": dict(sdr.stream_stats)},
                         "timestamp": current_time,
                     }
                 )
