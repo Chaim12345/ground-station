@@ -246,6 +246,49 @@ def decode_lora(
 # Orchestration
 # --------------------------------------------------------------------------
 
+# After Doppler removal only the receiver's static offset is left; RTL-SDR
+# stations can be several kHz off, so keep the span but use finer steps.
+DOPPLER_CORRECTED_OFFSETS = tuple(range(-4000, 4001, 500))
+
+
+def _doppler_corrected_copy(
+    data_path: Path,
+    meta: Dict[str, Any],
+    norad_id: int,
+    sample_rate: float,
+    center: int,
+    db_path: Path,
+    tmp_dir: Path,
+    log: Log,
+):
+    """Doppler-corrected temp copy of the recording, or None if not possible."""
+    from tasks import dopplercorrect as dc
+
+    station = dc.resolve_station(meta, data_path, db_path)
+    tle = dc.resolve_tle(norad_id, db_path)
+    start = dc.capture_start(meta)
+    if not (station and tle and start and center):
+        missing = [k for k, v in (("station", station), ("tle", tle), ("start", start), ("center", center)) if not v]
+        log(f"Doppler correction skipped (missing {', '.join(missing)})")
+        return None
+    duration = data_path.stat().st_size / 8 / sample_rate
+    try:
+        t_rel, shift = dc.doppler_track(tle[0], tle[1], station, start, duration, center)
+        out = tmp_dir / "doppler_corrected.cf32"
+        dc.correct_file(data_path, out, sample_rate, t_rel, shift)
+    except Exception as e:  # never block decoding on the optional step
+        log(f"Doppler correction failed: {e}")
+        return None
+    info = {
+        "applied": True,
+        "station": station,
+        "start": start.isoformat(),
+        "doppler_hz_range": [round(float(shift.min())), round(float(shift.max()))],
+    }
+    log(f"Doppler corrected: {info['doppler_hz_range'][1]:+d} .. {info['doppler_hz_range'][0]:+d} Hz")
+    return out, info
+
+
 
 def decode_recording(
     data_path: Path,
@@ -275,14 +318,25 @@ def decode_recording(
     grsat = gr_satellites_binary()
     frames: List[Dict[str, Any]] = []
     engines: List[str] = []
-    if lora_cfg:
-        engines.append("gr-lora_sdr")
-        frames += decode_lora(data_path, center, float(sample_rate), lora_cfg, log)
-    if grsat and gr_satellites_knows(norad_id, grsat):
-        engines.append("gr_satellites")
-        frames += decode_gr_satellites(
-            data_path, norad_id, float(sample_rate), offsets, log=log, grsat=grsat
+    doppler_info: Dict[str, Any] = {"applied": False}
+    with tempfile.TemporaryDirectory() as tmp:
+        decode_path = data_path
+        corrected = _doppler_corrected_copy(
+            data_path, meta, norad_id, float(sample_rate), center, db_path, Path(tmp), log
         )
+        if corrected is not None:
+            decode_path, doppler_info = corrected
+            # Residual = static receiver offset only: sweep finer steps.
+            offsets = DOPPLER_CORRECTED_OFFSETS
+        if lora_cfg:
+            engines.append("gr-lora_sdr")
+            # LoRa demodulation tolerates Doppler; its sync is self-correcting.
+            frames += decode_lora(data_path, center, float(sample_rate), lora_cfg, log)
+        if grsat and gr_satellites_knows(norad_id, grsat):
+            engines.append("gr_satellites")
+            frames += decode_gr_satellites(
+                decode_path, norad_id, float(sample_rate), offsets, log=log, grsat=grsat
+            )
     if not engines:
         log(f"No decoder available for NORAD {norad_id}")
 
@@ -298,6 +352,7 @@ def decode_recording(
         "sample_rate": sample_rate,
         "center_frequency": center,
         "engines": engines,
+        "doppler_correction": doppler_info,
         "frames": len(frames),
         "trusted_frames": len(trusted),
         "seconds": round(time.time() - t0, 1),
