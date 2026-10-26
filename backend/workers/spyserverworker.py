@@ -44,6 +44,10 @@ logger = logging.getLogger("spyserver-worker")
 # Target blocks per second for constant rate streaming (matches other workers)
 TARGET_BLOCKS_PER_SEC = 15
 
+# Longest stall/reconnect outage that is zero-filled to keep wall-clock
+# timing; longer gaps are not padded (the pass is effectively lost anyway).
+MAX_OUTAGE_FILL_SECONDS = 60.0
+
 
 def calculate_samples_per_scan(sample_rate, fft_size):
     """Calculate number of samples per scan for constant block rate streaming."""
@@ -179,16 +183,85 @@ def spyserver_worker_process(
             "iq_chunks_out": 0,
             "read_errors": 0,
             "queue_drops": 0,
+            "outage_fill_samples": 0,
+            "reconnects": 0,
             "last_activity": None,
             "errors": 0,
             "cpu_percent": 0.0,
             "memory_mb": 0.0,
             "memory_percent": 0.0,
         }
-        last_stats_send = time.time()
-        stats_send_interval = 1.0
         stream_chunk_id = 0
         stream_sample_index = 0
+        last_good_monotonic = time.monotonic()
+
+        def publish(samples):
+            """Send one complex64 chunk to the FFT and demod/recorder queues."""
+            nonlocal stream_chunk_id, stream_sample_index
+            chunk_sample_count = len(samples)
+            chunk_id = stream_chunk_id
+            chunk_start_sample = stream_sample_index
+            stream_chunk_id += 1
+            stream_sample_index += chunk_sample_count
+            if not has_iq_consumers:
+                return
+            timestamp = time.time()
+            base = {
+                # `center_freq` is intentionally logical (not hardware RF);
+                # SpyServer IQ stream center == logical center.
+                "center_freq": logical_center_freq,
+                "logical_center_freq_hz": logical_center_freq,
+                "rf_center_freq_hz": logical_center_freq,
+                "dsp_shift_hz": 0.0,
+                "offset_freq_hz": offset_freq,
+                "sample_rate": sample_rate,
+                "timestamp": timestamp,
+                "stream_chunk_id": chunk_id,
+                "stream_start_sample": chunk_start_sample,
+                "stream_sample_count": chunk_sample_count,
+            }
+            for target, extra in (
+                (
+                    iq_queue_fft,
+                    {
+                        "config": {
+                            "fft_size": fft_size,
+                            "fft_window": fft_window,
+                            "fft_averaging": fft_averaging,
+                            "fft_overlap_percent": fft_overlap_percent,
+                            "fft_overlap_depth": fft_overlap_depth,
+                        }
+                    },
+                ),
+                (iq_queue_demod, {}),
+            ):
+                if target is None:
+                    continue
+                try:
+                    if not target.full():
+                        target.put_nowait({"samples": samples.copy(), **base, **extra})
+                        stats["iq_chunks_out"] += 1
+                    else:
+                        stats["queue_drops"] += 1
+                except Exception:
+                    stats["queue_drops"] += 1
+
+        def fill_outage(seconds: float) -> None:
+            """Publish zeros for time lost to a stall/reconnect.
+
+            Keeps recordings on wall-clock time so Doppler prediction and the
+            pass timeline stay aligned with the samples after an outage.
+            """
+            seconds = min(max(seconds, 0.0), MAX_OUTAGE_FILL_SECONDS)
+            remaining = int(seconds * sample_rate)
+            stats["outage_fill_samples"] += remaining
+            while remaining > 0:
+                n = min(remaining, num_samples)
+                publish(np.zeros(n, dtype=np.complex64))
+                remaining -= n
+
+        last_stats_send = time.time()
+        stats_send_interval = 1.0
 
         process = psutil.Process()
         last_cpu_check = time.time()
@@ -294,75 +367,11 @@ def spyserver_worker_process(
                 samples = sdr.read_samples(num_samples)
                 stats["samples_read"] += len(samples)
                 stats["last_activity"] = time.time()
+                last_good_monotonic = time.monotonic()
 
                 # Enforce pipeline contract: workers publish complex64 IQ samples.
                 samples = require_complex64(samples, source="spyserver-worker")
-
-                samples = remove_dc_offset(samples)
-                chunk_sample_count = len(samples)
-                chunk_id = stream_chunk_id
-                chunk_start_sample = stream_sample_index
-                stream_chunk_id += 1
-                stream_sample_index += chunk_sample_count
-
-                if has_iq_consumers:
-                    timestamp = time.time()
-
-                    if iq_queue_fft is not None:
-                        try:
-                            if not iq_queue_fft.full():
-                                iq_message = {
-                                    "samples": samples.copy(),
-                                    # `center_freq` is intentionally logical (not
-                                    # hardware RF); SpyServer IQ stream center
-                                    # == logical center.
-                                    "center_freq": logical_center_freq,
-                                    "logical_center_freq_hz": logical_center_freq,
-                                    "rf_center_freq_hz": logical_center_freq,
-                                    "dsp_shift_hz": 0.0,
-                                    "offset_freq_hz": offset_freq,
-                                    "sample_rate": sample_rate,
-                                    "timestamp": timestamp,
-                                    "stream_chunk_id": chunk_id,
-                                    "stream_start_sample": chunk_start_sample,
-                                    "stream_sample_count": chunk_sample_count,
-                                    "config": {
-                                        "fft_size": fft_size,
-                                        "fft_window": fft_window,
-                                        "fft_averaging": fft_averaging,
-                                        "fft_overlap_percent": fft_overlap_percent,
-                                        "fft_overlap_depth": fft_overlap_depth,
-                                    },
-                                }
-                                iq_queue_fft.put_nowait(iq_message)
-                                stats["iq_chunks_out"] += 1
-                            else:
-                                stats["queue_drops"] += 1
-                        except Exception:
-                            stats["queue_drops"] += 1
-
-                    if iq_queue_demod is not None:
-                        try:
-                            if not iq_queue_demod.full():
-                                demod_message = {
-                                    "samples": samples.copy(),
-                                    "center_freq": logical_center_freq,
-                                    "logical_center_freq_hz": logical_center_freq,
-                                    "rf_center_freq_hz": logical_center_freq,
-                                    "dsp_shift_hz": 0.0,
-                                    "offset_freq_hz": offset_freq,
-                                    "sample_rate": sample_rate,
-                                    "timestamp": timestamp,
-                                    "stream_chunk_id": chunk_id,
-                                    "stream_start_sample": chunk_start_sample,
-                                    "stream_sample_count": chunk_sample_count,
-                                }
-                                iq_queue_demod.put_nowait(demod_message)
-                                stats["iq_chunks_out"] += 1
-                            else:
-                                stats["queue_drops"] += 1
-                        except Exception:
-                            stats["queue_drops"] += 1
+                publish(remove_dc_offset(samples))
 
             except Exception as e:
                 error_msg = _format_worker_error("reading samples", e, config)
@@ -398,10 +407,21 @@ def spyserver_worker_process(
                             sdr.gain = config.get("gain", 20)
                         sdr.set_agc_mode(bool(tuner_agc))
                         sdr.start_stream()
-                        sample_rate = sdr.sample_rate or requested_sample_rate
-                        num_samples = calculate_samples_per_scan(sample_rate, fft_size)
+                        tuning = sdr.wait_for_tuning()
+                        if not tuning["ok"]:
+                            # Another listener took the receiver: recording
+                            # its band would be worse than recording nothing.
+                            raise RuntimeError(tuning["reason"])
+                        new_rate = sdr.sample_rate or requested_sample_rate
+                        if new_rate != sample_rate:
+                            raise RuntimeError(
+                                f"sample rate changed on reconnect ({sample_rate} -> {new_rate})"
+                            )
+                        fill_outage(time.monotonic() - last_good_monotonic)
+                        last_good_monotonic = time.monotonic()
+                        stats["reconnects"] += 1
                         logger.info(
-                            "SpyServer reconnected: device=%s, sample_rate=%s",
+                            "SpyServer reconnected: device=%s, sample_rate=%s, outage filled",
                             sdr.device_type_name, sample_rate,
                         )
                         reconnected = True
