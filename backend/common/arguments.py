@@ -17,6 +17,7 @@
 import argparse
 import os
 import secrets
+import sys
 from pathlib import Path
 
 from common.appconfig import DEFAULT_APP_CONFIG, load_app_config
@@ -88,6 +89,14 @@ resolved_app_config_path: Path
 app_config_cli_overrides: set[str]
 raw_startup_cli_args: argparse.Namespace | None
 
+# Only the backend server's own command line belongs to this parser. Offline
+# tools (tools/*.py) and scripts that import app modules have their own flags,
+# which parse_args() would reject with SystemExit; they still read the config
+# file, just with no CLI overrides.
+_is_server_process = Path(sys.argv[0]).name == "app.py" or bool(
+    os.environ.get("GS_PARSE_CLI_ARGS")
+)
+
 # Only parse arguments if we're not in an alembic context
 if os.environ.get("ALEMBIC_CONTEXT"):
     # Create a namespace with default values for alembic context
@@ -116,7 +125,7 @@ if os.environ.get("ALEMBIC_CONTEXT"):
         celestial_sync_past_hours=1,
     )
 else:
-    _raw_args = parser.parse_args()
+    _raw_args = parser.parse_args(sys.argv[1:] if _is_server_process else [])
     raw_startup_cli_args = _raw_args
     app_config_cli_overrides = {
         key

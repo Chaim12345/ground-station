@@ -23,7 +23,6 @@ OBS = Path(__file__).resolve().parents[1] / "data" / "observations"
 
 
 def run(data: str, delete: bool) -> dict:
-    # Imported lazily: the app's config module parses sys.argv on import.
     from tasks.telemetrydecoder import decode_recording_task
 
     p = Path(data)
@@ -37,7 +36,6 @@ def main() -> int:
     ap.add_argument("--delete-iq", action="store_true")
     ap.add_argument("--only", default="")
     args = ap.parse_args()
-    sys.argv = sys.argv[:1]  # keep our flags away from the app's argument parser
     files = [f for f in sorted(glob.glob(str(OBS / "*.gsobs/recordings/*.sigmf-data"))) if args.only in f]
     good = 0
     with cf.ProcessPoolExecutor(max_workers=args.jobs) as ex:
