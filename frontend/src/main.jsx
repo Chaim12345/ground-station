@@ -53,6 +53,7 @@ import {WakeLockProvider} from "./components/dashboard/wake-lock-provider.jsx";
 import SatelliteInfoPage from "./components/satellites/satellite-info-page.jsx";
 import FileBrowserMain from "./components/filebrowser/filebrowser-main.jsx";
 import ScheduledObservationsLayout from "./components/scheduler/main-layout.jsx";
+import RadarLayout from "./components/radar/main-layout.jsx";
 import CelestialMainLayout from "./components/celestial/main-layout.jsx";
 import ApiTokensPage from "./components/auth/tokens.jsx";
 
@@ -107,6 +108,10 @@ const router = createBrowserRouter([
                     {
                         path: "scheduler",
                         Component: ScheduledObservationsLayout,
+                    },
+                    {
+                        path: "radar",
+                        Component: RadarLayout,
                     },
                     {
                         path: "preferences",

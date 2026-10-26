@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from observations.multistation import generate_multi_station_observations
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -343,6 +345,67 @@ async def sync_satellite_data_job(background_task_manager):
         logger.exception(e)
 
 
+async def refresh_spyservers_job(background_task_manager):
+    """
+    Scheduled auto-discovery of public SpyServer stations.
+
+    Runs the registered spyserver_discovery task through the background task
+    manager so results flow through the standard pipeline (progress, socket
+    events, discovered-servers store, persistence). Keeps the station list
+    fresh without any user interaction.
+    """
+    try:
+        spyserver_task = get_task("spyserver_discovery")
+        task_id = await background_task_manager.start_task(
+            func=spyserver_task,
+            args=(),
+            kwargs={},
+            name="Scheduled SpyServer Discovery",
+            task_id=None,
+        )
+        logger.info(f"Scheduled SpyServer discovery started as background task: {task_id}")
+    except ValueError:
+        # A discovery task is already running (manual or previous interval);
+        # nothing to do this cycle.
+        logger.debug("Skipping scheduled SpyServer discovery: task already running")
+    except Exception as e:
+        logger.error(f"Error starting scheduled SpyServer discovery: {e}")
+        logger.exception(e)
+
+
+async def generate_multi_station_observations_job():
+    """Scheduled multi-station observation generation (all station SDRs)."""
+    try:
+        logger.info("Running automatic multi-station observation generation...")
+        async with AsyncSessionLocal() as session:
+            result = await generate_multi_station_observations(session)
+            stats = result or {}
+            logger.info(
+                f"Multi-station generation completed: "
+                f"{stats.get('generated', 0)} created, "
+                f"{stats.get('conflict_skipped', 0)} conflict-skipped, "
+                f"{stats.get('skipped', 0)} skipped, "
+                f"{stats.get('errors', 0)} errors across "
+                f"{stats.get('stations_processed', 0)} station(s)"
+            )
+            if stats.get("generated", 0) > 0:
+                await obs_events.emit_scheduled_observations_changed()
+                if obs_events.observation_sync:
+                    sync_result = await obs_events.observation_sync.sync_all_observations()
+                    if sync_result["success"]:
+                        sync_stats = sync_result.get("stats", {})
+                        logger.info(
+                            f"APScheduler sync complete: "
+                            f"{sync_stats.get('scheduled', 0)} scheduled"
+                        )
+    except Exception as e:
+        logger.error(f"Error running multi-station observation generation: {e}")
+        logger.exception(e)
+
+
+# Import at module load — handled by direct import below
+
+
 def check_and_restart_decoders_job(process_manager):
     """Job to check decoder health and restart if needed."""
     try:
@@ -595,7 +658,46 @@ def start_scheduler(sio, process_manager, background_task_manager):
         replace_existing=True,
     )
 
+    # Auto-discover public SpyServer stations shortly after startup and
+    # refresh every 15 minutes so the station list stays current without any
+    # user interaction.
+    scheduler.add_job(
+        refresh_spyservers_job,
+        trigger=IntervalTrigger(minutes=15),
+        args=[background_task_manager],
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=25),
+        id="refresh_spyservers",
+        name="Auto-discover SpyServer stations",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     celestial_sync_enabled = bool(getattr(arguments, "celestial_periodic_sync_enabled", True))
+    try:
+        celestial_sync_interval_minutes = int(
+            getattr(arguments, "celestial_periodic_sync_interval_minutes", 60)
+        )
+    except (TypeError, ValueError):
+        celestial_sync_interval_minutes = 60
+    celestial_sync_interval_minutes = min(
+        max(5, celestial_sync_interval_minutes),
+        CELESTIAL_SYNC_MAX_INTERVAL_MINUTES,
+    )
+
+    # Multi-station capture: predict passes from each configured station's own
+    # location and book an observation per (satellite, station, pass). First
+    # run shortly after startup so all stations' in-range targets are captured.
+    scheduler.add_job(
+        generate_multi_station_observations_job,
+        trigger=IntervalTrigger(hours=6),
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+        id="generate_multi_station_observations",
+        name="Multi-station observation generation",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     try:
         celestial_sync_interval_minutes = int(
             getattr(arguments, "celestial_periodic_sync_interval_minutes", 60)

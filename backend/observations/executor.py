@@ -27,6 +27,8 @@ from crud import trackingstate
 from crud.hardware import fetch_sdr
 from crud.scheduledobservations import fetch_scheduled_observations
 from db import AsyncSessionLocal
+from db.models import Transmitters
+from sqlalchemy import select
 from handlers.entities.filebrowser import emit_file_browser_state
 from observations import events as observation_events
 from observations.bundle import (
@@ -60,6 +62,19 @@ from tasks.registry import get_task
 from tracker.contracts import get_tracking_state_name
 from tracker.runner import get_assigned_tracker_for_rotator
 from vfos.state import INTERNAL_VFO_NUMBER, VFOManager
+
+def _telemetry_decode_deletes(task_config: Dict[str, Any]) -> bool:
+    """True when the telemetry decode task may delete the IQ after a good decode.
+
+    Opt-in via ``delete_iq_after_decode``. SatDump-processed recordings are
+    never telemetry-decoded, so this cannot delete SatDump's input.
+    """
+    return bool(
+        task_config.get("enable_telemetry_decode", True)
+        and task_config.get("delete_iq_after_decode")
+        and not task_config.get("enable_post_processing")
+    )
+
 
 KNOWN_SATDUMP_PIPELINES = {
     "meteor_m2-x_lrpt",
@@ -896,11 +911,48 @@ class ObservationExecutor:
                     raise ValueError(f"SDR with ID {sdr_id} not found in database")
 
                 sdr_device = sdr_result["data"]
+                if not sdr_device:
+                    raise ValueError(f"SDR with ID {sdr_id} not found in database")
+
+            # Resolve an effective center frequency. Configs saved by the UI
+            # may carry center_frequency=0 with auto_center_frequency=true
+            # ("center on the signal"): in that case derive the center from
+            # the session tasks' transmitter frequencies (decoder frequency,
+            # IQ target frequency, or the transmitter_id lookup), falling
+            # back to the SDR's stored mid-band default when nothing yields
+            # a usable frequency.
+            center_frequency = sdr_config_dict.get("center_frequency")
+            auto_center = sdr_config_dict.get("auto_center_frequency", False)
+            try:
+                center_frequency = float(center_frequency) if center_frequency is not None else None
+            except (TypeError, ValueError):
+                center_frequency = None
+            if center_frequency is None or center_frequency <= 0 or auto_center:
+                resolved = await self._resolve_auto_center_frequency(tasks)
+                if resolved:
+                    if auto_center or center_frequency is None or center_frequency <= 0:
+                        logger.info(
+                            f"Auto-centering SDR at {resolved / 1e6:.3f} MHz "
+                            f"(from session tasks)"
+                        )
+                        center_frequency = resolved
+            if not center_frequency or center_frequency <= 0:
+                # Last resort: the SDR's advertised center of its range.
+                sdr_min = float(sdr_device.get("frequency_min") or 0) * 1e6
+                sdr_max = float(sdr_device.get("frequency_max") or 0) * 1e6
+                if sdr_max > 0:
+                    center_frequency = (sdr_min + sdr_max) / 2
+                    logger.info(
+                        f"No task frequency resolvable; centering at mid-band "
+                        f"{center_frequency / 1e6:.3f} MHz"
+                    )
+            if not center_frequency or center_frequency <= 0:
+                center_frequency = 100000000
 
             # Build SDR config dict (operational parameters)
             sdr_config = SDRConfig(
                 sdr_id=sdr_id,
-                center_freq=sdr_config_dict.get("center_frequency", 100000000),
+                center_freq=center_frequency,
                 sample_rate=sdr_config_dict.get("sample_rate", 2048000),
                 gain=sdr_config_dict.get("gain", 20),
                 ppm_error=sdr_config_dict.get("ppm_error", 0),
@@ -1134,8 +1186,15 @@ class ObservationExecutor:
             if has_iq_task:
                 skip_auto_waterfall = any(
                     task.get("type") == "iq_recording"
-                    and (task.get("config") or {}).get("enable_post_processing")
-                    and (task.get("config") or {}).get("delete_after_post_processing")
+                    and (
+                        (
+                            (task.get("config") or {}).get("enable_post_processing")
+                            and (task.get("config") or {}).get("delete_after_post_processing")
+                        )
+                        # The telemetry decode task renders the waterfall itself
+                        # before it may delete the IQ, so the two cannot race.
+                        or _telemetry_decode_deletes(task.get("config") or {})
+                    )
                     for task in tasks
                 )
                 if skip_auto_waterfall:
@@ -1152,6 +1211,9 @@ class ObservationExecutor:
                         sdr_id, session_id, skip_auto_waterfall=skip_auto_waterfall
                     )
 
+                # Telemetry decode first: it reads the IQ info that the SatDump
+                # step clears from _iq_recording_info when it finishes.
+                await self._start_telemetry_decoding(observation_id, session_key, tasks)
                 await self._start_satdump_postprocessing(
                     observation_id, session_key, tasks, session.get("sdr", {}) or {}
                 )
@@ -1164,6 +1226,53 @@ class ObservationExecutor:
         logger.info(
             f"Observation {observation_id} session {session_key} cleaned up for {satellite.get('name', 'unknown')}"
         )
+
+    async def _start_telemetry_decoding(
+        self, observation_id: str, session_key: str, tasks: list[dict]
+    ) -> None:
+        """Queue a gr-satellites / gr-lora_sdr decode for each finished IQ recording.
+
+        Enabled by default (task config ``enable_telemetry_decode``). Frames land
+        in the bundle's ``decoded/`` folder. With ``delete_iq_after_decode`` the
+        large .sigmf-data is removed, but only after validated frames were decoded.
+        """
+        task_info = self._iq_recording_info.get(observation_id, {}).get(session_key, {})
+        if not task_info:
+            return
+        background_task_manager = runtimestate.background_task_manager
+        if not background_task_manager:
+            logger.error("Background task manager not available for telemetry decoding")
+            return
+
+        for task_index, task in enumerate(tasks, start=1):
+            if task.get("type") != "iq_recording":
+                continue
+            task_config = task.get("config", {}) or {}
+            # SatDump-processed recordings (weather imagery) are SatDump's job.
+            if not task_config.get("enable_telemetry_decode", True) or task_config.get(
+                "enable_post_processing"
+            ):
+                continue
+            recording_entry = task_info.get(task_index)
+            recording_path = recording_entry.get("recording_path") if recording_entry else None
+            if not recording_path:
+                continue
+            # SatDump also consumes this file; never delete it from under SatDump.
+            delete_iq = _telemetry_decode_deletes(task_config)
+            output_dir = Path(recording_path).parent.parent / "decoded" / Path(recording_path).name
+            try:
+                task_id = await background_task_manager.start_task(
+                    func=get_task("telemetry_decode"),
+                    args=(f"{recording_path}.sigmf-data", str(output_dir)),
+                    kwargs={"delete_iq_after": delete_iq, "generate_waterfall": delete_iq},
+                    name=f"Telemetry decode: {Path(recording_path).name}",
+                )
+                logger.info(
+                    f"Started telemetry decode task {task_id} for {recording_path} "
+                    f"(delete_iq_after={delete_iq})"
+                )
+            except Exception as e:
+                logger.error(f"Failed to start telemetry decode for {recording_path}: {e}")
 
     async def _start_satdump_postprocessing(
         self,
@@ -1245,6 +1354,52 @@ class ObservationExecutor:
             self._iq_recording_info[observation_id].pop(session_key, None)
             if not self._iq_recording_info[observation_id]:
                 self._iq_recording_info.pop(observation_id, None)
+
+    async def _resolve_auto_center_frequency(self, tasks: list) -> Optional[float]:
+        """
+        Derive an SDR center frequency (Hz) from a session's tasks.
+
+        Looks at task-level frequencies in priority order:
+        decoder task config.frequency, IQ recording target_center_freq,
+        then the transmitter_id lookup (downlink_low). Returns the midpoint
+        of the resolved range when several frequencies are found, or None
+        when no task yields a usable frequency.
+        """
+        frequencies: list = []
+        for task in tasks or []:
+            if not isinstance(task, dict):
+                continue
+            task_config = task.get("config", {}) or {}
+            task_type = task.get("type")
+            frequency = task_config.get("frequency")
+            if not frequency and task_type == "iq_recording":
+                frequency = task_config.get("target_center_freq")
+            if not frequency and task_config.get("transmitter_id"):
+                try:
+                    async with AsyncSessionLocal() as db_session:
+                        result = await db_session.execute(
+                            select(Transmitters).where(
+                                Transmitters.id == task_config["transmitter_id"]
+                            )
+                        )
+                        transmitter_record = result.scalar_one_or_none()
+                    if transmitter_record and transmitter_record.downlink_low:
+                        frequency = transmitter_record.downlink_low
+                except Exception as e:
+                    logger.warning(f"Auto-center: transmitter lookup failed: {e}")
+            try:
+                if frequency:
+                    frequency = float(frequency)
+                    if frequency > 0:
+                        frequencies.append(frequency)
+            except (TypeError, ValueError):
+                continue
+
+        if not frequencies:
+            return None
+        if len(frequencies) == 1:
+            return frequencies[0]
+        return (min(frequencies) + max(frequencies)) / 2
 
     def _load_sigmf_metadata(self, recording_path: str) -> Dict[str, Any]:
         meta_path = Path(f"{recording_path}.sigmf-meta")

@@ -93,10 +93,13 @@ import logging
 import re
 from typing import Any, Dict, Optional, Tuple
 
+from constants.framing import AO40_FRAMINGS
+
 from .aprsparser import APRSParser
 from .ax25parser import AX25Parser
 from .ccsdsparser import CCSDSParser
 from .cspparser import CSPParser
+from .parsers.funcube import FuncubeParser
 from .parsers.geoscan import GeoscanParser
 from .parsers.registry import register_builtin_payload_parsers
 from .payloadanalyzers import PayloadAnalyzer
@@ -128,6 +131,7 @@ class TelemetryParser:
         self.aprs_parser = APRSParser()
         self.csp_parser = CSPParser()
         self.ccsds_parser = CCSDSParser()
+        self.funcube_parser = FuncubeParser()
         self.payload_parsers: Dict[Any, Any] = {}  # protocol-aware registry
         register_builtin_payload_parsers(self)
         logger.debug("Telemetry parser initialized (protocol-agnostic)")
@@ -204,6 +208,26 @@ class TelemetryParser:
 
         # Choose protocol
         protocol = None
+        framing_hint = parser_hint.get("framing") if isinstance(parser_hint, dict) else None
+
+        # FUNcube family (AO-40 FEC): fixed 256-byte frames, no AX.25 header.
+        if framing_hint in AO40_FRAMINGS:
+            result["protocol"] = "ao40"
+            try:
+                result["telemetry"] = self.funcube_parser.parse(packet_bytes)
+                result["parser"] = "ao40+FuncubeParser"
+            except Exception as e:
+                logger.warning(f"FUNcube parser failed: {e}, falling back to hex")
+                result["telemetry"] = self._fallback_telemetry(packet_bytes)
+                result["parser"] = "ao40"
+            result["success"] = True
+            result["raw"] = {
+                "packet_hex": packet_bytes.hex(),
+                "payload_hex": packet_bytes.hex(),
+                "payload_length": len(packet_bytes),
+            }
+            return result
+
         if protocol_hint in ("ax25", "csp", "ccsds", "proprietary"):
             protocol = protocol_hint
         else:

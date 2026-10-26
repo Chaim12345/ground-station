@@ -90,6 +90,7 @@ from scipy import signal  # noqa: E402
 from constants import AX25_FRAMINGS, FramingType  # noqa: E402
 from demodulators.basedecoderprocess import BaseDecoderProcess  # noqa: E402
 from demodulators.deframerfactory import create_fsk_deframer  # noqa: E402
+from demodulators.iqchannel import ChunkChannelizer  # noqa: E402
 from telemetry.parser import TelemetryParser  # noqa: E402
 
 
@@ -467,6 +468,9 @@ class FSKDecoder(BaseDecoderProcess):
         self.sdr_sample_rate = None  # Full SDR sample rate
         self.sdr_center_freq = None  # SDR center frequency
         self.decimation_filter = None  # Filter for decimation
+        # Keeps NCO phase, FIR history and decimation phase continuous across
+        # IQ chunks; per-chunk restarts corrupt long frames (e.g. AO-40 FEC).
+        self.channelizer = ChunkChannelizer()
         self.modulation_subtype = modulation_subtype  # FSK, GFSK, or GMSK
         self.batch_interval = batch_interval
 
@@ -624,36 +628,17 @@ class FSKDecoder(BaseDecoderProcess):
         return is_in_band, offset, margin_hz
 
     def _frequency_translate(self, samples, offset_freq, sample_rate):
-        """Translate frequency by offset (shift signal in frequency domain)."""
-        if offset_freq == 0:
-            return samples
-
-        # Generate complex exponential for frequency shift
-        t = np.arange(len(samples)) / sample_rate
-        shift = np.exp(-2j * np.pi * offset_freq * t)
-        return samples * shift
+        """Shift the VFO to DC with NCO phase continuous across IQ chunks."""
+        return self.channelizer.translate(samples, offset_freq, sample_rate)
 
     def _design_decimation_filter(self, decimation_factor, bandwidth, sample_rate):
-        """Design low-pass filter for decimation."""
-        # Cutoff at bandwidth/2 (Nyquist for target bandwidth)
-        cutoff = bandwidth / 2
-        # Transition band: 10% of bandwidth
-        transition = bandwidth * 0.1
-        # Design FIR filter
-        numtaps = int(sample_rate / transition) | 1  # Ensure odd
-        if numtaps > 1001:  # Limit filter length
-            numtaps = 1001
-        return signal.firwin(numtaps, cutoff, fs=sample_rate)
+        """Configure the stateful decimator and return its taps."""
+        self.channelizer.configure(decimation_factor, bandwidth, sample_rate)
+        return self.channelizer.taps
 
     def _decimate_iq(self, samples, decimation_factor):
-        """Decimate IQ samples with filtering."""
-        if decimation_factor == 1:
-            return samples
-
-        # Apply low-pass filter
-        filtered = signal.lfilter(self.decimation_filter, 1, samples)
-        # Decimate
-        return filtered[::decimation_factor]
+        """Decimate with FIR history and downsampling phase kept across chunks."""
+        return self.channelizer.decimate(samples)
 
     def _should_accept_packet(self, payload, callsigns):
         """FSK-family decoders require valid callsigns"""

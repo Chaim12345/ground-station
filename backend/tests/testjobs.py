@@ -394,6 +394,8 @@ def test_start_and_stop_scheduler_register_expected_jobs(monkeypatch):
         "sync_satellite_data",
         "check_restart_decoders",
         "generate_observations",
+        "generate_multi_station_observations",
+        "refresh_spyservers",
         scheduler_module.CELESTIAL_TRACKS_BROADCAST_JOB_ID,
     }
     orbital_sync_job = next(job for job in scheduler.jobs if job.id == "sync_satellite_data")

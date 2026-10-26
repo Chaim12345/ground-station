@@ -87,9 +87,14 @@ def test_native_recorded_lora(scenario):
             pytest.fail("CI image must include GNU Radio and gr-lora_sdr")
         pytest.skip("GNU Radio is not installed")
     # Kill the complete native process group on timeout, including a worker child.
+    # Keep any inherited PYTHONPATH (e.g. the GNU Radio site-packages set by
+    # startdev.sh) and prepend the backend so the runner can import the app.
+    backend_path = str(Path(__file__).resolve().parents[1])
+    inherited = os.environ.get("PYTHONPATH")
+    python_path = f"{backend_path}{os.pathsep}{inherited}" if inherited else backend_path
     with subprocess.Popen(
         [sys.executable, str(Path(__file__).with_name("lorarunner.py")), scenario],
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+        env={**os.environ, "PYTHONPATH": python_path},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

@@ -103,6 +103,8 @@ const FSK_FRAMING_OPTIONS = [
     {value: 'doka', label: 'DOKA (CCSDS)'},
     {value: 'ax100_asm', label: 'AX100 (ASM + Golay)'},
     {value: 'ax100_rs', label: 'AX100 (Reed-Solomon)'},
+    {value: 'ao40_fec', label: 'AO-40 FEC (FUNcube, DBPSK)'},
+    {value: 'ao40_fec_short', label: 'AO-40 FEC short'},
 ];
 
 

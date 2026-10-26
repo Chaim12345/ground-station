@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.common import logger, serialize_object
 from common.targetkey import normalize_target_key
-from constants.framing import FSK_DECODER_FRAMINGS
+from constants.framing import BPSK_DECODER_FRAMINGS, FSK_DECODER_FRAMINGS
 from db.models import CelestialTargets, Transmitters
 from demodulators.loraconfig import LORA_DEFAULTS, normalize_lora
 
@@ -100,8 +100,9 @@ def _coerce_optional_framing(value: Any) -> str | None:
     if _is_null_marker(value):
         return None
     framing = str(value).strip().lower()
-    if framing not in FSK_DECODER_FRAMINGS:
-        raise ValueError(f"unsupported FSK framing: {framing}")
+    # A transmitter may be FSK-family or BPSK; accept any implemented framing.
+    if framing not in FSK_DECODER_FRAMINGS | BPSK_DECODER_FRAMINGS:
+        raise ValueError(f"unsupported framing: {framing}")
     return framing
 
 

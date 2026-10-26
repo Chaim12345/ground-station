@@ -18,7 +18,7 @@ import logging
 from typing import Dict, Optional
 
 from constants import FramingType
-from constants.framing import FSK_DECODER_FRAMINGS
+from constants.framing import BPSK_DECODER_FRAMINGS, FSK_DECODER_FRAMINGS
 from demodulators.loraconfig import lora_metadata, normalize_lora
 from pipeline.config.decoderconfig import DecoderConfig
 from satconfig.config import SatelliteConfigService
@@ -314,6 +314,9 @@ class DecoderConfigService:
         if decoder_type in {"fsk", "gmsk", "gfsk"} and stored_framing in FSK_DECODER_FRAMINGS:
             framing = stored_framing
             config_source = "transmitter_metadata"
+        elif decoder_type == "bpsk" and stored_framing in BPSK_DECODER_FRAMINGS:
+            framing = stored_framing
+            config_source = "transmitter_metadata"
         if (
             decoder_type in {"fsk", "gmsk", "gfsk", "aprs"}
             and transmitter.get("deviation") is not None
@@ -367,6 +370,8 @@ class DecoderConfigService:
         stored_framing = str(transmitter.get("framing") or "").strip().lower()
         if decoder_type in {"fsk", "gmsk", "gfsk"} and stored_framing in FSK_DECODER_FRAMINGS:
             framing = stored_framing
+        elif decoder_type == "bpsk" and stored_framing in BPSK_DECODER_FRAMINGS:
+            framing = stored_framing
 
         # Detect deviation (FSK modes)
         deviation = self._detect_deviation(decoder_type, transmitter, baudrate)
@@ -414,6 +419,8 @@ class DecoderConfigService:
         description_upper = description.upper()
 
         # Check description first (more reliable)
+        if "AO-40" in description_upper or "AO40" in description_upper or "FUNCUBE" in description_upper:
+            return str(FramingType.AO40_FEC)
         if "GEOSCAN" in description_upper:
             return str(FramingType.GEOSCAN)
         elif "USP" in description_upper:

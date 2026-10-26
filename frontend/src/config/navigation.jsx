@@ -19,6 +19,7 @@
 
 import PublicIcon from '@mui/icons-material/Public';
 import GpsFixedIcon from '@mui/icons-material/GpsFixed';
+import RadarIcon from '@mui/icons-material/Radar';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import {Satellite03Icon, Saturn01Icon} from "hugeicons-react";
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -361,6 +362,11 @@ export const getNavigation = ({ isAdmin = false } = {}) => {
             segment: 'tracking',
             title: i18n.t('live_tracking', { ns: 'navigation', defaultValue: 'Live Tracking' }),
             icon: <GpsFixedIcon/>,
+        },
+        {
+            segment: 'radar',
+            title: i18n.t('radar', { ns: 'navigation', defaultValue: 'Live Radar' }),
+            icon: <RadarIcon />,
         },
         {
             segment: 'waterfall',

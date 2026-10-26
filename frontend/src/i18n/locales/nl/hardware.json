@@ -179,6 +179,7 @@
     "no_sdrs": "Geen SDR-apparaten geconfigureerd. Klik op 'Toevoegen' om een SDR te configureren.",
     "airspy": "Airspy",
     "airspy_hf": "Airspy HF+",
+    "spyserver": "SpyServer (op afstand)",
     "probing_airspy": "Zoeken naar lokale Airspy-apparaten...",
     "select_sdr": "SDR selecteren",
     "select_airspy_device": "Airspy-apparaat",

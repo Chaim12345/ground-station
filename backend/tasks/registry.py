@@ -10,6 +10,8 @@ from typing import Callable, Dict
 from tasks.exampletask import example_failing_task, example_long_task, example_quick_task
 from tasks.satdumpprocessor import satdump_process_recording
 from tasks.soapysdrdiscovery import soapysdr_discovery_task, soapysdr_quick_refresh_task
+from tasks.spyserverdiscovery import spyserver_discovery_task, spyserver_quick_check_task
+from tasks.telemetrydecoder import decode_recording_task
 from tasks.tlesync import orbital_sync_background_task, tle_sync_background_task
 from tasks.waterfallgenerator import generate_waterfall_task
 
@@ -23,8 +25,12 @@ TASK_REGISTRY: Dict[str, Callable] = {
     # Real tasks
     "generate_waterfall": generate_waterfall_task,
     "satdump_process": satdump_process_recording,
+    # gr-satellites / gr-lora_sdr telemetry decode of a stored IQ recording
+    "telemetry_decode": decode_recording_task,
     "soapysdr_discovery": soapysdr_discovery_task,
     "soapysdr_quick_refresh": soapysdr_quick_refresh_task,
+    "spyserver_discovery": spyserver_discovery_task,
+    "spyserver_quick_check": spyserver_quick_check_task,
     "orbital_sync": orbital_sync_background_task,
     "tle_sync": tle_sync_background_task,
 }

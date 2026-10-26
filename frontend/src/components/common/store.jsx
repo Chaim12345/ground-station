@@ -48,6 +48,7 @@ import systemInfoReducer from '../settings/system-info-slice.jsx';
 import sessionsReducer from '../settings/sessions-slice.jsx';
 import transcriptionReducer from '../waterfall/transcription-slice.jsx';
 import schedulerReducer from '../scheduler/scheduler-slice.jsx';
+import radarReducer from '../radar/radar-slice.jsx';
 import tasksReducer from '../tasks/tasks-slice.jsx';
 import celestialReducer, { CELESTIAL_PASSES_DEFAULTS_VERSION } from '../celestial/celestial-slice.jsx';
 import celestialMonitoredReducer from '../celestial/monitored-slice.jsx';
@@ -455,6 +456,7 @@ export const store = configureStore({
         sessions: sessionsReducer,
         transcription: persistedTranscriptionReducer,
         scheduler: persistedSchedulerReducer,
+        radar: radarReducer,
         backgroundTasks: persistedTasksReducer,
         celestial: persistedCelestialReducer,
         celestialMonitored: persistedCelestialMonitoredReducer,

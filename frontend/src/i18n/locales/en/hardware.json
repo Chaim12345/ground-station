@@ -173,6 +173,7 @@
     "uhd": "UHD",
     "airspy": "Airspy",
     "airspy_hf": "Airspy HF+",
+    "spyserver": "SpyServer (remote)",
     "cancel": "Cancel",
     "submit": "Submit",
     "confirm_deletion": "Confirm Deletion",

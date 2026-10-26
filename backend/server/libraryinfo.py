@@ -22,7 +22,12 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
-import gnuradio
+# GNU Radio is an optional runtime dependency (missing installations must not
+# take the whole backend down; other subsystems already degrade gracefully).
+try:
+    import gnuradio
+except ImportError:
+    gnuradio = None
 
 from common.logger import logger
 
@@ -284,10 +289,12 @@ def get_library_versions(use_cache: bool = True) -> Dict[str, Any]:
             "description": "Software-defined radio framework",
         }
     else:
-        # Fallback to Python import
+        # Fallback to Python import (gnuradio is None when not installed)
         system_libraries["gnuradio"] = {
             "name": "GNU Radio",
-            "version": gnuradio.__version__ if hasattr(gnuradio, "__version__") else "installed",
+            "version": gnuradio.__version__
+            if gnuradio is not None and hasattr(gnuradio, "__version__")
+            else "installed",
             "category": "sdr",
             "description": "Software-defined radio framework",
         }

@@ -32,13 +32,24 @@ FSK_DECODER_FRAMINGS = {
     FramingType.AX100_RS,
 }
 
+# Framings with implementations in create_bpsk_deframer (AO-40 FEC is the
+# FUNcube family downlink: DBPSK 1200 baud, 256-byte frames).
+BPSK_DECODER_FRAMINGS = {
+    FramingType.AX25,
+    FramingType.DOKA,
+    FramingType.AO40_FEC,
+    FramingType.AO40_FEC_SHORT,
+}
+
 
 # APRS uses AX.25 UI frames, but its 1200-baud Bell 202 modem does not use
 # the G3RUH scrambler used by the existing generic AX.25 decoder setting.
 AX25_FRAMINGS = {FramingType.AX25, FramingType.APRS, FramingType.USP}
 CSP_FRAMINGS = {FramingType.AX100_ASM, FramingType.AX100_RS}
 CCSDS_FRAMINGS = {FramingType.DOKA}
-PROPRIETARY_FRAMINGS = {FramingType.GEOSCAN}
+# AO-40 FEC frames carry no AX.25 header; payload layout is satellite-specific.
+PROPRIETARY_FRAMINGS = {FramingType.GEOSCAN, FramingType.AO40_FEC, FramingType.AO40_FEC_SHORT}
+AO40_FRAMINGS = {FramingType.AO40_FEC, FramingType.AO40_FEC_SHORT}
 
 
 GR_SATELLITES_FRAMING_MAP = {
@@ -49,9 +60,10 @@ GR_SATELLITES_FRAMING_MAP = {
     "CCSDS Concatenated": FramingType.AX25,
     "CCSDS Reed-Solomon": FramingType.AX25,
     "CCSDS Uncoded": FramingType.AX25,
-    # Keep current behavior for now: AO-40 entries map to AX.25 unless explicitly overridden.
-    "AO-40 FEC": FramingType.AX25,
-    "AO-40 FEC short": FramingType.AX25,
+    # FUNcube family (AO-73, UKube-1, JY1-Sat, Nayif-1, ...). Mapping these to
+    # AX.25 made them undecodable: there is no HDLC flag in an AO-40 FEC stream.
+    "AO-40 FEC": FramingType.AO40_FEC,
+    "AO-40 FEC short": FramingType.AO40_FEC_SHORT,
     "NGHam": FramingType.AX25,
     "NGHam no Reed Solomon": FramingType.AX25,
 }

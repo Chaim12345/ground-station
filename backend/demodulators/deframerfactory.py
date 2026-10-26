@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
+from satellites.components.deframers.ao40_fec_deframer import ao40_fec_deframer
 from satellites.components.deframers.ax25_deframer import ax25_deframer
 from satellites.components.deframers.ax100_deframer import ax100_deframer
 from satellites.components.deframers.ccsds_concatenated_deframer import ccsds_concatenated_deframer
@@ -64,6 +65,14 @@ def create_fsk_deframer(
 
 def create_bpsk_deframer(framing: str, options: Any) -> Tuple[Any, str]:
     """Create BPSK deframer block and human-readable frame info."""
+    if framing in (FramingType.AO40_FEC, FramingType.AO40_FEC_SHORT):
+        # FUNcube family. Distributed syncword + 80x65 interleaver + k=7 Viterbi
+        # + CCSDS scrambler + 2x interleaved RS(160,128) -> 256-byte frames.
+        # gr-satellites' default syncword threshold for this deframer is 8.
+        short = framing == FramingType.AO40_FEC_SHORT
+        deframer = ao40_fec_deframer(syncword_threshold=8, short_frames=short, options=options)
+        return deframer, "AO-40 FEC short" if short else "AO-40 FEC"
+
     if framing == FramingType.DOKA:
         deframer = ccsds_rs_deframer(
             frame_size=223,

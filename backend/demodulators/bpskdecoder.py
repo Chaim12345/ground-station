@@ -91,9 +91,10 @@ from gnuradio import blocks, gr  # noqa: E402
 from satellites.components.demodulators.bpsk_demodulator import bpsk_demodulator  # noqa: E402
 from scipy import signal  # noqa: E402
 
-from constants import FramingType  # noqa: E402
+from constants import AO40_FRAMINGS, FramingType  # noqa: E402
 from demodulators.basedecoderprocess import BaseDecoderProcess  # noqa: E402
 from demodulators.deframerfactory import create_bpsk_deframer  # noqa: E402
+from demodulators.iqchannel import ChunkChannelizer  # noqa: E402
 from telemetry.parser import TelemetryParser  # noqa: E402
 
 logger = logging.getLogger("bpskdecoder")
@@ -101,6 +102,27 @@ logger = logging.getLogger("bpskdecoder")
 # Global configuration parameters for batch processing
 BATCH_INTERVAL_SECONDS = 5.0  # Batch processing interval
 BATCH_OVERLAP_SECONDS = 0.5  # Overlap between batches (tail retention)
+
+# An AO-40 FEC frame is 5132 coded symbols (~4.3 s at 1200 baud). With 5 s
+# batches and 0.5 s overlap most frames straddle a batch edge and are lost, so
+# AO-40 framings use longer batches and an overlap longer than one frame, plus
+# loop settle time. Duplicates produced by the overlap are suppressed.
+AO40_BATCH_INTERVAL_SECONDS = 20.0
+AO40_BATCH_OVERLAP_SECONDS = 6.0
+
+# Demodulator loop settings. The generic profile (FLL 200 Hz) was tuned for
+# short AX.25 bursts. Measured on synthetic FUNcube IQ (DBPSK 1200 bd, 15 dB):
+# FLL 200 Hz -> 0/4 frames, FLL <=100 Hz -> 4/4. The wide FLL jitters enough to
+# break a 5200-symbol AO-40 frame, so AO-40 uses gr-satellites' stock values.
+BPSK_DEMOD_PROFILES = {
+    "default": {"fll_bw": 200, "clk_bw": 0.08, "clk_limit": 0.005, "costas_bw": 80},
+    "ao40": {"fll_bw": 25, "clk_bw": 0.06, "clk_limit": 0.004, "costas_bw": 50},
+}
+
+
+def bpsk_demod_profile(framing):
+    """Loop bandwidths for a framing (single source for DSP and metadata)."""
+    return BPSK_DEMOD_PROFILES["ao40" if framing in AO40_FRAMINGS else "default"]
 
 
 class DecoderStatus(Enum):
@@ -242,8 +264,17 @@ class BPSKFlowgraph(gr.top_block):
         self.callback = callback
         self.status_callback = status_callback
         self.differential = differential
-        self.batch_interval = batch_interval
         self.framing = framing  # Store framing protocol
+        # Long AO-40 FEC frames need longer batches + an overlap > one frame.
+        if framing in AO40_FRAMINGS:
+            self.batch_interval = max(batch_interval, AO40_BATCH_INTERVAL_SECONDS)
+            self.overlap_seconds = AO40_BATCH_OVERLAP_SECONDS
+        else:
+            self.batch_interval = batch_interval
+            self.overlap_seconds = BATCH_OVERLAP_SECONDS
+        # Frames re-decoded from the overlap tail are emitted only once.
+        self._previous_batch_packets: set = set()
+        self._current_batch_packets: set = set()
 
         # Accumulate samples in a buffer
         self.sample_buffer = np.array([], dtype=np.complex64)
@@ -311,7 +342,7 @@ class BPSKFlowgraph(gr.top_block):
             samples_to_process = self.sample_buffer.copy()
             # Keep a tail for continuity while processing.
             # Increase overlap to reduce chances of dropping frames that straddle batches.
-            tail_samples = int(self.sample_rate * BATCH_OVERLAP_SECONDS)
+            tail_samples = int(self.sample_rate * self.overlap_seconds)
             if len(self.sample_buffer) > tail_samples:
                 self.sample_buffer = self.sample_buffer[-tail_samples:]
             else:
@@ -338,15 +369,15 @@ class BPSKFlowgraph(gr.top_block):
             # Create vector source with accumulated samples
             source = blocks.vector_source_c(samples_to_process.tolist(), repeat=False)
 
-            # Create fresh instances of demodulator and deframer
-            # Optimized for LOW SNR signals (6-7 dB) - balanced bandwidth for lock acquisition
-            # 200/80 Hz settings provided best results in testing
+            # Create fresh instances of demodulator and deframer.
+            # Loop bandwidths depend on framing (see BPSK_DEMOD_PROFILES).
+            profile = bpsk_demod_profile(self.framing)
             options = argparse.Namespace(
                 rrc_alpha=0.35,
-                fll_bw=200,  # Balanced FLL bandwidth for low SNR (best tested setting)
-                clk_bw=0.08,  # Moderate bandwidth for symbol rate tracking
-                clk_limit=0.005,  # Moderate timing deviation tolerance
-                costas_bw=80,  # Balanced Costas bandwidth for low SNR (best tested setting)
+                fll_bw=profile["fll_bw"],
+                clk_bw=profile["clk_bw"],
+                clk_limit=profile["clk_limit"],
+                costas_bw=profile["costas_bw"],
                 f_offset=0,
                 disable_fll=False,
                 manchester_block_size=32,
@@ -360,7 +391,7 @@ class BPSKFlowgraph(gr.top_block):
                 baudrate=self.baudrate,
                 samp_rate=self.sample_rate,
                 iq=True,
-                f_offset=0,  # Let FLL auto-track with 250 Hz bandwidth
+                f_offset=0,  # Residual offset is tracked by the FLL
                 differential=self.differential,
                 manchester=False,
                 options=options,
@@ -375,8 +406,10 @@ class BPSKFlowgraph(gr.top_block):
             )
 
             # Create message handler for this batch (pass framing and logger)
+            self._previous_batch_packets = self._current_batch_packets
+            self._current_batch_packets = set()
             msg_handler = BPSKMessageHandler(
-                self.callback,
+                self._on_batch_packet,
                 logger=logging.getLogger("bpskdecoder"),
                 framing=self.framing,
             )
@@ -466,6 +499,15 @@ class BPSKFlowgraph(gr.top_block):
         if self.callback:
             self.callback(payload, callsigns)
 
+    def _on_batch_packet(self, payload, callsigns=None):
+        """Drop the duplicate of a frame already emitted from the previous batch."""
+        key = bytes(payload)
+        if key in self._previous_batch_packets or key in self._current_batch_packets:
+            logger.debug("Suppressed duplicate BPSK frame from batch overlap")
+            return
+        self._current_batch_packets.add(key)
+        self._on_packet_decoded(payload, callsigns)
+
 
 class BPSKDecoder(BaseDecoderProcess):
     """Real-time BPSK decoder using GNU Radio (multiprocessing-based)
@@ -504,6 +546,9 @@ class BPSKDecoder(BaseDecoderProcess):
         self.sdr_sample_rate = None  # Full SDR sample rate
         self.sdr_center_freq = None  # SDR center frequency
         self.decimation_filter = None  # Filter for decimation
+        # Keeps NCO phase, FIR history and decimation phase continuous across
+        # IQ chunks; per-chunk restarts corrupt long frames (e.g. AO-40 FEC).
+        self.channelizer = ChunkChannelizer()
         self.batch_interval = batch_interval
 
         logger.debug(
@@ -615,36 +660,17 @@ class BPSKDecoder(BaseDecoderProcess):
         return None
 
     def _frequency_translate(self, samples, offset_freq, sample_rate):
-        """Translate frequency by offset (shift signal in frequency domain)."""
-        if offset_freq == 0:
-            return samples
-
-        # Generate complex exponential for frequency shift
-        t = np.arange(len(samples)) / sample_rate
-        shift = np.exp(-2j * np.pi * offset_freq * t)
-        return samples * shift
+        """Shift the VFO to DC with NCO phase continuous across IQ chunks."""
+        return self.channelizer.translate(samples, offset_freq, sample_rate)
 
     def _design_decimation_filter(self, decimation_factor, bandwidth, sample_rate):
-        """Design low-pass filter for decimation."""
-        # Cutoff at bandwidth/2 (Nyquist for target bandwidth)
-        cutoff = bandwidth / 2
-        # Transition band: 10% of bandwidth
-        transition = bandwidth * 0.1
-        # Design FIR filter
-        numtaps = int(sample_rate / transition) | 1  # Ensure odd
-        if numtaps > 1001:  # Limit filter length
-            numtaps = 1001
-        return signal.firwin(numtaps, cutoff, fs=sample_rate)
+        """Configure the stateful decimator and return its taps."""
+        self.channelizer.configure(decimation_factor, bandwidth, sample_rate)
+        return self.channelizer.taps
 
     def _decimate_iq(self, samples, decimation_factor):
-        """Decimate IQ samples with filtering."""
-        if decimation_factor == 1:
-            return samples
-
-        # Apply low-pass filter
-        filtered = signal.lfilter(self.decimation_filter, 1, samples)
-        # Decimate
-        return filtered[::decimation_factor]
+        """Decimate with FIR history and downsampling phase kept across chunks."""
+        return self.channelizer.decimate(samples)
 
     def _is_doka_signal(self):
         """
@@ -676,19 +702,22 @@ class BPSKDecoder(BaseDecoderProcess):
         return f"{self.baudrate}baud"
 
     def _get_demodulator_params_metadata(self):
-        """Return BPSK demodulator parameters"""
+        """Return the BPSK demodulator parameters actually used for this framing"""
+        profile = bpsk_demod_profile(self.framing)
         return {
-            "fll_bandwidth_hz": 200,
-            "costas_bandwidth_hz": 80,
+            "fll_bandwidth_hz": profile["fll_bw"],
+            "costas_bandwidth_hz": profile["costas_bw"],
             "rrc_alpha": 0.35,
-            "clock_recovery_bandwidth": 0.08,
-            "clock_recovery_limit": 0.005,
+            "clock_recovery_bandwidth": profile["clk_bw"],
+            "clock_recovery_limit": profile["clk_limit"],
         }
 
     def _get_payload_protocol(self):
-        """BPSK uses CCSDS for DOKA, AX.25 otherwise"""
+        """CCSDS for DOKA, proprietary for AO-40 FEC (FUNcube), AX.25 otherwise"""
         if self.framing == FramingType.DOKA:
             return "ccsds"
+        if self.framing in AO40_FRAMINGS:
+            return "proprietary"
         return "ax25"
 
     def _is_vfo_in_sdr_bandwidth(self, vfo_center, sdr_center, sdr_sample_rate):

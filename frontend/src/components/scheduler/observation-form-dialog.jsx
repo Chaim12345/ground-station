@@ -753,6 +753,8 @@ const ObservationFormDialog = ({ onExited }) => {
                         post_process_pipeline: getDefaultSatdumpPipeline(t),
                         delete_after_post_processing: false,
                         retain_iq_on_satdump_failure: true,
+                        enable_telemetry_decode: true,
+                        delete_iq_after_decode: false,
                     },
                 };
                 break;
@@ -2924,6 +2926,39 @@ const ObservationFormDialog = ({ onExited }) => {
                                                             label={t('scheduler_dialogs.shared.retain_iq_on_satdump_failure_label')}
                                                         />
                                                     </Box>
+                                                    <FormControlLabel
+                                                        sx={{ mt: 1, display: 'flex' }}
+                                                        control={
+                                                            <Checkbox
+                                                                checked={task.config.enable_telemetry_decode !== false}
+                                                                onChange={(e) => {
+                                                                    handleTaskConfigChange(index, 'enable_telemetry_decode', e.target.checked);
+                                                                    if (!e.target.checked) {
+                                                                        handleTaskConfigChange(index, 'delete_iq_after_decode', false);
+                                                                    }
+                                                                }}
+                                                                disabled={isFormDisabled || !!task.config.enable_post_processing}
+                                                            />
+                                                        }
+                                                        label={t('scheduler_dialogs.shared.telemetry_decode_label', 'Decode telemetry after the pass (gr-satellites / LoRa)')}
+                                                    />
+                                                    <FormControlLabel
+                                                        sx={{ ml: 2, display: 'flex' }}
+                                                        control={
+                                                            <Checkbox
+                                                                checked={task.config.delete_iq_after_decode || false}
+                                                                onChange={(e) =>
+                                                                    handleTaskConfigChange(index, 'delete_iq_after_decode', e.target.checked)
+                                                                }
+                                                                disabled={
+                                                                    isFormDisabled ||
+                                                                    !!task.config.enable_post_processing ||
+                                                                    task.config.enable_telemetry_decode === false
+                                                                }
+                                                            />
+                                                        }
+                                                        label={t('scheduler_dialogs.shared.delete_iq_after_decode_label', 'Delete IQ recording once frames decode successfully')}
+                                                    />
                                                 </>
                                             )}
                                                     </Stack>

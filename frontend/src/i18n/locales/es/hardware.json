@@ -179,6 +179,7 @@
     "no_sdrs": "No hay dispositivos SDR configurados. Haga clic en 'Agregar' para configurar un SDR.",
     "airspy": "Airspy",
     "airspy_hf": "Airspy HF+",
+    "spyserver": "SpyServer (remoto)",
     "probing_airspy": "Probing para dispositivos de Airspy locales...",
     "select_sdr": "Seleccione SDR",
     "select_airspy_device": "Dispositivo Airspy",

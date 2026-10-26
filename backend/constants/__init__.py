@@ -5,7 +5,9 @@ Constants package for Ground Station backend
 """
 
 from .framing import (
+    AO40_FRAMINGS,
     AX25_FRAMINGS,
+    BPSK_DECODER_FRAMINGS,
     CCSDS_FRAMINGS,
     CSP_FRAMINGS,
     GR_SATELLITES_FRAMING_MAP,
@@ -30,7 +32,9 @@ __all__ = [
     "ModulationCategory",
     "get_modulation_category",
     "FramingType",
+    "AO40_FRAMINGS",
     "AX25_FRAMINGS",
+    "BPSK_DECODER_FRAMINGS",
     "CSP_FRAMINGS",
     "CCSDS_FRAMINGS",
     "PROPRIETARY_FRAMINGS",

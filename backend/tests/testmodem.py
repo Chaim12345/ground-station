@@ -99,4 +99,4 @@ async def test_transmitter_rejects_unsupported_framing(db_session):
         },
     )
     assert not result["success"]
-    assert "unsupported FSK framing" in result["error"]
+    assert "unsupported framing" in result["error"]

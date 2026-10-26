@@ -62,7 +62,9 @@ async def find_overlapping_observation(
     )
 
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    # Tolerate duplicate overlapping rows (e.g. from concurrent generation runs)
+    # instead of raising MultipleResultsFound; any matching observation is fine.
+    return result.scalars().first()
 
 
 def should_update_observation(existing_obs: ScheduledObservations) -> bool:

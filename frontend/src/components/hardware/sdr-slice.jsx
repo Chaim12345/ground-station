@@ -164,6 +164,35 @@ export const startSoapySDRDiscovery = createAsyncThunk(
     }
 );
 
+export const startSpyServerDiscovery = createAsyncThunk(
+    'sdrs/startSpyServerDiscovery',
+    async ({ socket, limit = 0 }, { rejectWithValue }) => {
+        try {
+            return await new Promise((resolve, reject) => {
+                socket.emit("api.call", {
+  cmd: "background-task.start",
+  data: {
+    task_name: 'spyserver_discovery',
+    args: [],
+    kwargs: {
+      limit
+    },
+    name: 'SpyServer Discovery'
+  }
+}, res => {
+  if (res?.success) {
+    resolve(res);
+  } else {
+    reject(new Error(res?.error || 'Failed to start SpyServer discovery'));
+  }
+});
+            });
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
 
 export const fetchSDRs = createAsyncThunk(
     'sdrs/fetchAll',

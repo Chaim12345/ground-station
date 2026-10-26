@@ -417,6 +417,87 @@ async def probe_sdr_parameters(dbsession, sdr_id, timeout=30.0, recording_path=N
             sdr_parameters_cache[cache_key] = params
             reply = {"success": True, "data": params}
 
+        elif sdr.get("type") in ["spyserver"]:
+            logger.info("Getting SDR parameters from remote SpyServer for SDR: %s", sdr)
+
+            # Probe the remote server with the protocol handshake; this is
+            # fast (a HELLO/DEVICE_INFO exchange) and returns the device's
+            # real capabilities without opening a stream.
+            probe_process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                "from hardware.spyserverprobe import probe_server; import json; "
+                f"print(json.dumps(probe_server({sdr['host']!r}, {sdr['port']})))",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await _communicate_probe(probe_process, timeout)
+                if probe_process.returncode != 0:
+                    error_output = _decode_subprocess_output(stderr)
+                    raise Exception(f"SpyServer probe process failed: {error_output}")
+            except asyncio.TimeoutError:
+                raise TimeoutError("Timed out while getting parameters from remote SpyServer")
+
+            spy_probe = json.loads(_decode_subprocess_output(stdout))
+            if not spy_probe.get("success"):
+                raise Exception(spy_probe.get("error") or "Remote SpyServer probe failed")
+
+            device = spy_probe.get("device_info", {})
+            max_rate = device.get("maximum_sample_rate", 0)
+            stages = device.get("decimation_stage_count", 0)
+            # The server enforces a minimum decimation (e.g. HF+ builds use 2),
+            # so faster rates than max_rate / 2^min_decimation are not
+            # deliverable and must not be offered.
+            min_decimation = int(device.get("minimum_iq_decimation", 0) or 0)
+            rates = (
+                [max_rate / (2**d) for d in range(min_decimation, stages + 1)]
+                if max_rate
+                else []
+            )
+
+            window_function_names = list(window_functions.keys())
+            fft_size_values = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536]
+
+            if device.get("device_type") == 3:
+                # RTL-SDR behind SpyServer has no analog gain index; the
+                # server-side AGC is the only gain control.
+                gain_values = [0.0]
+            else:
+                # Airspy gain indices step ~3 dB; offer dB values the worker's
+                # dB->index mapping understands.
+                gain_values = [round(i * 3.01, 1) for i in range((device.get("maximum_gain_index") or 0) + 1)]
+
+            params = {
+                "gain_values": gain_values,
+                "sample_rate_values": _select_neat_sample_rates(rates),
+                "sample_rate_values_full": rates,
+                "fft_size_values": fft_size_values,
+                "fft_window_values": window_function_names,
+                "has_bias_t": False,
+                "has_tuner_agc": True,
+                "has_rtl_agc": False,
+                "has_soapy_agc": False,
+                "antennas": {"tx": [], "rx": ["RX"]},
+                # frequency_ranges are MHz in this API
+                "frequency_ranges": {
+                    "rx": {
+                        "min": (device.get("minimum_frequency") or 0) / 1e6,
+                        "max": (device.get("maximum_frequency") or 0) / 1e6,
+                        "step": 0.001,
+                    }
+                },
+                "capabilities": {
+                    "device_type": device.get("device_type_name"),
+                    "resolution_bits": device.get("resolution"),
+                    "maximum_sample_rate": max_rate,
+                },
+            }
+
+            sdr_parameters_cache[cache_key] = params
+            reply = {"success": True, "data": params}
+
         elif sdr.get("type") in ["sigmfplayback"]:
             logger.info("Getting parameters from SigMF recording for SDR: %s", sdr)
 

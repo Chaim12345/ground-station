@@ -39,6 +39,7 @@ from workers.airspyhfworker import airspyhf_worker_process
 from workers.airspyworker import airspy_worker_process
 from workers.rtlsdrworker import rtlsdr_worker_process
 from workers.sigmfplaybackworker import sigmf_playback_worker_process
+from workers.spyserverworker import spyserver_worker_process
 from workers.uhdworker import uhd_worker_process
 
 # Add setproctitle import for process naming
@@ -471,6 +472,7 @@ class ProcessLifecycleManager:
             "airspyhf",
             "soapysdrremote",
             "soapysdrlocal",
+            "spyserver",
             "uhd",
             "sigmfplayback",
         ]
@@ -549,6 +551,14 @@ class ProcessLifecycleManager:
             driver = "sigmfplayback"
             worker_process = sigmf_playback_worker_process
             process_name = f"Ground Station - SigMF-Playback-{sdr_id}"
+
+        elif sdr_device["type"] == "spyserver":
+            hostname = sdr_device["host"]
+            port = sdr_device["port"]
+            connection_type = "spyserver"
+            driver = "spyserver"
+            worker_process = spyserver_worker_process
+            process_name = f"Ground Station - SpyServer-{sdr_id}"
 
         # Check if a process for this device already exists
         if sdr_id in self.processes and self.processes[sdr_id]["process"].is_alive():

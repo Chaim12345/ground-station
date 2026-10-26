@@ -612,6 +612,19 @@ class BackgroundTaskManager:
                 update_discovered_servers(servers_data)
                 logger.info("Updated main process discovered_servers")
 
+                # SpyServer entries carry sdr_record payloads; persist them so
+                # the station list survives backend restarts.
+                if any(
+                    isinstance(info, dict) and "sdr_record" in info
+                    for info in servers_data.values()
+                ):
+                    try:
+                        from hardware.spyserverprobe import save_discovery_cache
+
+                        save_discovery_cache(servers_data)
+                    except Exception as cache_error:
+                        logger.warning(f"Could not persist SpyServer discovery cache: {cache_error}")
+
                 # Emit Socket.IO event based on whether this is initial discovery or refresh
                 if refresh_count is not None:
                     # This is a refresh

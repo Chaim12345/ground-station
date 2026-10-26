@@ -24,6 +24,7 @@ from db import AsyncSessionLocal
 from observations.constants import STATUS_FAILED
 from observations.events import emit_scheduled_observations_changed
 from observations.generator import generate_observations_for_monitored_satellites
+from observations.multistation import generate_multi_station_observations as run_multi_station_generation
 from observations.validation import validate_transmitter_frequencies
 
 # ============================================================================
@@ -605,11 +606,34 @@ async def regenerate_observations(
         }
 
 
+async def generate_multi_station_observations(
+    sio: Any, data: Optional[Dict], logger: Any, sid: str
+) -> Dict[str, Any]:
+    """Generate observations across all configured station SDRs."""
+    dry_run = (data or {}).get("dry_run", False) if isinstance(data, dict) else False
+    async with AsyncSessionLocal() as dbsession:
+        result = await run_multi_station_generation(
+            dbsession, dry_run=dry_run
+        )
+        if not dry_run and result.get("generated", 0) > 0:
+            await emit_scheduled_observations_changed()
+            if obs_events.observation_sync:
+                sync_result = await obs_events.observation_sync.sync_all_observations()
+                logger.info(
+                    f"APScheduler sync complete: "
+                    f"{sync_result.get('stats', {}).get('scheduled', 0)} scheduled"
+                )
+        return {
+            "success": True,
+            "data": result,
+            "dry_run": dry_run,
+        }
+
+
 def register_handlers(registry):
     """Register scheduler handlers with the command registry."""
     registry.register_batch(
         {
-            # Scheduled observations
             "get-scheduled-observations": (get_scheduled_observations, "api_call"),
             "create-scheduled-observation": (create_scheduled_observation, "api_call"),
             "update-scheduled-observation": (update_scheduled_observation, "api_call"),
@@ -627,5 +651,9 @@ def register_handlers(registry):
             ),
             # Observation generation
             "regenerate-observations": (regenerate_observations, "api_call"),
+            "generate-multi-station-observations": (
+                generate_multi_station_observations,
+                "api_call",
+            ),
         }
     )

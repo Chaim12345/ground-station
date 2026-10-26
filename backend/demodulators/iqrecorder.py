@@ -17,6 +17,7 @@
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -269,6 +270,16 @@ class IQRecorder(threading.Thread):
                         f"rate={output_sample_rate/1e6:.2f} MS/s"
                     )
 
+                    # Persist sample rate + captures immediately. Without this a
+                    # recording that never reaches stop() (crash, kill, stalled
+                    # observation) has no sample rate or frequency and the IQ
+                    # data can never be decoded. A metadata failure must never
+                    # stop the IQ data itself from being written.
+                    try:
+                        self._write_metadata(in_progress=True)
+                    except OSError as e:
+                        logger.warning(f"Could not update in-progress metadata: {e}")
+
                 # Apply frequency shift if enabled
                 if self.enable_frequency_shift and self.shift_hz != 0:
                     # Generate time array for this chunk
@@ -346,38 +357,55 @@ class IQRecorder(threading.Thread):
 
     def _write_preliminary_metadata(self):
         """Write preliminary metadata file to mark recording as in progress."""
+        self._write_metadata(in_progress=True)
+        logger.info(f"Preliminary metadata written: {self.recording_path}.sigmf-meta")
+
+    def _base_global_metadata(self) -> dict:
+        """Global SigMF fields shared by in-progress and final metadata."""
         global_metadata: dict = {
             "core:datatype": self.storage_format,
             "core:version": "1.0.0",
             "core:description": "Ground Station IQ Recording",
             "core:recorder": "ground-station",
-            "gs:recording_in_progress": True,
             "gs:start_time": self.start_time_iso,
             "gs:session_id": self.session_id,
         }
+        # Sample rate is only known once the first IQ chunk arrived.
+        if self.current_sample_rate:
+            global_metadata["core:sample_rate"] = self.current_sample_rate
 
         if self.storage_format == "ci16_le":
             global_metadata["gs:quantization"] = "float IQ quantized to signed 16-bit I/Q"
             global_metadata["gs:quantization_scale"] = 32767
 
-        # Add target satellite NORAD ID if provided
         if self.target_satellite_norad_id:
             global_metadata["gs:target_satellite_norad_id"] = self.target_satellite_norad_id
-
-        # Add target satellite name if provided
         if self.target_satellite_name:
             global_metadata["gs:target_satellite_name"] = self.target_satellite_name
+        return global_metadata
 
-        preliminary_metadata = {
+    def _write_metadata(self, in_progress: bool, extra_global: dict | None = None) -> None:
+        """Atomically write the .sigmf-meta file.
+
+        Written via temp file + os.replace so a reader (file browser, library,
+        decode task) never sees a half-written JSON document.
+        """
+        global_metadata = self._base_global_metadata()
+        if in_progress:
+            global_metadata["gs:recording_in_progress"] = True
+        if extra_global:
+            global_metadata.update(extra_global)
+
+        metadata = {
             "global": global_metadata,
-            "captures": [],
-            "annotations": [],
+            "captures": list(self.captures),
+            "annotations": list(self.annotations),
         }
-
-        with open(f"{self.recording_path}.sigmf-meta", "w") as f:
-            json.dump(preliminary_metadata, f, indent=2)
-
-        logger.info(f"Preliminary metadata written: {self.recording_path}.sigmf-meta")
+        meta_path = f"{self.recording_path}.sigmf-meta"
+        tmp_path = f"{meta_path}.tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        os.replace(tmp_path, meta_path)
 
     def add_annotation(self, start_sample, sample_count, freq_lower, freq_upper, comment):
         """Add signal annotation to metadata."""
@@ -403,39 +431,20 @@ class IQRecorder(threading.Thread):
         with self.stats_lock:
             recorder_stats = self.stats.copy()
 
-        global_metadata: dict = {
-            "core:datatype": self.storage_format,
-            "core:sample_rate": self.current_sample_rate,
-            "core:version": "1.0.0",
-            "core:description": "Ground Station IQ Recording",
-            "core:recorder": "ground-station",
-            "gs:start_time": self.start_time_iso,
+        final_global: dict = {
             "gs:finalized_time": datetime.now(timezone.utc)
             .replace(microsecond=0, tzinfo=None)
             .isoformat()
             + "Z",
-            "gs:session_id": self.session_id,
             "gs:recorder_stats": recorder_stats,
         }
 
-        if self.storage_format == "ci16_le":
-            global_metadata["gs:quantization"] = "float IQ quantized to signed 16-bit I/Q"
-            global_metadata["gs:quantization_scale"] = 32767
-
-        # Add target satellite NORAD ID if provided
-        if self.target_satellite_norad_id:
-            global_metadata["gs:target_satellite_norad_id"] = self.target_satellite_norad_id
-
-        # Add target satellite name if provided
-        if self.target_satellite_name:
-            global_metadata["gs:target_satellite_name"] = self.target_satellite_name
-
         # Add frequency shift metadata if applied
         if self.enable_frequency_shift and self.shift_hz != 0:
-            global_metadata["gs:frequency_shift_applied"] = True
-            global_metadata["gs:frequency_shift_hz"] = self.shift_hz
-            global_metadata["gs:original_center_freq"] = self.current_center_freq
-            global_metadata["gs:target_center_freq"] = self.target_center_freq
+            final_global["gs:frequency_shift_applied"] = True
+            final_global["gs:frequency_shift_hz"] = self.shift_hz
+            final_global["gs:original_center_freq"] = self.current_center_freq
+            final_global["gs:target_center_freq"] = self.target_center_freq
 
             # Add annotation documenting the frequency shift
             if self.total_samples > 0 and self.current_center_freq is not None:
@@ -452,9 +461,9 @@ class IQRecorder(threading.Thread):
 
         # Add decimation metadata if applied
         if self.decimation_factor > 1:
-            global_metadata["gs:decimation_factor"] = self.decimation_factor
-            global_metadata["gs:original_sample_rate"] = self.current_input_sample_rate
-            global_metadata["gs:decimated_sample_rate"] = self.current_sample_rate
+            final_global["gs:decimation_factor"] = self.decimation_factor
+            final_global["gs:original_sample_rate"] = self.current_input_sample_rate
+            final_global["gs:decimated_sample_rate"] = self.current_sample_rate
 
             if (
                 self.total_samples > 0
@@ -472,14 +481,7 @@ class IQRecorder(threading.Thread):
                     }
                 )
 
-        metadata = {
-            "global": global_metadata,
-            "captures": self.captures,
-            "annotations": self.annotations,
-        }
-
-        with open(f"{self.recording_path}.sigmf-meta", "w") as f:
-            json.dump(metadata, f, indent=2)
+        self._write_metadata(in_progress=False, extra_global=final_global)
 
         logger.info(
             f"Metadata written: {len(self.captures)} capture(s), "

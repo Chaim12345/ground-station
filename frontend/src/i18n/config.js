@@ -33,6 +33,7 @@ import dashboardEN from './locales/en/dashboard.json';
 import waterfallEN from './locales/en/waterfall.json';
 import filebrowserEN from './locales/en/filebrowser.json';
 import celestialEN from './locales/en/celestial.json';
+import radarEN from './locales/en/radar.json';
 
 import commonEL from './locales/el/common.json';
 import navigationEL from './locales/el/navigation.json';
@@ -59,6 +60,7 @@ import dashboardFR from './locales/fr/dashboard.json';
 import waterfallFR from './locales/fr/waterfall.json';
 import filebrowserFR from './locales/fr/filebrowser.json';
 import celestialFR from './locales/fr/celestial.json';
+import radarFR from './locales/fr/radar.json';
 
 import commonES from './locales/es/common.json';
 import navigationES from './locales/es/navigation.json';
@@ -72,6 +74,7 @@ import dashboardES from './locales/es/dashboard.json';
 import waterfallES from './locales/es/waterfall.json';
 import filebrowserES from './locales/es/filebrowser.json';
 import celestialES from './locales/es/celestial.json';
+import radarES from './locales/es/radar.json';
 
 import commonDE from './locales/de/common.json';
 import navigationDE from './locales/de/navigation.json';
@@ -98,6 +101,7 @@ import dashboardNL from './locales/nl/dashboard.json';
 import waterfallNL from './locales/nl/waterfall.json';
 import filebrowserNL from './locales/nl/filebrowser.json';
 import celestialNL from './locales/nl/celestial.json';
+import radarNL from './locales/nl/radar.json';
 
 import commonIT from './locales/it/common.json';
 import navigationIT from './locales/it/navigation.json';
@@ -139,6 +143,7 @@ const resources = {
         waterfall: waterfallEN,
         filebrowser: filebrowserEN,
         celestial: celestialEN,
+        radar: radarEN,
     },
     el: {
         common: commonEL,
@@ -167,6 +172,7 @@ const resources = {
         waterfall: waterfallFR,
         filebrowser: filebrowserFR,
         celestial: celestialFR,
+        radar: radarFR,
     },
     es: {
         common: commonES,
@@ -181,6 +187,7 @@ const resources = {
         waterfall: waterfallES,
         filebrowser: filebrowserES,
         celestial: celestialES,
+        radar: radarES,
     },
     de: {
         common: commonDE,
@@ -209,6 +216,7 @@ const resources = {
         waterfall: waterfallNL,
         filebrowser: filebrowserNL,
         celestial: celestialNL,
+        radar: radarNL,
     },
     it: {
         common: commonIT,

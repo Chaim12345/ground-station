@@ -696,6 +696,12 @@ async def add_sdr(session: AsyncSession, data: dict) -> dict:
                 if "port" not in data or data["port"] is None:
                     raise AssertionError("Field 'port' is required for TCP type SDRs")
 
+            elif sdr_type.lower() == "spyserver":
+                if "host" not in data or data["host"] is None:
+                    raise AssertionError("Field 'host' is required for SpyServer type SDRs")
+                if "port" not in data or data["port"] is None:
+                    raise AssertionError("Field 'port' is required for SpyServer type SDRs")
+
         data["antenna_labels"] = _normalize_antenna_labels(data.get("antenna_labels"))
 
         new_sdr = SDRs(**{key: value for key, value in data.items() if hasattr(SDRs, key)})

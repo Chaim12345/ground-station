@@ -125,6 +125,7 @@ class SDRType(str, PyEnum):
     AIRSPYHF = "airspyhf"
     SOAPYSDRLOCAL = "soapysdrlocal"
     SOAPYSDRREMOTE = "soapysdrremote"
+    SPYSERVER = "spyserver"
     UHD = "uhd"
     SIGMFPLAYBACK = "sigmfplayback"
 
@@ -333,6 +334,12 @@ class SDRs(Base):
     antenna_labels = Column(JsonField, nullable=True)
     frequency_min = Column(Integer, nullable=True)
     frequency_max = Column(Integer, nullable=True)
+    # Observer site coordinates for remote receivers (e.g. SpyServer
+    # stations): used to predict satellite visibility from the SDR's own
+    # location instead of the app's single home location.
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    altitude = Column(Float, nullable=True)
     added = Column(AwareDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated = Column(
         AwareDateTime,

@@ -1762,6 +1762,22 @@ async def init_db():
         os.makedirs(directory, exist_ok=True)
         logger.debug(f"Ensured directory exists: {directory}")
 
+    # Restore the last SpyServer station discovery from cache so the station
+    # list is available immediately after a restart (before the next
+    # scheduled auto-discovery completes).
+    try:
+        from hardware.spyserverprobe import load_discovery_cache
+        from hardware.soapysdrbrowser import update_discovered_servers
+
+        cached_servers = load_discovery_cache()
+        if cached_servers:
+            update_discovered_servers(cached_servers)
+            logger.info(
+                f"Restored {len(cached_servers)} SpyServer station(s) from discovery cache"
+            )
+    except Exception as e:
+        logger.warning(f"Could not restore SpyServer discovery cache: {e}")
+
     # Check if database exists by trying to query metadata
     database_existed = False
     try:

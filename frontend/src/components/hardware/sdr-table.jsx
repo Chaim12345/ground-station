@@ -64,6 +64,7 @@ import {
     setSelectedSdrDevice,
     fetchLocalSoapySDRDevices,
     startSoapySDRDiscovery,
+    startSpyServerDiscovery,
     fetchLocalRtlSdrDevices,
     fetchLocalUhdDevices,
     fetchLocalAirspyDevices,
@@ -181,6 +182,18 @@ const sdrTypeFields = {
             driver: 'airspyhf',
             serial: ''
         }
+    },
+    spyserver: {
+        excludeFields: ['serial', 'driver'],
+        fields: ['host', 'port', 'name', 'frequency_min', 'frequency_max'],
+        defaults: {
+            host: '',
+            port: 5555,
+            name: 'SpyServer Remote',
+            frequency_min: 0.009,
+            frequency_max: 1800,
+            serial: ''
+        }
     }
 };
 
@@ -209,7 +222,11 @@ const isSoapyDiscoveryTask = (task) => {
         command.includes('soapysdr_discovery') ||
         command.includes('soapysdr_quick_refresh') ||
         name.includes('soapysdr discovery') ||
-        name.includes('soapysdr refresh')
+        name.includes('soapysdr refresh') ||
+        command.includes('spyserver_discovery') ||
+        command.includes('spyserver_quick_check') ||
+        name.includes('spyserver discovery') ||
+        name.includes('spyserver check')
     );
 };
 
@@ -384,6 +401,38 @@ export default function SDRsPage() {
         [soapyServers]
     );
     const hasDiscoveredSoapyServers = soapyServerEntries.length > 0;
+
+    // Best discovered SpyServer station: must look like a SpyServer entry, prefer free
+    // slots (max_clients 0/missing = unknown, treated as free), then lowest latency
+    // (missing latency = worst), then fewest current clients.
+    const bestSpyServerEntry = useMemo(() => {
+        const candidates = soapyServerEntries
+            .map(([key, server]) => ({key, server}))
+            .filter(({server}) => Boolean(server?.sdr_record) || server?.driver === 'spyserver');
+        if (candidates.length === 0) return null;
+
+        const hasFreeSlot = (server) => {
+            const max = Number(server?.max_clients);
+            const current = Number(server?.current_clients);
+            if (!Number.isFinite(max) || max === 0) return true;
+            return !Number.isFinite(current) || current < max;
+        };
+        const latencyOf = (server) => {
+            const latency = Number(server?.latency_seconds);
+            return Number.isFinite(latency) ? latency : Infinity;
+        };
+        const currentOf = (server) => {
+            const current = Number(server?.current_clients);
+            return Number.isFinite(current) ? current : Infinity;
+        };
+
+        return candidates
+            .filter(({server}) => hasFreeSlot(server))
+            .sort((a, b) =>
+                latencyOf(a.server) - latencyOf(b.server) ||
+                currentOf(a.server) - currentOf(b.server)
+            )[0] || null;
+    }, [soapyServerEntries]);
     const discoveryTaskDurationMs = useMemo(() => {
         if (!activeSoapyDiscoveryTask) return null;
         const fromTask = toTaskDurationMs(activeSoapyDiscoveryTask.duration);
@@ -489,6 +538,19 @@ export default function SDRsPage() {
         }
     };
 
+    const handleStartSpyServerDiscovery = async () => {
+        if (!socket) return;
+        setDiscovering(true);
+        try {
+            await dispatch(startSpyServerDiscovery({ socket })).unwrap();
+        } catch (error) {
+            console.error('Failed to start SpyServer discovery:', error);
+            toast.error(t('sdr.discovery_failed', 'Failed to start SoapySDR discovery'));
+        } finally {
+            setDiscovering(false);
+        }
+    };
+
     const getTypeLabel = (type) => {
         if (rtlUsbTypes.has(type)) return t('sdr.rtlsdr_usb', 'RTL-SDR USB');
         if (rtlTcpTypes.has(type)) return t('sdr.rtlsdr_tcp', 'RTL-SDR TCP');
@@ -504,6 +566,8 @@ export default function SDRsPage() {
                 return t('sdr.airspy', 'Airspy');
             case 'airspyhf':
                 return t('sdr.airspy_hf', 'Airspy HF+');
+            case 'spyserver':
+                return t('sdr.spyserver', 'SpyServer (remote)');
             default:
                 return type || '-';
         }
@@ -789,8 +853,28 @@ export default function SDRsPage() {
                     return acc;
                 }, {});
 
+                // Auto-fill from the best discovered SpyServer station, overriding
+                // generic defaults with the station's real values when present
+                const defaults = {...typeConfig.defaults};
+                if (newType === 'spyserver' && bestSpyServerEntry) {
+                    const server = bestSpyServerEntry.server;
+                    const record = server?.sdr_record || {};
+                    const autoHost = record.host || server?.ip;
+                    const autoPort = record.port ?? server?.port;
+                    const autoName = record.name || server?.name;
+                    if (autoHost) defaults.host = autoHost;
+                    if (autoPort != null) defaults.port = autoPort;
+                    if (autoName) defaults.name = autoName;
+                    if (Number.isFinite(Number(record.frequency_min))) {
+                        defaults.frequency_min = Number(record.frequency_min);
+                    }
+                    if (Number.isFinite(Number(record.frequency_max))) {
+                        defaults.frequency_max = Number(record.frequency_max);
+                    }
+                }
+
                 dispatch(setFormValues({
-                    ...typeConfig.defaults,
+                    ...defaults,
                     ...nullifiedExcluded,
                     type: newType,
                     antenna_labels: {},
@@ -955,6 +1039,7 @@ export default function SDRsPage() {
                         <MenuItem value="uhd">{t('sdr.uhd')}</MenuItem>
                         <MenuItem value="airspy">{t('sdr.airspy', 'Airspy')}</MenuItem>
                         <MenuItem value="airspyhf">{t('sdr.airspy_hf', 'Airspy HF+')}</MenuItem>
+                        <MenuItem value="spyserver">{t('sdr.spyserver', 'SpyServer (remote)')}</MenuItem>
                     </Select>
                 </FormControl>
             );
@@ -1573,6 +1658,30 @@ export default function SDRsPage() {
                             required
                         />
                     );
+
+                    // Hint when the best discovered SpyServer station was auto-filled
+                    if (selectedType === 'spyserver' && bestSpyServerEntry) {
+                        const server = bestSpyServerEntry.server;
+                        const record = server?.sdr_record || {};
+                        const autoHost = record.host || server?.ip || '';
+                        const autoPort = record.port ?? server?.port ?? '';
+                        if (formValues.host && formValues.host === autoHost) {
+                            fields.push(
+                                <Typography
+                                    key="spyserver-autofill-hint"
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{display: 'block'}}
+                                >
+                                    {t(
+                                        'sdr.spyserver_autofilled',
+                                        'Auto-filled from best reachable station ({{host}}:{{port}})',
+                                        {host: autoHost, port: autoPort}
+                                    )}
+                                </Typography>
+                            );
+                        }
+                    }
                 }
             }
 
@@ -1915,19 +2024,32 @@ export default function SDRsPage() {
                             </Typography>
                         </Box>
                     </Stack>
-                    <Button
-                        variant="contained"
-                        color="primary"
-                        size="small"
-                        startIcon={<RefreshIcon fontSize="small" />}
-                        disabled={discovering || isSoapyServerDiscoveryRunning || loading}
-                        onClick={handleStartSoapyDiscovery}
-                        sx={{ flexShrink: 0 }}
-                    >
-                        {(discovering || isSoapyServerDiscoveryRunning)
-                            ? t('sdr.discovering_servers', 'Discovering...')
-                            : t('sdr.discover_servers', 'Discover SoapySDR Servers')}
-                    </Button>
+                    <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: 'wrap' }}>
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            size="small"
+                            startIcon={<RefreshIcon fontSize="small" />}
+                            disabled={discovering || isSoapyServerDiscoveryRunning || loading}
+                            onClick={handleStartSoapyDiscovery}
+                        >
+                            {(discovering || isSoapyServerDiscoveryRunning)
+                                ? t('sdr.discovering_servers', 'Discovering...')
+                                : t('sdr.discover_servers', 'Discover SoapySDR Servers')}
+                        </Button>
+                        <Button
+                            variant="outlined"
+                            color="primary"
+                            size="small"
+                            startIcon={<DnsIcon fontSize="small" />}
+                            disabled={discovering || isSoapyServerDiscoveryRunning || loading}
+                            onClick={handleStartSpyServerDiscovery}
+                        >
+                            {(discovering || isSoapyServerDiscoveryRunning)
+                                ? t('sdr.discovering_servers', 'Discovering...')
+                                : t('sdr.discover_spyservers', 'Discover SpyServers')}
+                        </Button>
+                    </Stack>
                 </Box>
 
                 {/* Card Body */}

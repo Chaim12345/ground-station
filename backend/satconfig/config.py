@@ -244,6 +244,9 @@ class SatelliteConfigService:
 
             params["modulation"] = tx.get("modulation", "FSK")
             params["framing"] = self._map_framing(tx.get("framing", "AX.25"))
+            # gr-satellites encodes differential BPSK in the modulation name
+            # ("DBPSK", "DBPSK Manchester"); the BPSK decoder needs it as a flag.
+            params["differential"] = str(params["modulation"]).upper().startswith("DBPSK")
 
             # Use YAML deviation if specified, otherwise estimate from satellite's baudrate
             if "deviation" in tx:

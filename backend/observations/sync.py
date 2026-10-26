@@ -336,6 +336,20 @@ class ObservationSchedulerSync:
                 if not obs_id:
                     continue
 
+                # Skip observations whose window has already ended; they were
+                # marked missed in step 3 and need no scheduler work. This avoids
+                # a per-observation DB fetch + job removal + log clear for the
+                # large number of past observations, which dominates startup time.
+                end_str = observation.get("task_end") or observation.get("event_end")
+                if end_str:
+                    try:
+                        end_time = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                        if end_time < now:
+                            stats["skipped_past"] += 1
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+
                 result = await self.sync_observation(obs_id)
                 if result["success"]:
                     action = result.get("action", "unknown")

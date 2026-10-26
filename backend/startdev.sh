@@ -9,8 +9,9 @@ set -euo pipefail
 
 backend_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 venv_python="$backend_dir/venv/bin/python"
-gnu_radio_prefix="${GNU_RADIO_PREFIX:-/opt/ground-station/gnuradio-3.10.12.0}"
-volk_prefix="${GNU_RADIO_VOLK_PREFIX:-/opt/ground-station/volk-3.2.0}"
+gnu_radio_prefix="${GNU_RADIO_PREFIX:-/opt/ground-station/gr311}"
+# The conda env ships its own VOLK under the same prefix.
+volk_prefix="${GNU_RADIO_VOLK_PREFIX:-$gnu_radio_prefix}"
 
 if [[ ! -x "$venv_python" ]]; then
     echo "Backend virtual-environment Python was not found: $venv_python" >&2
