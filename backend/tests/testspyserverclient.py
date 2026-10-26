@@ -254,6 +254,22 @@ def test_sequence_gaps_are_zero_filled_and_counted():
     assert client.stream_stats["zero_filled_samples"] == 200
     # huge jump = counter reset, never zero-filled
     assert client._account_sequence(1_000_000, 100) == 0
+
+
+def test_gap_fill_never_runs_ahead_of_wall_clock(monkeypatch):
+    import workers.spyserverclient as sc
+
+    clock = [1000.0]
+    monkeypatch.setattr(sc.time, "monotonic", lambda: clock[0])
+    client = SpyServerClient("127.0.0.1")
+    client._effective_sample_rate = 1000.0  # 1 kS/s
+    client._account_sequence(1, 100)
+    clock[0] += 0.5  # 0.5 s elapsed -> at most ~510 samples may exist
+    # a 100-message "gap" would claim 10000 missing samples
+    fill = client._account_sequence(102, 100)
+    total = client.stream_stats["samples"] + client.stream_stats["zero_filled_samples"]
+    assert fill < 10_000
+    assert total <= 0.5 * 1000 * 1.02 + 100
     # 32-bit wrap-around is a normal step
     client._last_iq_seq = 0xFFFFFFFF
     assert client._account_sequence(0, 100) == 0
@@ -271,6 +287,31 @@ def test_dropped_server_messages_keep_stream_timing(mock_server):
     # zero-filled blocks are present in the stream
     assert np.count_nonzero(samples == 0) >= 256
     client.close()
+
+
+def test_samples_before_tuning_confirmation_are_discarded():
+    """Backlog flushed by the server before the retune is the old band."""
+    client = SpyServerClient("127.0.0.1")
+    client._center_freq = 145_860_000.0
+    client._buffer.extend(np.ones(100, dtype=np.complex64).tobytes())  # old band
+    client._last_iq_seq = 41
+    client.client_sync = {"can_control": 1, "iq_center_frequency": 145_860_000}
+    report = client.wait_for_tuning(timeout=0.05)
+    assert report["ok"] is True
+    assert len(client._buffer) == 0
+    assert client.stream_stats["discarded_pre_tune_samples"] == 100
+    assert client._last_iq_seq is None  # the flush is not counted as a gap
+
+
+def test_mistuned_server_keeps_buffer_and_reports_failure():
+    client = SpyServerClient("127.0.0.1")
+    client._center_freq = 145_860_000.0
+    client._buffer.extend(bytes(80))
+    client.client_sync = {"can_control": 0, "iq_center_frequency": 123_615_000,
+                          "device_center_frequency": 123_615_000}
+    report = client.wait_for_tuning(timeout=0.05)
+    assert report["ok"] is False
+    assert "123615000" in report["reason"]
 
 
 def test_client_sync_parses_short_bodies():

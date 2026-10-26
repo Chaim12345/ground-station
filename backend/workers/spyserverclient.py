@@ -154,6 +154,7 @@ class SpyServerClient:
         }
         self._last_iq_seq: Optional[int] = None
         self._last_iq_len = 0
+        self._stream_t0: Optional[float] = None
         self._sync_count = 0
 
         # Sample buffer shared between the reader thread and read_samples()
@@ -382,15 +383,27 @@ class SpyServerClient:
         """Update stream stats; return how many zero samples to insert."""
         stats = self.stream_stats
         stats["iq_messages"] += 1
-        stats["samples"] += n_samples
         fill = 0
+        now = time.monotonic()
+        if self._stream_t0 is None:
+            self._stream_t0 = now
         if self._last_iq_seq is not None:
             missing = (seq - self._last_iq_seq - 1) & 0xFFFFFFFF
             if 0 < missing <= self.MAX_FILL_MESSAGES:
                 stats["gaps"] += 1
                 stats["missing_messages"] += missing
                 fill = missing * (self._last_iq_len or n_samples)
+                # Sequence numbers are not a perfect sample clock (servers also
+                # number non-IQ messages, block sizes vary): never let output
+                # run ahead of wall-clock time at the nominal rate.
+                rate = self._effective_sample_rate or 0.0
+                if rate > 0:
+                    budget = int((now - self._stream_t0) * rate * 1.02) - (
+                        stats["samples"] + stats["zero_filled_samples"] + n_samples
+                    )
+                    fill = max(0, min(fill, budget))
                 stats["zero_filled_samples"] += fill
+        stats["samples"] += n_samples
         self._last_iq_seq = seq
         self._last_iq_len = n_samples
         return fill
@@ -509,6 +522,20 @@ class SpyServerClient:
                     break
                 self._buffer_cond.wait(timeout=max(0.05, deadline - time.monotonic()))
             sync = dict(self.client_sync)
+            confirmed = sync.get("iq_center_frequency") == requested
+            if confirmed:
+                # Servers flush a backlog on connect and keep streaming the old
+                # band until the retune lands. Anything buffered before this
+                # CLIENT_SYNC may be the wrong frequency: drop it, and restart
+                # sequence tracking so the flush is not counted as a gap.
+                self.stream_stats["discarded_pre_tune_samples"] = (
+                    self.stream_stats.get("discarded_pre_tune_samples", 0) + len(self._buffer) // 8
+                )
+                self._buffer.clear()
+                self._last_iq_seq = None
+                self._stream_t0 = None
+                self.stream_stats["samples"] = 0
+                self.stream_stats["zero_filled_samples"] = 0
         iq_center = sync.get("iq_center_frequency")
         report = {
             "ok": True,
