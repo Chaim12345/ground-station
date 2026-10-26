@@ -60,6 +60,7 @@ class RecorderHandler:
         task_config: Optional[Dict[str, Any]] = None,
         recorder_id: Optional[str] = None,
         bundle_dir: Optional[Path] = None,
+        station: Optional[Dict[str, float]] = None,
     ) -> Optional[str]:
         """
         Start an IQ recording task.
@@ -124,6 +125,8 @@ class RecorderHandler:
                 "decimation_factor": decimation_factor,
                 "storage_format": storage_format,
             }
+            if station:
+                recorder_kwargs["station"] = station
 
             # Add frequency shift parameters if enabled
             if enable_frequency_shift and target_center_freq:

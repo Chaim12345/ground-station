@@ -64,6 +64,22 @@ from tracker.contracts import get_tracking_state_name
 from tracker.runner import get_assigned_tracker_for_rotator
 from vfos.state import INTERNAL_VFO_NUMBER, VFOManager
 
+def _station_from_sdr(sdr_device: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    """Receiver site for SigMF metadata (needed for Doppler correction)."""
+    lat = sdr_device.get("latitude")
+    lon = sdr_device.get("longitude")
+    if lat is None or lon is None:
+        return None
+    try:
+        return {
+            "lat": float(lat),
+            "lon": float(lon),
+            "alt": float(sdr_device.get("altitude") or 0.0),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
 def _telemetry_decode_deletes(task_config: Dict[str, Any]) -> bool:
     """True when the telemetry decode task may delete the IQ after a good decode.
 
@@ -1043,6 +1059,7 @@ class ObservationExecutor:
                         task_config,
                         recorder_id=recorder_id,
                         bundle_dir=bundle_dir,
+                        station=_station_from_sdr(sdr_device),
                     )
                     if recording_path:
                         self._iq_recording_info.setdefault(observation_id, {}).setdefault(

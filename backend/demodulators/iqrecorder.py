@@ -54,8 +54,11 @@ class IQRecorder(threading.Thread):
         enable_frequency_shift=False,
         decimation_factor=1,
         storage_format="cf32_le",
+        station=None,
     ):
         super().__init__(daemon=True, name=f"IQRecorder-{session_id}")
+        # Receiver site {lat, lon, alt}: lets offline decoding predict Doppler.
+        self.station = dict(station) if station else None
         self.iq_queue = iq_queue
         self.recording_path = Path(recording_path)
         self.session_id = session_id
@@ -380,6 +383,8 @@ class IQRecorder(threading.Thread):
 
         if self.target_satellite_norad_id:
             global_metadata["gs:target_satellite_norad_id"] = self.target_satellite_norad_id
+        if self.station:
+            global_metadata["gs:station"] = self.station
         if self.target_satellite_name:
             global_metadata["gs:target_satellite_name"] = self.target_satellite_name
         return global_metadata

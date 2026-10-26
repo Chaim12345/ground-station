@@ -57,7 +57,8 @@ def test_sample_rate_persisted_before_stop(tmp_path):
 
 def test_stop_writes_final_metadata(tmp_path):
     q: queue.Queue = queue.Queue()
-    rec = IQRecorder(q, None, "s1", str(tmp_path / "rec"))
+    station = {"lat": 45.5, "lon": 9.3, "alt": 120.0}
+    rec = IQRecorder(q, None, "s1", str(tmp_path / "rec"), station=station)
     rec.start()
     q.put(_iq_message(0))
     assert _wait_for(lambda: rec.total_samples > 0)
@@ -70,6 +71,9 @@ def test_stop_writes_final_metadata(tmp_path):
     assert "gs:finalized_time" in g
     assert g["gs:recorder_stats"]["samples_written"] == 4096
     assert len(meta["captures"]) == 1
+    # Receiver site recorded so offline decoding can predict Doppler.
+    assert g["gs:station"] == station
+    assert meta["captures"][0]["core:datetime"]
 
 
 def test_preliminary_metadata_has_no_sample_rate_until_data(tmp_path):
