@@ -343,8 +343,10 @@ def decode_recording(
     # A frame is "trusted" if the decoder validated it: gr-satellites only
     # emits frames that passed FEC/CRC; LoRa reports CRC per frame.
     trusted = [f for f in frames if f.get("crc_valid") is not False]
+    for frame in frames:
+        frame["parsed"] = _parse_frame(frame, norad_id)
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "frames.json").write_text(json.dumps(frames, indent=2))
+    (output_dir / "frames.json").write_text(json.dumps(frames, indent=2, default=str))
     write_kiss(output_dir / "frames.kiss", [bytes.fromhex(f["hex"]) for f in trusted])
     summary = {
         "recording": data_path.name,
@@ -359,7 +361,91 @@ def decode_recording(
         "decoded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    write_readable_report(output_dir, summary, frames)
     return summary
+
+
+def _printable(data: bytes) -> str:
+    return "".join(chr(b) if 32 <= b < 127 else "." for b in data)
+
+
+def _framing_for(norad_id: int, engine: str) -> Optional[str]:
+    """gr-satellites framing for the satellite (selects the telemetry parser)."""
+    if engine != "gr_satellites":
+        return None
+    try:
+        from satellites.satyaml.satyaml import SatYAML
+
+        from constants import GR_SATELLITES_FRAMING_MAP
+
+        transmitters = SatYAML().search_norad(int(norad_id)).get("transmitters") or {}
+        for tx in transmitters.values():
+            mapped = GR_SATELLITES_FRAMING_MAP.get(tx.get("framing"))
+            if mapped is not None:
+                return getattr(mapped, "value", mapped)
+    except Exception:
+        return None
+    return None
+
+
+def _parse_frame(frame: Dict[str, Any], norad_id: int) -> Dict[str, Any]:
+    """Run the app's telemetry parser; never raise."""
+    payload = bytes.fromhex(frame["hex"])
+    try:
+        from telemetry.parser import TelemetryParser
+
+        parser = TelemetryParser()
+        if frame.get("engine") == "gr-lora_sdr":
+            return parser.parse(payload, protocol_hint="lora", sat_hint=str(norad_id))
+        framing = _framing_for(norad_id, frame.get("engine", ""))
+        hint = {"framing": framing} if framing else None
+        return parser.parse(payload, parser_hint=hint)
+    except Exception as e:  # parsing is best-effort; raw frames are kept anyway
+        return {"parser": None, "success": False, "error": str(e)}
+
+
+def write_readable_report(output_dir: Path, summary: Dict[str, Any], frames: List[Dict[str, Any]]) -> Path:
+    """decoded.txt: what was received, readable in the file browser."""
+    lines = [
+        f"Recording : {summary['recording']}",
+        f"Satellite : NORAD {summary['norad_id']}",
+        f"Engines   : {', '.join(summary['engines']) or 'none'}",
+        f"Frames    : {summary['frames']} ({summary['trusted_frames']} validated)",
+    ]
+    dop = summary.get("doppler_correction") or {}
+    if dop.get("applied"):
+        lines.append(f"Doppler   : corrected {dop.get('doppler_hz_range')} Hz")
+    lines.append("")
+    for i, frame in enumerate(frames, 1):
+        payload = bytes.fromhex(frame["hex"])
+        parsed = frame.get("parsed") or {}
+        head = f"--- frame {i}: {len(payload)} bytes, {frame.get('engine')}"
+        if frame.get("crc_valid") is not None:
+            head += f", CRC {'ok' if frame['crc_valid'] else 'FAILED'}"
+        if frame.get("f_offset_hz") is not None:
+            head += f", offset {frame['f_offset_hz']:+d} Hz"
+        lines.append(head)
+        if parsed.get("parser"):
+            lines.append(f"parser    : {parsed['parser']}")
+        hdr = parsed.get("frame") or {}
+        if hdr.get("source") or hdr.get("destination"):
+            lines.append(f"AX.25     : {hdr.get('source')} -> {hdr.get('destination')}")
+        tel = parsed.get("telemetry")
+        printable_ratio = sum(32 <= b < 127 or b in (9, 10, 13) for b in payload) / max(len(payload), 1)
+        if printable_ratio >= 0.85:
+            # Beacons / CW-style text and APRS messages.
+            lines.append(f"text      : {payload.decode('ascii', 'replace').strip()}")
+        # The generic fallback is a heuristic hex/float dump, not decoded data.
+        if isinstance(tel, dict) and tel and tel.get("format") != "raw":
+            fields = {k: v for k, v in tel.items() if k not in ("text", "ascii", "hex", "raw_hex", "analysis")}
+            if fields:
+                lines.append("telemetry : " + json.dumps(fields, default=str)[:4000])
+        lines.append(f"ascii     : {_printable(payload)}")
+        lines.append(f"hex       : {payload.hex()}")
+        lines.append("")
+    path = output_dir / "decoded.txt"
+    path.write_text("\n".join(lines))
+    return path
 
 
 def _delete_iq(data_path: Path, log: Log) -> int:

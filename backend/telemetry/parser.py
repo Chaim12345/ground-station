@@ -194,11 +194,23 @@ class TelemetryParser:
         # LoRa is a PHY, not an application protocol. Keep arbitrary payloads
         # opaque until a satellite-specific parser is explicitly selected.
         if protocol_hint == "lora":
+            from telemetry.parsers.wrenowl import (
+                WREN1_NORAD,
+                is_owl_beacon,
+                parse_owl_beacon,
+            )
+
+            if str(sat_hint) in (str(WREN1_NORAD), "WREN-1") and is_owl_beacon(packet_bytes):
+                telemetry = parse_owl_beacon(packet_bytes)
+                parser_name = "lora+WrenOwlParser"
+            else:
+                telemetry = self._fallback_telemetry(packet_bytes)
+                parser_name = "lora"
             return {
-                "parser": "lora",
+                "parser": parser_name,
                 "protocol": "lora",
                 "success": True,
-                "telemetry": self._fallback_telemetry(packet_bytes),
+                "telemetry": telemetry,
                 "raw": {
                     "packet_hex": packet_bytes.hex(),
                     "payload_hex": packet_bytes.hex(),

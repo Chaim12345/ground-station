@@ -96,6 +96,19 @@ def test_lora_crc_failures_do_not_authorise_deletion(tmp_path, monkeypatch):
     assert data.exists()
 
 
+def test_readable_report_lists_every_frame(tmp_path, fake_grsat):
+    fake_grsat.extend([b"HELLO SPACE\x00\x01", b"\x41" * 8])
+    data = _bundle(tmp_path)
+    _run(data, delete=False)
+    out = data.parents[1] / "decoded" / data.stem
+    report = (out / "decoded.txt").read_text()
+    assert "Frames    : 2 (2 validated)" in report
+    assert "HELLO SPACE.." in report  # printable view of the payload
+    assert b"HELLO SPACE".hex() in report
+    frames = json.loads((out / "frames.json").read_text())
+    assert all("parsed" in f for f in frames)
+
+
 def test_kiss_round_trip_escapes_special_bytes(tmp_path):
     frames = [bytes([0xC0, 0xDB, 0x00, 0xDC]), b"plain"]
     path = tmp_path / "f.kiss"
