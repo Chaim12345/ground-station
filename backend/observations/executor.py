@@ -51,6 +51,7 @@ from observations.helpers import (
     remove_scheduled_stop_job,
     update_observation_status,
 )
+from observations.captureplan import plan_network_sample_rate
 from observations.tasks.decoderhandler import DecoderHandler
 from observations.tasks.recorderhandler import RecorderHandler
 from observations.tasks.trackerhandler import TrackerHandler
@@ -949,11 +950,24 @@ class ObservationExecutor:
             if not center_frequency or center_frequency <= 0:
                 center_frequency = 100000000
 
+            sample_rate = float(sdr_config_dict.get("sample_rate", 2048000))
+            if str(sdr_device.get("type", "")).upper().endswith("SPYSERVER"):
+                # Network receivers drop blocks at high rates; ask for the
+                # narrowest rate that holds the signal + Doppler.
+                transmitters = await self._session_transmitters(tasks)
+                planned = plan_network_sample_rate(sample_rate, transmitters)
+                if planned != sample_rate:
+                    logger.info(
+                        f"SpyServer capture rate {sample_rate:.0f} -> {planned:.0f} S/s "
+                        f"(sized for {len(transmitters)} transmitter(s) + Doppler)"
+                    )
+                sample_rate = planned
+
             # Build SDR config dict (operational parameters)
             sdr_config = SDRConfig(
                 sdr_id=sdr_id,
                 center_freq=center_frequency,
-                sample_rate=sdr_config_dict.get("sample_rate", 2048000),
+                sample_rate=sample_rate,
                 gain=sdr_config_dict.get("gain", 20),
                 ppm_error=sdr_config_dict.get("ppm_error", 0),
                 antenna=sdr_config_dict.get("antenna_port", "RX"),
@@ -1354,6 +1368,44 @@ class ObservationExecutor:
             self._iq_recording_info[observation_id].pop(session_key, None)
             if not self._iq_recording_info[observation_id]:
                 self._iq_recording_info.pop(observation_id, None)
+
+    async def _session_transmitters(self, tasks: list) -> list[Dict[str, Any]]:
+        """Transmitter records referenced by a session's tasks."""
+        ids = {
+            (task.get("config") or {}).get("transmitter_id")
+            for task in tasks or []
+            if isinstance(task, dict)
+        }
+        ids.discard(None)
+        ids.discard("")
+        if not ids:
+            return []
+        try:
+            async with AsyncSessionLocal() as db_session:
+                result = await db_session.execute(
+                    select(Transmitters).where(Transmitters.id.in_(ids))
+                )
+                records = result.scalars().all()
+        except Exception as e:
+            logger.warning(f"Capture plan: transmitter lookup failed: {e}")
+            return []
+        out = []
+        for rec in records:
+            lora = rec.lora_config
+            if isinstance(lora, str):
+                try:
+                    lora = json.loads(lora)
+                except ValueError:
+                    lora = None
+            out.append(
+                {
+                    "downlink_low": rec.downlink_low,
+                    "mode": rec.mode,
+                    "baud": rec.baud,
+                    "lora_config": lora,
+                }
+            )
+        return out
 
     async def _resolve_auto_center_frequency(self, tasks: list) -> Optional[float]:
         """
